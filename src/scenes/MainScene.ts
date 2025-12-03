@@ -119,6 +119,20 @@ export default class MainScene extends Phaser.Scene {
     // HP 自動回復計時器（鈦金肝被動技能）
     private hpRegenTimer: number = 0;
 
+    // HP 損傷顯示（白色區塊延遲靠攏）
+    private displayedHp: number = 200; // 顯示的 HP（延遲跟隨實際 HP）
+    private hpDamageDelay: number = 0; // 損傷延遲計時器（毫秒）
+    private static readonly HP_DAMAGE_DELAY = 1000; // 1 秒延遲
+    private static readonly HP_DAMAGE_LERP_SPEED = 3; // 靠攏速度（每秒倍率）
+
+    // RWD 最小字級（手機可讀性）
+    private static readonly MIN_FONT_SIZE_LARGE = 14; // 大字（標題、等級）
+    private static readonly MIN_FONT_SIZE_MEDIUM = 12; // 中字（HP、描述）
+    private static readonly MIN_FONT_SIZE_SMALL = 10; // 小字（副標、數值）
+
+    // 手機判斷
+    private isMobile: boolean = false;
+
     // 成長曲線常數
     private static readonly BASE_HP = 200; // 初始 HP
     private static readonly HP_PER_LEVEL = 50; // 每級增加的 HP
@@ -185,6 +199,9 @@ export default class MainScene extends Phaser.Scene {
     create() {
         // MainScene 的背景色
         this.cameras.main.setBackgroundColor('#111111');
+
+        // 判斷是否為手機裝置（觸控為主或螢幕較小）
+        this.isMobile = this.sys.game.device.input.touch && window.innerWidth < 1024;
 
         const screenWidth = this.cameras.main.width;
         const screenHeight = this.cameras.main.height;
@@ -1833,6 +1850,7 @@ export default class MainScene extends Phaser.Scene {
         this.recalculateMaxHp();
         this.recalculateMoveSpeed();
         this.currentHp = this.maxHp;
+        this.displayedHp = this.maxHp; // 同步顯示 HP
 
         // 更新經驗需求
         this.currentExp = 0;
@@ -1874,6 +1892,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 回滿 HP
         this.currentHp = this.maxHp;
+        this.displayedHp = this.maxHp; // 同步顯示 HP
 
         // 重置經驗並計算下一級所需
         this.currentExp = 0;
@@ -1922,6 +1941,7 @@ export default class MainScene extends Phaser.Scene {
         this.recalculateMaxHp();
         // 升級時回滿 HP
         this.currentHp = this.maxHp;
+        this.displayedHp = this.maxHp; // 同步顯示 HP
 
         // 更新怪物管理器的玩家等級（影響新生成怪物的血量）
         this.monsterManager.setPlayerLevel(this.currentLevel);
@@ -1969,21 +1989,29 @@ export default class MainScene extends Phaser.Scene {
     private handleSkillPanelInput() {
         if (!this.cursors) return;
 
-        // A 鍵選擇左邊（索引 0）
+        // A 鍵選擇左邊（索引 0），重複按確認
         if (Phaser.Input.Keyboard.JustDown(this.cursors.A)) {
-            this.setSelectedSkill(0);
+            if (this.selectedSkillIndex === 0) {
+                this.confirmSkillSelection();
+            } else {
+                this.setSelectedSkill(0);
+            }
         }
-        // S 鍵選擇中間（索引 1）
+        // S 鍵選擇中間（索引 1），重複按確認
         if (Phaser.Input.Keyboard.JustDown(this.cursors.S)) {
-            this.setSelectedSkill(1);
+            if (this.selectedSkillIndex === 1) {
+                this.confirmSkillSelection();
+            } else {
+                this.setSelectedSkill(1);
+            }
         }
-        // D 鍵選擇右邊（索引 2）
+        // D 鍵選擇右邊（索引 2），重複按確認
         if (Phaser.Input.Keyboard.JustDown(this.cursors.D)) {
-            this.setSelectedSkill(2);
-        }
-        // W 鍵或 Enter 確認選擇
-        if (Phaser.Input.Keyboard.JustDown(this.cursors.W)) {
-            this.confirmSkillSelection();
+            if (this.selectedSkillIndex === 2) {
+                this.confirmSkillSelection();
+            } else {
+                this.setSelectedSkill(2);
+            }
         }
     }
 
@@ -2362,7 +2390,7 @@ export default class MainScene extends Phaser.Scene {
         // HP 文字位置（頂部網格上方）
         const cellHeight = this.skillGridCellSize;
         const barY = this.gameBounds.y + cellHeight * 2;
-        const fontSize = Math.floor(this.gameBounds.height * 0.03);
+        const fontSize = Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(this.gameBounds.height * 0.03));
 
         this.hpText = this.add.text(
             this.gameBounds.x + this.gameBounds.width / 2,
@@ -2391,6 +2419,14 @@ export default class MainScene extends Phaser.Scene {
     private drawHpBarFill() {
         // HP 條使用頂部 2 行網格格子（row 0 和 row 1）
         const hpRows = [0, 1];
+        const totalCells = this.skillGridCols;
+
+        // 計算各種 HP 填充格子數
+        const fillRatio = this.currentHp / this.maxHp;
+        const fillCells = Math.floor(totalCells * fillRatio);
+
+        const displayedRatio = this.displayedHp / this.maxHp;
+        const displayedCells = Math.floor(totalCells * displayedRatio);
 
         // 先繪製所有頂部格子為黑底
         for (const row of hpRows) {
@@ -2406,10 +2442,20 @@ export default class MainScene extends Phaser.Scene {
             }
         }
 
-        // 計算 HP 填充格子數
-        const fillRatio = this.currentHp / this.maxHp;
-        const totalCells = this.skillGridCols;
-        const fillCells = Math.floor(totalCells * fillRatio);
+        // 繪製白色損傷區塊（displayedHp 到 currentHp 之間）
+        if (displayedCells > fillCells) {
+            for (const row of hpRows) {
+                for (let col = fillCells; col < displayedCells; col++) {
+                    const index = row * this.skillGridCols + col;
+                    const cell = this.skillGridCells[index];
+                    if (!cell) continue;
+
+                    // 白色損傷區塊，上排亮一點
+                    const alpha = row === 0 ? 0.85 : 0.7;
+                    cell.setFillStyle(0xffffff, alpha);
+                }
+            }
+        }
 
         if (fillCells <= 0) return;
 
@@ -2480,8 +2526,34 @@ export default class MainScene extends Phaser.Scene {
             this.hpBarFlowOffset -= 1;
         }
 
+        // 更新損傷顯示（白色區塊延遲靠攏）
+        this.updateDamageDisplay(delta);
+
         // 重繪 HP 條
         this.drawHpBarFill();
+    }
+
+    private updateDamageDisplay(delta: number) {
+        // 如果顯示 HP 大於實際 HP，需要延遲後靠攏
+        if (this.displayedHp > this.currentHp) {
+            // 延遲計時
+            if (this.hpDamageDelay > 0) {
+                this.hpDamageDelay -= delta;
+            } else {
+                // 延遲結束，開始靠攏
+                const diff = this.displayedHp - this.currentHp;
+                const lerpAmount = diff * MainScene.HP_DAMAGE_LERP_SPEED * (delta / 1000);
+                this.displayedHp -= Math.max(1, lerpAmount); // 至少減少 1
+
+                // 確保不會低於實際 HP
+                if (this.displayedHp < this.currentHp) {
+                    this.displayedHp = this.currentHp;
+                }
+            }
+        } else if (this.displayedHp < this.currentHp) {
+            // 回血時立即跟上
+            this.displayedHp = this.currentHp;
+        }
     }
 
     private updateHpText() {
@@ -2502,7 +2574,7 @@ export default class MainScene extends Phaser.Scene {
         // 護盾文字（顯示在右上角）
         const cellHeight = this.skillGridCellSize;
         const barY = this.gameBounds.y + cellHeight * 2;
-        const fontSize = Math.floor(this.gameBounds.height * 0.025);
+        const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.025));
 
         this.shieldText = this.add.text(
             this.gameBounds.x + this.gameBounds.width - 10,
@@ -2861,6 +2933,9 @@ export default class MainScene extends Phaser.Scene {
             if (this.currentHp < 0) {
                 this.currentHp = 0;
             }
+
+            // 設定損傷延遲計時器（白色區塊 1 秒後靠攏）
+            this.hpDamageDelay = MainScene.HP_DAMAGE_DELAY;
 
             // 更新 HP 顯示
             this.drawHpBarFill();
@@ -3241,7 +3316,7 @@ export default class MainScene extends Phaser.Scene {
         this.expBarContainer.setDepth(100);
 
         // 等級文字（左下角，在網格之上）
-        const fontSize = Math.floor(this.gameBounds.height * 0.03);
+        const fontSize = Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(this.gameBounds.height * 0.03));
         // 底部 2 格的高度
         const cellHeight = this.skillGridCellSize;
         const barY = this.gameBounds.y + this.gameBounds.height - cellHeight * 2;
@@ -3437,7 +3512,7 @@ export default class MainScene extends Phaser.Scene {
             container.add(colorBg);
 
             // 等級文字
-            const fontSize = Math.floor(iconPixelSize * 0.2);
+            const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
             const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
                 fontFamily: 'monospace',
                 fontSize: `${fontSize}px`,
@@ -3480,7 +3555,7 @@ export default class MainScene extends Phaser.Scene {
             container.add(colorBg);
 
             // 等級文字
-            const fontSize = Math.floor(iconPixelSize * 0.2);
+            const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
             const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
                 fontFamily: 'monospace',
                 fontSize: `${fontSize}px`,
@@ -3540,8 +3615,30 @@ export default class MainScene extends Phaser.Scene {
         const gap = MainScene.SKILL_GRID_GAP;
         const { startX, startY, gridSize } = data;
 
+        // 檢查是否擁有此技能
+        const activeCount = MainScene.ACTIVE_SKILLS;
+        const isActive = skillIndex < activeCount;
+        const skills = isActive
+            ? this.skillManager.getPlayerActiveSkills()
+            : this.skillManager.getPlayerPassiveSkills();
+        const idx = isActive ? skillIndex : skillIndex - activeCount;
+        const skill = skills[idx];
+
+        // 未取得技能：繪製整個填滿的網格
+        if (!skill) {
+            graphics.fillStyle(0x000000, 0.5);
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    const x = startX + col * (cellSize + gap);
+                    const y = startY + row * (cellSize + gap);
+                    graphics.fillRect(x, y, cellSize, cellSize);
+                }
+            }
+            return;
+        }
+
+        // 已取得技能：只繪製邊框格子（空心）
         // 計算邊框格子順序（從 12 點鐘方向順時針）
-        // 頂邊（中間往右）-> 右邊 -> 底邊 -> 左邊 -> 頂邊（左上角到中間）
         const edgeCells: { row: number; col: number }[] = [];
 
         // 頂邊（從中間開始往右）
@@ -3817,8 +3914,9 @@ export default class MainScene extends Phaser.Scene {
                 const reflectDamage = MainScene.DAMAGE_UNIT * reflectUnits;
                 const baseCd = skill.definition.cooldown || 10000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
-                lines.push(`護盾: ${shieldAmount}`);
+                lines.push(`護盾: ${shieldAmount} (霸體)`);
                 lines.push(`反傷: ${reflectDamage}`);
+                lines.push(`回血: ${shieldAmount}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
             }
@@ -3995,7 +4093,7 @@ export default class MainScene extends Phaser.Scene {
             '選擇技能',
             {
                 fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
-                fontSize: `${Math.floor(this.gameBounds.height * 0.07)}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(this.gameBounds.height * 0.07))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             }
@@ -4011,8 +4109,8 @@ export default class MainScene extends Phaser.Scene {
             '提升你的數位能力',
             {
                 fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
-                fontSize: `${Math.floor(this.gameBounds.height * 0.025)}px`,
-                color: '#aaaaaa'
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.025))}px`,
+                color: '#cccccc'
             }
         );
         subtitle.setOrigin(0.5, 0.5);
@@ -4021,16 +4119,17 @@ export default class MainScene extends Phaser.Scene {
         // 建立 3 個技能選項
         this.createSkillOptions();
 
-        // 底部提示文字
+        // 底部提示文字（手機版簡化）
         const hintY = this.gameBounds.y + this.gameBounds.height * 0.92;
+        const hintText = this.isMobile ? '點選選擇' : '重複按同一鍵確認';
         const hint = this.add.text(
             this.gameBounds.x + this.gameBounds.width / 2,
             hintY,
-            '點選或按 W 確定',
+            hintText,
             {
                 fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
-                fontSize: `${Math.floor(this.gameBounds.height * 0.022)}px`,
-                color: '#666666'
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.022))}px`,
+                color: '#888888'
             }
         );
         hint.setOrigin(0.5, 0.5);
@@ -4083,7 +4182,7 @@ export default class MainScene extends Phaser.Scene {
             // 技能類型標籤
             const typeLabel = this.add.text(0, -cardHeight * 0.42, skillDef.type === 'active' ? 'ACTIVE' : 'PASSIVE', {
                 fontFamily: 'monospace',
-                fontSize: `${Math.floor(cardHeight * 0.045)}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))}px`,
                 color: skillDef.type === 'active' ? '#ff6666' : '#66ffff',
                 fontStyle: 'bold'
             });
@@ -4101,7 +4200,7 @@ export default class MainScene extends Phaser.Scene {
             const nameY = cardHeight * 0.06;
             const nameText = this.add.text(0, nameY, skillDef.name, {
                 fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
-                fontSize: `${Math.floor(cardHeight * 0.08)}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.08))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             });
@@ -4112,7 +4211,7 @@ export default class MainScene extends Phaser.Scene {
             if (skillDef.subtitle) {
                 const subtitleText = this.add.text(0, cardHeight * 0.12, skillDef.subtitle, {
                     fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
-                    fontSize: `${Math.floor(cardHeight * 0.04)}px`,
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
                     color: '#999999'
                 });
                 subtitleText.setOrigin(0.5, 0.5);
@@ -4130,33 +4229,36 @@ export default class MainScene extends Phaser.Scene {
             }
             const levelText = this.add.text(0, cardHeight * 0.20, levelDisplay, {
                 fontFamily: 'monospace',
-                fontSize: `${Math.floor(cardHeight * 0.05)}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
                 color: nextLevel >= skillDef.maxLevel ? '#ffff00' : '#88ff88',
                 fontStyle: 'bold'
             });
             levelText.setOrigin(0.5, 0.5);
             optionContainer.add(levelText);
 
-            // 技能描述（固定位置）
-            const descText = this.add.text(0, cardHeight * 0.32, skillDef.description, {
+            // 技能描述（固定位置，手機版下移利用更多空間）
+            const descY = this.isMobile ? cardHeight * 0.36 : cardHeight * 0.32;
+            const descText = this.add.text(0, descY, skillDef.description, {
                 fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
-                fontSize: `${Math.floor(cardHeight * 0.04)}px`,
-                color: '#aaaaaa',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                color: '#dddddd', // 提亮顏色以便閱讀
                 wordWrap: { width: cardWidth * 0.85 },
                 align: 'center'
             });
             descText.setOrigin(0.5, 0.5);
             optionContainer.add(descText);
 
-            // 按鍵提示標籤
-            const keyLabel = this.add.text(0, cardHeight * 0.42, `[ ${keys[i]} ]`, {
-                fontFamily: 'monospace',
-                fontSize: `${Math.floor(cardHeight * 0.06)}px`,
-                color: '#ffff00',
-                fontStyle: 'bold'
-            });
-            keyLabel.setOrigin(0.5, 0.5);
-            optionContainer.add(keyLabel);
+            // 按鍵提示標籤（手機版隱藏）
+            if (!this.isMobile) {
+                const keyLabel = this.add.text(0, cardHeight * 0.42, `[ ${keys[i]} ]`, {
+                    fontFamily: 'monospace',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
+                    color: '#ffff00',
+                    fontStyle: 'bold'
+                });
+                keyLabel.setOrigin(0.5, 0.5);
+                optionContainer.add(keyLabel);
+            }
 
             // 設定互動
             cardBg.setInteractive({ useHandCursor: true });

@@ -36,8 +36,8 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     },
     {
         id: 'active_coder',
-        name: '編碼者',
-        subtitle: '遊戲先知',
+        name: '遊戲先知',
+        subtitle: '編碼者',
         description: '對周圍 2 單位敵人造成傷害，每級增加 0.5 單位範圍',
         type: 'active',
         color: 0xaa66ff, // 紫色
@@ -47,8 +47,8 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     },
     {
         id: 'active_vfx',
-        name: '視效師',
-        subtitle: '超級導演',
+        name: '超級導演',
+        subtitle: '視效師',
         description: '朝隨機敵人發射 10 單位貫穿光束，每級增加 1 道',
         type: 'active',
         color: 0x66ff66, // 綠色
@@ -58,9 +58,9 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     },
     {
         id: 'active_architect',
-        name: '架構師',
-        subtitle: '靈魂統領',
-        description: '產生 30% HP 護盾並反傷攻擊者，護盾消失時回復等值 HP',
+        name: '靈魂統領',
+        subtitle: '架構師',
+        description: '產生 30% HP 護盾（霸體）並反傷攻擊者，護盾消失時回復等值 HP',
         type: 'active',
         color: 0xffcc00, // 金色
         flashColor: 0xffdd44, // 閃金光
