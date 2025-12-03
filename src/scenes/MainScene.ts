@@ -17,6 +17,8 @@ export default class MainScene extends Phaser.Scene {
     private characterState: CharacterState = 'idle';
     private facingRight: boolean = true; // 角色面向右邊
     private skillIcons: Phaser.GameObjects.Rectangle[] = [];
+    private skillIconGridGraphics: Phaser.GameObjects.Graphics[] = []; // 技能框網格邊框
+    private skillIconGridData: { startX: number; startY: number; gridSize: number }[] = []; // 技能框位置資料
     private gameBounds!: GameBounds;
     private boundsBorder!: Phaser.GameObjects.Rectangle;
     private background!: Phaser.GameObjects.Image;
@@ -39,15 +41,9 @@ export default class MainScene extends Phaser.Scene {
     // 地圖倍率（相對於可視區域的倍數）
     private static readonly MAP_SCALE = 10;
 
-    // 技能欄設定（基準值，會根據遊戲區域縮放）
-    private static readonly BASE_ICON_SIZE = 100;
-    private static readonly BASE_ICON_GAP = 10;
-    private static readonly BASE_GROUP_GAP = 30;
-    private static readonly BASE_BOTTOM_MARGIN = 20;
+    // 技能欄設定
     private static readonly ACTIVE_SKILLS = 4;
     private static readonly PASSIVE_SKILLS = 3;
-    // 基準遊戲區域寬度（1920px 時使用原始尺寸）
-    private static readonly BASE_WIDTH = 1920;
 
     // 地板格子
     private floorGrid!: Phaser.GameObjects.Graphics;
@@ -101,7 +97,6 @@ export default class MainScene extends Phaser.Scene {
     private maxExp: number = 100;
     private currentLevel: number = 0;
     private expBarContainer!: Phaser.GameObjects.Container;
-    private expBarFill!: Phaser.GameObjects.Graphics;
     private expBarFlowOffset: number = 0; // 流動效果偏移
     private levelText!: Phaser.GameObjects.Text;
 
@@ -109,17 +104,20 @@ export default class MainScene extends Phaser.Scene {
     private currentHp: number = 200;
     private maxHp: number = 200;
     private hpBarContainer!: Phaser.GameObjects.Container;
-    private hpBarFill!: Phaser.GameObjects.Graphics;
     private hpBarFlowOffset: number = 0; // HP 流動效果偏移
     private hpText!: Phaser.GameObjects.Text;
 
     // 護盾系統
     private currentShield: number = 0;
     private maxShield: number = 0; // 護盾最大值（用於計算回血）
-    private shieldBarFill!: Phaser.GameObjects.Graphics;
     private shieldBarFlowOffset: number = 0; // 護盾流動效果偏移
     private shieldReflectDamage: number = 0; // 護盾反傷傷害值
     private shieldText!: Phaser.GameObjects.Text;
+    private shieldAuraGraphics!: Phaser.GameObjects.Graphics; // 護盾光環圖形
+    private shieldSparkleTimer: number = 0; // 金光閃點計時器
+
+    // HP 自動回復計時器（鈦金肝被動技能）
+    private hpRegenTimer: number = 0;
 
     // 成長曲線常數
     private static readonly BASE_HP = 200; // 初始 HP
@@ -157,8 +155,10 @@ export default class MainScene extends Phaser.Scene {
     private hurtEndTime: number = 0;
     private static readonly HURT_DURATION = 200; // 受傷硬直時間（毫秒）
 
-    // 低血量紅暈效果
-    private lowHpVignette!: Phaser.GameObjects.Graphics;
+    // 低血量紅暈效果（使用畫面邊緣的技能網格）
+    private lowHpBreathTimer: number = 0; // 呼吸動畫計時器
+    private isLowHp: boolean = false; // 是否處於低血量狀態
+    private vignetteEdgeCells: Set<number> = new Set(); // 邊緣格子的索引
 
     // 技能冷卻系統
     private skillCooldowns: Map<string, number> = new Map(); // skillId -> 上次發動時間
@@ -238,6 +238,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 建立遊戲區域容器（用於套用遮罩）
         this.gameAreaContainer = this.add.container(0, 0);
+        this.gameAreaContainer.setDepth(0); // 最底層
 
         // 繪製遊戲區域邊界（黑色背景 + 邊框）
         this.drawGameBorder();
@@ -255,6 +256,10 @@ export default class MainScene extends Phaser.Scene {
 
         // 建立角色容器（會隨鏡頭移動，但獨立於 worldContainer 以便設定深度）
         this.characterContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
+
+        // 建立護盾光環圖形（在角色下方）
+        this.shieldAuraGraphics = this.add.graphics();
+        this.characterContainer.add(this.shieldAuraGraphics);
 
         // 建立角色 Sprite
         this.character = this.add.sprite(this.characterX, this.characterY, 'char_idle_1');
@@ -289,6 +294,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 建立 UI 容器（固定在螢幕上，不隨鏡頭移動）
         this.uiContainer = this.add.container(0, 0);
+        this.uiContainer.setDepth(10); // 在遊戲區域之上
 
         // 建立技能範圍格子覆蓋層（放在 UI 層）
         this.createSkillGrid();
@@ -369,6 +375,10 @@ export default class MainScene extends Phaser.Scene {
         this.updateHpBarFlow(delta);
         this.updateShieldBarFlow(delta);
         this.updateExpBarFlow(delta);
+        this.updateShieldAura(delta);
+        this.updateHpRegen(delta);
+        this.updateLowHpVignetteBreathing(delta);
+        this.updateSkillCooldownDisplay();
 
         // 如果遊戲暫停，處理技能選擇面板的按鍵
         if (this.isPaused) {
@@ -673,6 +683,9 @@ export default class MainScene extends Phaser.Scene {
             this.drawSectorEffect(targetAngle, range, halfAngle, skill.definition.color);
         }
 
+        // 繪製扇形邊緣線（60% 透明度）
+        this.drawSectorEdge(targetAngle, range, halfAngle, skill.definition.color);
+
         // 繪製打擊區網格特效（展開+淡出動畫）
         this.flashSkillAreaSector(this.characterX, this.characterY, range, targetAngle, halfAngle, skill.definition.flashColor || skill.definition.color);
 
@@ -806,6 +819,190 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
+    // 繪製扇形邊緣線（60% 透明度，與網格特效同時顯示）
+    private drawSectorEdge(angle: number, radius: number, halfAngle: number, color: number) {
+        const graphics = this.add.graphics();
+        this.worldContainer.add(graphics);
+
+        const startAngle = angle - halfAngle;
+        const endAngle = angle + halfAngle;
+        const originX = this.characterX;
+        const originY = this.characterY;
+
+        const duration = 500; // 與網格特效同步
+        const holdTime = 300;
+        const startTime = this.time.now;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            graphics.clear();
+
+            // 淡出進度
+            let fadeProgress = 0;
+            if (elapsed > holdTime) {
+                fadeProgress = (elapsed - holdTime) / (duration - holdTime);
+            }
+            const alpha = 0.6 * (1 - fadeProgress);
+
+            if (alpha > 0.01) {
+                // 兩條切線（從原點到弧線兩端）
+                graphics.lineStyle(3, color, alpha);
+                graphics.beginPath();
+                graphics.moveTo(originX, originY);
+                graphics.lineTo(originX + Math.cos(startAngle) * radius, originY + Math.sin(startAngle) * radius);
+                graphics.strokePath();
+
+                graphics.beginPath();
+                graphics.moveTo(originX, originY);
+                graphics.lineTo(originX + Math.cos(endAngle) * radius, originY + Math.sin(endAngle) * radius);
+                graphics.strokePath();
+
+                // 白色高光切線
+                graphics.lineStyle(1.5, 0xffffff, alpha * 0.5);
+                graphics.beginPath();
+                graphics.moveTo(originX, originY);
+                graphics.lineTo(originX + Math.cos(startAngle) * radius * 0.98, originY + Math.sin(startAngle) * radius * 0.98);
+                graphics.strokePath();
+
+                graphics.beginPath();
+                graphics.moveTo(originX, originY);
+                graphics.lineTo(originX + Math.cos(endAngle) * radius * 0.98, originY + Math.sin(endAngle) * radius * 0.98);
+                graphics.strokePath();
+            }
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            if (graphics.active) graphics.destroy();
+            timerEvent.remove();
+        });
+    }
+
+    // 繪製圓形邊緣線（60% 透明度，與網格特效同時顯示）
+    private drawCircleEdge(radius: number, color: number) {
+        const graphics = this.add.graphics();
+        this.worldContainer.add(graphics);
+
+        const originX = this.characterX;
+        const originY = this.characterY;
+
+        const duration = 500;
+        const holdTime = 300;
+        const startTime = this.time.now;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            graphics.clear();
+
+            let fadeProgress = 0;
+            if (elapsed > holdTime) {
+                fadeProgress = (elapsed - holdTime) / (duration - holdTime);
+            }
+            const alpha = 0.6 * (1 - fadeProgress);
+
+            if (alpha > 0.01) {
+                // 外圈圓線
+                graphics.lineStyle(3, color, alpha);
+                graphics.strokeCircle(originX, originY, radius);
+
+                // 白色高光邊緣
+                graphics.lineStyle(1.5, 0xffffff, alpha * 0.5);
+                graphics.strokeCircle(originX, originY, radius * 0.98);
+            }
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            if (graphics.active) graphics.destroy();
+            timerEvent.remove();
+        });
+    }
+
+    // 繪製光束邊緣線（60% 透明度，與網格特效同時顯示）
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    private drawBeamEdge(angle: number, length: number, _width: number, _color: number) {
+        const graphics = this.add.graphics();
+        this.worldContainer.add(graphics);
+
+        const originX = this.characterX;
+        const originY = this.characterY;
+        const endX = originX + Math.cos(angle) * length;
+        const endY = originY + Math.sin(angle) * length;
+
+        const duration = 800; // 與光束網格特效同步
+        const holdTime = 380;
+        const startTime = this.time.now;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            graphics.clear();
+
+            let fadeProgress = 0;
+            if (elapsed > holdTime) {
+                fadeProgress = (elapsed - holdTime) / (duration - holdTime);
+            }
+
+            const alpha = 0.6 * (1 - fadeProgress * 0.5); // 淡出但不完全消失
+
+            if (alpha > 0.01) {
+                // 只保留中心白線
+                graphics.lineStyle(2, 0xffffff, alpha);
+                graphics.beginPath();
+                graphics.moveTo(originX, originY);
+                graphics.lineTo(endX, endY);
+                graphics.strokePath();
+            }
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            if (graphics.active) graphics.destroy();
+            timerEvent.remove();
+        });
+    }
+
     // 編碼者：對周圍敵人造成傷害
     // 起始範圍 2 單位，每級 +0.5 單位（Lv.0=2單位，Lv.5=4.5單位）
     // 起始傷害 1 單位，每級 +1 單位（Lv.0=1單位，Lv.5=6單位）
@@ -841,6 +1038,9 @@ export default class MainScene extends Phaser.Scene {
         if (this.showLegacySkillEffects) {
             this.drawCircleEffect(range, skill.definition.color);
         }
+
+        // 繪製圓形邊緣線（60% 透明度）
+        this.drawCircleEdge(range, skill.definition.color);
 
         // 繪製打擊區網格特效（展開+淡出動畫）
         this.flashSkillAreaCircle(this.characterX, this.characterY, range, skill.definition.flashColor || skill.definition.color);
@@ -1046,6 +1246,9 @@ export default class MainScene extends Phaser.Scene {
             if (this.showLegacySkillEffects) {
                 this.drawBeamEffect(targetAngle, range, beamWidth, skill.definition.color);
             }
+
+            // 繪製光束邊緣線（60% 透明度）
+            this.drawBeamEdge(targetAngle, range, beamWidth, skill.definition.color);
 
             // 繪製光束打擊區網格特效（展開+淡出動畫）
             const endX = this.characterX + Math.cos(targetAngle) * range;
@@ -2113,54 +2316,18 @@ export default class MainScene extends Phaser.Scene {
     // ===== HP 條系統 =====
 
     private createHpBar() {
-        // HP 條容器
+        // HP 條容器（用於放置 HP 文字）
         this.hpBarContainer = this.add.container(0, 0);
-        this.hpBarContainer.setDepth(100);
+        this.hpBarContainer.setDepth(1001); // 在網格之上
 
-        // HP 條尺寸（技能欄寬度，高度是 EXP 條的兩倍）
-        const expBarHeight = this.gameBounds.height * 0.01;
-        const barHeight = expBarHeight * 2; // HP 條高度是 EXP 條兩倍
-
-        // 計算技能欄的總寬度（和 createSkillBar 一致）
-        const scale = Math.min(1, this.gameBounds.width / MainScene.BASE_WIDTH);
-        const clampedScale = Math.max(0.4, scale);
-        const iconSize = Math.floor(MainScene.BASE_ICON_SIZE * clampedScale);
-        const iconGap = Math.floor(MainScene.BASE_ICON_GAP * clampedScale);
-        const groupGap = Math.floor(MainScene.BASE_GROUP_GAP * clampedScale);
-        const bottomMargin = Math.floor(MainScene.BASE_BOTTOM_MARGIN * clampedScale);
-
-        const activeCount = MainScene.ACTIVE_SKILLS;
-        const passiveCount = MainScene.PASSIVE_SKILLS;
-        const activeGroupWidth = activeCount * iconSize + (activeCount - 1) * iconGap;
-        const passiveGroupWidth = passiveCount * iconSize + (passiveCount - 1) * iconGap;
-        const barWidth = activeGroupWidth + groupGap + passiveGroupWidth;
-
-        // 起始 X 位置（和技能欄一致，置中）
-        const barX = this.gameBounds.x + (this.gameBounds.width - barWidth) / 2;
-        // Y 位置：技能欄上方
-        const skillBarY = this.gameBounds.y + this.gameBounds.height - iconSize - bottomMargin;
-        const barY = skillBarY - barHeight - 8; // 技能欄上方 8 像素間距
-
-        // 黑色背景
-        const barBg = this.add.rectangle(
-            barX + barWidth / 2,
-            barY + barHeight / 2,
-            barWidth,
-            barHeight,
-            0x000000
-        );
-        barBg.setStrokeStyle(1, 0x333333);
-        this.hpBarContainer.add(barBg);
-
-        // HP 條填充（使用 Graphics 繪製流動效果）
-        this.hpBarFill = this.add.graphics();
-        this.hpBarContainer.add(this.hpBarFill);
-
-        // HP 文字（和等級文字一樣大，可以往上凸出）
+        // HP 文字位置（頂部網格上方）
+        const cellHeight = this.skillGridCellSize;
+        const barY = this.gameBounds.y + cellHeight * 2;
         const fontSize = Math.floor(this.gameBounds.height * 0.03);
+
         this.hpText = this.add.text(
-            barX + barWidth / 2,
-            barY + barHeight / 2,
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY + cellHeight / 2,
             `${this.currentHp} / ${this.maxHp}`,
             {
                 fontFamily: 'monospace',
@@ -2168,13 +2335,14 @@ export default class MainScene extends Phaser.Scene {
                 color: '#ffffff',
                 fontStyle: 'bold',
                 stroke: '#000000',
-                strokeThickness: 3
+                strokeThickness: 4 // 黑邊加粗 1px
             }
         );
         this.hpText.setOrigin(0.5, 0.5);
+        this.hpText.setDepth(1002);
         this.hpBarContainer.add(this.hpText);
 
-        // 初始繪製
+        // 初始繪製（HP 條現在使用網格格子繪製）
         this.drawHpBarFill();
 
         // 加入 UI 容器
@@ -2182,70 +2350,90 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private drawHpBarFill() {
-        this.hpBarFill.clear();
+        // HP 條使用頂部 2 行網格格子（row 0 和 row 1）
+        const hpRows = [0, 1];
 
-        // HP 條尺寸（和 createHpBar 一致）
-        const expBarHeight = this.gameBounds.height * 0.01;
-        const barHeight = expBarHeight * 2;
+        // 先繪製所有頂部格子為黑底
+        for (const row of hpRows) {
+            for (let col = 0; col < this.skillGridCols; col++) {
+                const index = row * this.skillGridCols + col;
+                const cell = this.skillGridCells[index];
+                if (!cell) continue;
 
-        const scale = Math.min(1, this.gameBounds.width / MainScene.BASE_WIDTH);
-        const clampedScale = Math.max(0.4, scale);
-        const iconSize = Math.floor(MainScene.BASE_ICON_SIZE * clampedScale);
-        const iconGap = Math.floor(MainScene.BASE_ICON_GAP * clampedScale);
-        const groupGap = Math.floor(MainScene.BASE_GROUP_GAP * clampedScale);
-        const bottomMargin = Math.floor(MainScene.BASE_BOTTOM_MARGIN * clampedScale);
-
-        const activeCount = MainScene.ACTIVE_SKILLS;
-        const passiveCount = MainScene.PASSIVE_SKILLS;
-        const activeGroupWidth = activeCount * iconSize + (activeCount - 1) * iconGap;
-        const passiveGroupWidth = passiveCount * iconSize + (passiveCount - 1) * iconGap;
-        const barWidth = activeGroupWidth + groupGap + passiveGroupWidth;
-
-        const barX = this.gameBounds.x + (this.gameBounds.width - barWidth) / 2;
-        const skillBarY = this.gameBounds.y + this.gameBounds.height - iconSize - bottomMargin;
-        const barY = skillBarY - barHeight - 8;
-
-        // 計算填充寬度
-        const fillRatio = this.currentHp / this.maxHp;
-        const fillWidth = barWidth * fillRatio;
-
-        if (fillWidth <= 0) return;
-
-        // 繪製暗紅暗紫色漸層流動效果
-        const numSegments = Math.ceil(fillWidth / 2) + 1;
-
-        for (let i = 0; i < numSegments; i++) {
-            const x = barX + i * 2;
-            if (x >= barX + fillWidth) break;
-
-            // 計算漸層位置（加入流動偏移）
-            const baseT = (x - barX) / barWidth;
-            const flowT = this.hpBarFlowOffset;
-            const t = (baseT + flowT) % 1;
-
-            // 使用正弦波讓頭尾同色（暗紅→暗紫→暗紅）
-            const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
-
-            // 暗紅色 (0x880022) 到 暗紫色 (0x660088) 漸層
-            const r = Math.floor(0x88 - (0x88 - 0x66) * wave);
-            const g = Math.floor(0x00 + (0x00 - 0x00) * wave);
-            const b = Math.floor(0x22 + (0x88 - 0x22) * wave);
-
-            const color = (r << 16) | (g << 8) | b;
-            this.hpBarFill.fillStyle(color, 1);
-
-            const segmentWidth = Math.min(2, barX + fillWidth - x);
-            this.hpBarFill.fillRect(x, barY, segmentWidth, barHeight);
+                // 設置黑底並顯示
+                cell.setFillStyle(0x000000, 0.9);
+                cell.setVisible(true);
+                cell.setDepth(1000);
+            }
         }
 
-        // 頂部高光
-        this.hpBarFill.fillStyle(0xffffff, 0.15);
-        this.hpBarFill.fillRect(barX, barY, fillWidth, barHeight * 0.4);
+        // 計算 HP 填充格子數
+        const fillRatio = this.currentHp / this.maxHp;
+        const totalCells = this.skillGridCols;
+        const fillCells = Math.floor(totalCells * fillRatio);
+
+        if (fillCells <= 0) return;
+
+        // 繪製 HP 格子（頂部 2 行，暗紅暗紫漸層流動效果）
+        for (const row of hpRows) {
+            for (let col = 0; col < fillCells; col++) {
+                const index = row * this.skillGridCols + col;
+                const cell = this.skillGridCells[index];
+                if (!cell) continue;
+
+                // 計算漸層位置（加入流動偏移）
+                const baseT = col / totalCells;
+                const flowT = this.hpBarFlowOffset;
+                const t = (baseT + flowT) % 1;
+
+                // 使用正弦波讓頭尾同色（暗紅→暗紫→暗紅）
+                const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+
+                // 暗紅色 (0x880022) 到 暗紫色 (0x660088) 漸層
+                const r = Math.floor(0x88 - (0x88 - 0x66) * wave);
+                const g = 0x00;
+                const b = Math.floor(0x22 + (0x88 - 0x22) * wave);
+                const color = (r << 16) | (g << 8) | b;
+
+                // 上排稍微亮一點（高光效果）
+                const alpha = row === 0 ? 0.95 : 0.8;
+
+                cell.setFillStyle(color, alpha);
+            }
+        }
+
+        // 護盾覆蓋在上半部（row 0），不額外繪製新格子
+        if (this.currentShield > 0 && this.maxShield > 0) {
+            const shieldRatio = this.currentShield / this.maxShield;
+            const shieldCells = Math.floor(totalCells * shieldRatio);
+
+            for (let col = 0; col < shieldCells; col++) {
+                const index = 0 * this.skillGridCols + col; // row 0
+                const cell = this.skillGridCells[index];
+                if (!cell) continue;
+
+                // 計算金色漸層位置（加入流動偏移）
+                const baseT = col / totalCells;
+                const flowT = this.shieldBarFlowOffset;
+                const t = (baseT + flowT) % 1;
+
+                // 使用正弦波（金→白金→金）- 淡的地方更白
+                const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+
+                // 金色 (0xffcc00) 到 白金色 (0xffffcc) 漸層
+                const r = 0xff;
+                const g = Math.floor(0xcc + (0xff - 0xcc) * wave);
+                const b = Math.floor(0x00 + (0xcc - 0x00) * wave);
+                const color = (r << 16) | (g << 8) | b;
+
+                cell.setFillStyle(color, 0.95);
+            }
+        }
     }
 
     private updateHpBarFlow(delta: number) {
-        // 流動速度（緩慢，從左到右）
-        const flowSpeed = 0.08; // 每秒移動 8% 的漸層
+        // 流動速度加快 2 倍
+        const flowSpeed = 0.2; // 每秒移動 20% 的漸層
         this.hpBarFlowOffset += (flowSpeed * delta) / 1000;
 
         // 保持在 0~1 範圍內循環
@@ -2259,129 +2447,59 @@ export default class MainScene extends Phaser.Scene {
 
     private updateHpText() {
         if (this.hpText) {
-            this.hpText.setText(`${this.currentHp} / ${this.maxHp}`);
+            if (this.currentShield > 0) {
+                // 有護盾時顯示：HP(+盾) / MaxHP
+                this.hpText.setText(`${this.currentHp}(+${this.currentShield}) / ${this.maxHp}`);
+            } else {
+                this.hpText.setText(`${this.currentHp} / ${this.maxHp}`);
+            }
         }
     }
 
     // ===== 護盾條系統 =====
 
     private createShieldBar() {
-        // 護盾條填充（使用 Graphics 繪製流動效果）
-        // 位置和尺寸在 drawShieldBarFill 中計算
-        this.shieldBarFill = this.add.graphics();
-        this.shieldBarFill.setDepth(101); // 在 HP 條之上
-
-        // 護盾文字（初始隱藏，有護盾時才顯示）
+        // 護盾現在整合到 HP 條（row 0），不需要獨立的護盾條
+        // 護盾文字（顯示在右上角）
+        const cellHeight = this.skillGridCellSize;
+        const barY = this.gameBounds.y + cellHeight * 2;
         const fontSize = Math.floor(this.gameBounds.height * 0.025);
-        this.shieldText = this.add.text(0, 0, '', {
-            fontFamily: 'monospace',
-            fontSize: `${fontSize}px`,
-            color: '#ffdd44',
-            fontStyle: 'bold',
-            stroke: '#000000',
-            strokeThickness: 3
-        });
-        this.shieldText.setOrigin(0.5, 0.5);
-        this.shieldText.setDepth(102);
+
+        this.shieldText = this.add.text(
+            this.gameBounds.x + this.gameBounds.width - 10,
+            barY + cellHeight / 2,
+            '',
+            {
+                fontFamily: 'monospace',
+                fontSize: `${fontSize}px`,
+                color: '#ffdd44',
+                fontStyle: 'bold',
+                stroke: '#000000',
+                strokeThickness: 3
+            }
+        );
+        this.shieldText.setOrigin(1, 0.5);
+        this.shieldText.setDepth(1002);
         this.shieldText.setVisible(false);
 
         // 加入 UI 容器
-        this.uiContainer.add(this.shieldBarFill);
         this.uiContainer.add(this.shieldText);
     }
 
     private drawShieldBarFill() {
-        this.shieldBarFill.clear();
-
-        // 如果沒有護盾，隱藏文字並不繪製
-        if (this.currentShield <= 0) {
-            this.shieldText.setVisible(false);
-            return;
-        }
-
-        // 護盾條尺寸
-        const expBarHeight = this.gameBounds.height * 0.01;
-        const hpBarHeight = expBarHeight * 2;
-        const barHeight = expBarHeight * 1.5;
-
-        const scale = Math.min(1, this.gameBounds.width / MainScene.BASE_WIDTH);
-        const clampedScale = Math.max(0.4, scale);
-        const iconSize = Math.floor(MainScene.BASE_ICON_SIZE * clampedScale);
-        const iconGap = Math.floor(MainScene.BASE_ICON_GAP * clampedScale);
-        const groupGap = Math.floor(MainScene.BASE_GROUP_GAP * clampedScale);
-        const bottomMargin = Math.floor(MainScene.BASE_BOTTOM_MARGIN * clampedScale);
-
-        const activeCount = MainScene.ACTIVE_SKILLS;
-        const passiveCount = MainScene.PASSIVE_SKILLS;
-        const activeGroupWidth = activeCount * iconSize + (activeCount - 1) * iconGap;
-        const passiveGroupWidth = passiveCount * iconSize + (passiveCount - 1) * iconGap;
-        const barWidth = activeGroupWidth + groupGap + passiveGroupWidth;
-
-        const barX = this.gameBounds.x + (this.gameBounds.width - barWidth) / 2;
-        const skillBarY = this.gameBounds.y + this.gameBounds.height - iconSize - bottomMargin;
-        const hpBarY = skillBarY - hpBarHeight - 8;
-        const barY = hpBarY - barHeight;
-
-        // 計算填充寬度（護盾值相對於護盾最大值）
-        if (this.maxShield <= 0) return;
-        const fillRatio = this.currentShield / this.maxShield;
-        const fillWidth = barWidth * Math.min(1, fillRatio);
-
-        if (fillWidth <= 0) return;
-
-        // 繪製黑色背景框
-        this.shieldBarFill.fillStyle(0x000000, 0.8);
-        this.shieldBarFill.fillRect(barX, barY, barWidth, barHeight);
-        this.shieldBarFill.lineStyle(1, 0x333333);
-        this.shieldBarFill.strokeRect(barX, barY, barWidth, barHeight);
-
-        // 繪製金色漸層流動效果（架構師主色）
-        const numSegments = Math.ceil(fillWidth / 2) + 1;
-
-        for (let i = 0; i < numSegments; i++) {
-            const x = barX + i * 2;
-            if (x >= barX + fillWidth) break;
-
-            // 計算漸層位置（加入流動偏移）
-            const baseT = (x - barX) / barWidth;
-            const flowT = this.shieldBarFlowOffset;
-            const t = (baseT + flowT) % 1;
-
-            // 使用正弦波讓頭尾同色（金→亮金→金）
-            const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
-
-            // 金色 (0xffcc00) 到 亮金色 (0xffdd44) 漸層
-            const r = 0xff;
-            const g = Math.floor(0xcc + (0xdd - 0xcc) * wave);
-            const b = Math.floor(0x00 + (0x44 - 0x00) * wave);
-
-            const color = (r << 16) | (g << 8) | b;
-            this.shieldBarFill.fillStyle(color, 0.9);
-
-            const segmentWidth = Math.min(2, barX + fillWidth - x);
-            this.shieldBarFill.fillRect(x, barY, segmentWidth, barHeight);
-        }
-
-        // 頂部高光
-        this.shieldBarFill.fillStyle(0xffffff, 0.25);
-        this.shieldBarFill.fillRect(barX, barY, fillWidth, barHeight * 0.4);
-
-        // 邊框光暈效果（金色）
-        this.shieldBarFill.lineStyle(1, 0xffdd44, 0.5);
-        this.shieldBarFill.strokeRect(barX, barY, fillWidth, barHeight);
-
-        // 更新護盾文字
-        this.shieldText.setText(`${this.currentShield} / ${this.maxShield}`);
-        this.shieldText.setPosition(barX + barWidth / 2, barY + barHeight / 2);
-        this.shieldText.setVisible(true);
+        // 護盾現在整合到 HP 條的 row 0，由 drawHpBarFill 處理
+        // 護盾數值顯示在 HP 文字中，隱藏獨立的護盾文字
+        this.shieldText.setVisible(false);
+        // 更新 HP 文字（會包含護盾數值）
+        this.updateHpText();
     }
 
     private updateShieldBarFlow(delta: number) {
         // 如果沒有護盾，不更新
         if (this.currentShield <= 0) return;
 
-        // 流動速度（較快，顯示能量感）
-        const flowSpeed = 0.15; // 每秒移動 15% 的漸層
+        // 流動速度高速
+        const flowSpeed = 0.6; // 每秒移動 60% 的漸層
         this.shieldBarFlowOffset += (flowSpeed * delta) / 1000;
 
         // 保持在 0~1 範圍內循環
@@ -2389,8 +2507,248 @@ export default class MainScene extends Phaser.Scene {
             this.shieldBarFlowOffset -= 1;
         }
 
-        // 重繪護盾條
+        // 護盾由 drawHpBarFill 一起重繪
         this.drawShieldBarFill();
+    }
+
+    // 更新護盾光環效果（暈開的橢圓光暈 + 隨機金光閃點）
+    private updateShieldAura(delta: number) {
+        this.shieldAuraGraphics.clear();
+
+        // 如果沒有護盾，不顯示光環
+        if (this.currentShield <= 0) return;
+
+        const originX = this.characterX;
+        const originY = this.characterY;
+
+        // 橢圓尺寸（角色周圍）
+        const ellipseWidth = this.characterSize * 0.8;
+        const ellipseHeight = this.characterSize * 0.35;
+        // 橢圓中心在角色腳底往上一點
+        const ellipseCenterY = originY - this.characterSize * 0.15;
+
+        // 繪製暈開的橢圓光暈（多層疊加模擬模糊效果）
+        for (let i = 5; i >= 0; i--) {
+            const scale = 1 + i * 0.08;
+            const alpha = 0.12 - i * 0.018;
+            const lineWidth = 3 + i * 2;
+            this.shieldAuraGraphics.lineStyle(lineWidth, 0xffffff, alpha);
+            this.shieldAuraGraphics.strokeEllipse(
+                originX,
+                ellipseCenterY,
+                ellipseWidth * scale,
+                ellipseHeight * scale
+            );
+        }
+
+        // 更新閃點計時器
+        this.shieldSparkleTimer += delta;
+
+        // 每 80ms 產生一個金光閃點
+        const sparkleInterval = 80;
+        if (this.shieldSparkleTimer >= sparkleInterval) {
+            this.shieldSparkleTimer -= sparkleInterval;
+            this.createShieldSparkle(originX, ellipseCenterY, ellipseWidth, ellipseHeight);
+        }
+    }
+
+    // 在橢圓上隨機位置產生金光閃點（網格方塊，小到大擴散放大上升淡出）
+    private createShieldSparkle(centerX: number, centerY: number, width: number, height: number) {
+        // 隨機角度
+        const angle = Math.random() * Math.PI * 2;
+        // 橢圓上的點（起始位置）
+        const startX = centerX + Math.cos(angle) * (width / 2);
+        const startY = centerY + Math.sin(angle) * (height / 2);
+
+        // 建立閃點圖形
+        const sparkle = this.add.graphics();
+        this.characterContainer.add(sparkle);
+
+        // 網格大小（使用與地板網格相同的比例）
+        const gridSize = this.gameBounds.height / 10;
+        const baseCellSize = gridSize * 0.08; // 起始較小
+        const maxCellSize = gridSize * 0.2; // 最大尺寸
+        const riseDistance = gridSize * 0.5; // 上升距離
+        const duration = 600 + Math.random() * 200;
+        const startTime = this.time.now;
+
+        const updateSparkle = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            sparkle.clear();
+
+            // 計算當前位置（垂直上升）
+            const currentY = startY - riseDistance * progress;
+
+            // 小到大擴散放大
+            const sizeProgress = Math.pow(progress, 0.5); // 快速變大後緩慢
+            const cellSize = baseCellSize + (maxCellSize - baseCellSize) * sizeProgress;
+
+            // 淡出效果
+            const alpha = 1 - progress;
+
+            if (alpha > 0.01) {
+                // 金色網格方塊
+                sparkle.fillStyle(0xffdd44, alpha * 0.9);
+                sparkle.fillRect(startX - cellSize / 2, currentY - cellSize / 2, cellSize, cellSize);
+
+                // 白色邊框
+                sparkle.lineStyle(1, 0xffffff, alpha * 0.6);
+                sparkle.strokeRect(startX - cellSize / 2, currentY - cellSize / 2, cellSize, cellSize);
+            }
+
+            if (progress >= 1) {
+                sparkle.destroy();
+            }
+        };
+
+        updateSparkle();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateSparkle,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            if (sparkle.active) sparkle.destroy();
+            timerEvent.remove();
+        });
+    }
+
+    // 更新 HP 自動回復（鈦金肝被動技能）
+    private updateHpRegen(delta: number) {
+        // 檢查是否有鈦金肝技能
+        const regenInterval = this.skillManager.getTitaniumLiverRegenInterval();
+        if (regenInterval <= 0) return;
+
+        // 如果 HP 已滿，不需要回復
+        if (this.currentHp >= this.maxHp) {
+            this.hpRegenTimer = 0;
+            return;
+        }
+
+        // 累加計時器
+        this.hpRegenTimer += delta;
+
+        // 達到回復間隔時觸發回復
+        if (this.hpRegenTimer >= regenInterval) {
+            this.hpRegenTimer -= regenInterval;
+
+            // 回復 1% 最大 HP
+            const healAmount = Math.max(1, Math.floor(this.maxHp * 0.01));
+            this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
+
+            // 更新 HP 條顯示
+            this.drawHpBarFill();
+            this.updateHpText();
+            this.updateLowHpVignette();
+
+            // 顯示回復特效
+            this.showHpHealEffect(healAmount);
+
+            console.log(`HP Regen: +${healAmount} HP (${this.currentHp}/${this.maxHp})`);
+        }
+    }
+
+    // 顯示 HP 回復特效（藍紫色網格方塊閃白上升淡出，同 HP 色系）
+    private showHpHealEffect(amount: number) {
+        const originX = this.characterX;
+        const originY = this.characterY - this.characterSize * 0.3;
+
+        // 根據回復量產生多個粒子（最少 3 個，最多 8 個）
+        const particleCount = Math.min(8, Math.max(3, Math.floor(amount / 10) + 3));
+
+        for (let i = 0; i < particleCount; i++) {
+            this.time.delayedCall(i * 40, () => {
+                this.createHpHealParticle(originX, originY);
+            });
+        }
+    }
+
+    // 產生單個 HP 回復粒子（藍紫色網格方塊，閃白上升淡出）
+    private createHpHealParticle(centerX: number, centerY: number) {
+        // 角色周圍隨機位置（橢圓分布）
+        const angle = Math.random() * Math.PI * 2;
+        const radiusX = this.characterSize * 0.4;
+        const radiusY = this.characterSize * 0.25;
+        const startX = centerX + Math.cos(angle) * radiusX * (0.3 + Math.random() * 0.7);
+        const startY = centerY + Math.sin(angle) * radiusY * (0.3 + Math.random() * 0.7);
+
+        const sparkle = this.add.graphics();
+        this.characterContainer.add(sparkle);
+
+        // 網格大小
+        const gridSize = this.gameBounds.height / 10;
+        const cellSize = gridSize * (0.1 + Math.random() * 0.08);
+        const riseDistance = gridSize * (0.5 + Math.random() * 0.3);
+        const duration = 700 + Math.random() * 300;
+        const startTime = this.time.now;
+
+        // 隨機選擇藍紫色系（HP 條色系）
+        const colors = [0x6644ff, 0x8866ff, 0x7755ee, 0x9977ff];
+        const baseColor = colors[Math.floor(Math.random() * colors.length)];
+
+        const updateParticle = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            sparkle.clear();
+
+            const currentY = startY - riseDistance * progress;
+
+            // 先閃白再淡出
+            let alpha: number;
+            let whiteBlend: number;
+            if (progress < 0.2) {
+                // 閃白階段
+                alpha = 0.6 + progress * 2; // 0.6 -> 1.0
+                whiteBlend = 1 - progress * 5; // 1.0 -> 0
+            } else {
+                // 淡出階段
+                alpha = 1 - (progress - 0.2) / 0.8;
+                whiteBlend = 0;
+            }
+
+            if (alpha > 0.01) {
+                // 混合白色
+                const r = ((baseColor >> 16) & 0xff);
+                const g = ((baseColor >> 8) & 0xff);
+                const b = (baseColor & 0xff);
+                const blendR = Math.round(r + (255 - r) * whiteBlend);
+                const blendG = Math.round(g + (255 - g) * whiteBlend);
+                const blendB = Math.round(b + (255 - b) * whiteBlend);
+                const blendColor = (blendR << 16) | (blendG << 8) | blendB;
+
+                // 藍紫色網格方塊
+                sparkle.fillStyle(blendColor, alpha * 0.9);
+                sparkle.fillRect(startX - cellSize / 2, currentY - cellSize / 2, cellSize, cellSize);
+
+                // 白色邊框
+                sparkle.lineStyle(1, 0xffffff, alpha * 0.7);
+                sparkle.strokeRect(startX - cellSize / 2, currentY - cellSize / 2, cellSize, cellSize);
+            }
+
+            if (progress >= 1) {
+                sparkle.destroy();
+            }
+        };
+
+        updateParticle();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateParticle,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            if (sparkle.active) sparkle.destroy();
+            timerEvent.remove();
+        });
     }
 
     // 玩家受到傷害
@@ -2427,6 +2785,9 @@ export default class MainScene extends Phaser.Scene {
                 this.drawHpBarFill();
                 this.updateHpText();
                 this.updateLowHpVignette();
+
+                // 顯示 HP 回復特效
+                this.showHpHealEffect(healAmount);
             }
 
             // 更新護盾條顯示
@@ -2731,100 +3092,124 @@ export default class MainScene extends Phaser.Scene {
         this.cameras.main.shake(100, 0.005);
     }
 
-    // 建立低血量紅暈效果
+    // 建立低血量紅暈效果（橢圓形邊緣格子會在 drawGridVignette 動態計算）
     private createLowHpVignette() {
-        this.lowHpVignette = this.add.graphics();
-        this.lowHpVignette.setDepth(1000); // 在最上層
-        this.lowHpVignette.setAlpha(0);
-        this.uiContainer.add(this.lowHpVignette);
+        // vignetteEdgeCells 會在 drawGridVignette 動態填充
+        console.log(`Vignette initialized (grid: ${this.skillGridCols}x${this.skillGridRows})`);
     }
 
-    // 更新低血量紅暈效果
+    // 更新低血量紅暈效果狀態
     private updateLowHpVignette() {
         const hpRatio = this.currentHp / this.maxHp;
+        this.isLowHp = hpRatio <= 0.3;
 
-        if (hpRatio <= 0.3) {
-            // HP 低於 30%，顯示紅暈並閃爍
-            this.drawVignette();
+        // 如果不是低血量，清除邊緣格子顏色
+        if (!this.isLowHp && this.currentShield <= 0) {
+            this.clearVignetteCells();
+        }
+    }
 
-            // 閃爍動畫
-            this.tweens.killTweensOf(this.lowHpVignette);
-            this.lowHpVignette.setAlpha(0.6);
-            this.tweens.add({
-                targets: this.lowHpVignette,
-                alpha: 0.3,
-                duration: 300,
-                ease: 'Sine.easeInOut'
-            });
+    // 清除邊緣格子的紅暈效果
+    private clearVignetteCells() {
+        for (const index of this.vignetteEdgeCells) {
+            const cell = this.skillGridCells[index];
+            if (cell) {
+                cell.setFillStyle(0xffffff, 0);
+                cell.setVisible(false);
+            }
+        }
+        // 清空集合，下次會重新計算
+        this.vignetteEdgeCells.clear();
+    }
+
+    // 更新低血量紅暈呼吸動畫（每幀更新）
+    private updateLowHpVignetteBreathing(delta: number) {
+        // 只有低血量或有護盾時才顯示
+        if (!this.isLowHp && this.currentShield <= 0) return;
+
+        // 更新呼吸計時器（呼吸週期 1.5 秒）
+        this.lowHpBreathTimer += delta;
+        const breathCycle = 1500;
+        if (this.lowHpBreathTimer >= breathCycle) {
+            this.lowHpBreathTimer -= breathCycle;
+        }
+
+        // 計算呼吸進度（0~1~0 的週期）
+        const breathProgress = this.lowHpBreathTimer / breathCycle;
+        const breathValue = Math.sin(breathProgress * Math.PI * 2) * 0.5 + 0.5; // 0~1
+
+        this.drawGridVignette(breathValue);
+    }
+
+    // 繪製網格式邊緣紅暈（使用技能網格格子，橢圓形漸層）
+    private drawGridVignette(breathValue: number) {
+        // 呼吸透明度（0.20 ~ 0.40）- 再淡一點
+        const alphaBreath = 0.20 + breathValue * 0.20;
+
+        // 決定顏色：有護盾時金黃色，低血量時紅色
+        let baseColor: number;
+        if (this.currentShield > 0) {
+            baseColor = 0xffdd44; // 金黃色
         } else {
-            // HP 高於 30%，隱藏紅暈
-            this.tweens.killTweensOf(this.lowHpVignette);
-            this.lowHpVignette.setAlpha(0);
+            baseColor = 0xff2222; // 紅色
+        }
+
+        // 畫面中心
+        const centerCol = this.skillGridCols / 2;
+        const centerRow = this.skillGridRows / 2;
+
+        // 橢圓半徑（放大 2 倍，讓橢圓延伸到畫面外更多）
+        const radiusX = this.skillGridCols / 2 * 2;
+        const radiusY = this.skillGridRows / 2 * 2;
+
+        // 遍歷所有格子（跳過頂部 2 行 HP 條和底部 2 行經驗條區域）
+        const hpBarEndRow = 2;
+        const expBarStartRow = this.skillGridRows - 2;
+        for (let row = hpBarEndRow; row < expBarStartRow; row++) {
+            for (let col = 0; col < this.skillGridCols; col++) {
+                const index = row * this.skillGridCols + col;
+                const cell = this.skillGridCells[index];
+                if (!cell) continue;
+
+                // 計算到橢圓中心的標準化距離
+                const dx = (col - centerCol) / radiusX;
+                const dy = (row - centerRow) / radiusY;
+                const ellipseDist = Math.sqrt(dx * dx + dy * dy);
+
+                // 只顯示橢圓外圍（距離 > 0.5），漸層到邊緣（0.5 ~ 0.75 範圍）
+                // 因為橢圓放大了，所以 0.5 ~ 0.75 會剛好在畫面邊緣
+                if (ellipseDist > 0.5) {
+                    // 越靠近邊緣越亮（0.5 ~ 0.75 映射到 0 ~ 1）
+                    const distRatio = Math.min(1, (ellipseDist - 0.5) / 0.25);
+                    const cellAlpha = alphaBreath * distRatio;
+
+                    if (cellAlpha > 0.01) {
+                        cell.setFillStyle(baseColor, cellAlpha);
+                        cell.setVisible(true);
+                        // 標記這個格子為邊緣格子（供 clearSkillGrid 使用）
+                        this.vignetteEdgeCells.add(index);
+                    }
+                }
+            }
         }
     }
 
-    // 繪製邊緣紅暈
-    private drawVignette() {
-        this.lowHpVignette.clear();
-
-        const width = this.gameBounds.width;
-        const height = this.gameBounds.height;
-        const x = this.gameBounds.x;
-        const y = this.gameBounds.y;
-        const edgeSize = Math.min(width, height) * 0.15; // 邊緣寬度
-
-        // 使用多層漸層繪製邊緣紅暈
-        const steps = 10;
-        for (let i = 0; i < steps; i++) {
-            const ratio = i / steps;
-            const alpha = (1 - ratio) * 0.5; // 從外到內漸淡
-            const offset = edgeSize * ratio;
-
-            this.lowHpVignette.lineStyle(edgeSize / steps, 0xff0000, alpha);
-            this.lowHpVignette.strokeRect(
-                x + offset,
-                y + offset,
-                width - offset * 2,
-                height - offset * 2
-            );
-        }
-    }
-
-    // ===== 經驗條系統 =====
+    // ===== 經驗條系統（使用底部 2 行網格格子）=====
 
     private createExpBar() {
-        // 經驗條容器
+        // 經驗條容器（不再需要，改用技能網格）
         this.expBarContainer = this.add.container(0, 0);
-        this.expBarContainer.setDepth(100); // 在遊戲內容之上，但在技能面板之下
+        this.expBarContainer.setDepth(100);
 
-        // 經驗條尺寸（1% 遊戲區域高度）
-        const barHeight = this.gameBounds.height * 0.01;
-        const barWidth = this.gameBounds.width;
-        const barX = this.gameBounds.x;
-        const barY = this.gameBounds.y + this.gameBounds.height - barHeight;
-
-        // 黑色背景
-        const barBg = this.add.rectangle(
-            barX + barWidth / 2,
-            barY + barHeight / 2,
-            barWidth,
-            barHeight,
-            0x000000
-        );
-        this.expBarContainer.add(barBg);
-
-        // 經驗條填充（使用 Graphics 繪製流動效果）
-        this.expBarFill = this.add.graphics();
-        this.expBarContainer.add(this.expBarFill);
-
-        // 初始繪製
-        this.drawExpBarFill();
-
-        // 等級文字（左下角）
+        // 等級文字（左下角，在網格之上）
         const fontSize = Math.floor(this.gameBounds.height * 0.03);
+        // 底部 2 格的高度
+        const cellHeight = this.skillGridCellSize;
+        const barY = this.gameBounds.y + this.gameBounds.height - cellHeight * 2;
+
         this.levelText = this.add.text(
             this.gameBounds.x + 10,
-            barY - fontSize - 5,
+            barY - 5,
             `Lv.${this.currentLevel}`,
             {
                 fontFamily: 'monospace',
@@ -2837,58 +3222,67 @@ export default class MainScene extends Phaser.Scene {
         );
         this.levelText.setOrigin(0, 1);
         this.expBarContainer.add(this.levelText);
+        // 經驗條現在使用網格格子繪製
     }
 
     private drawExpBarFill() {
-        this.expBarFill.clear();
+        // 經驗條現在使用底部 2 行網格格子
+        const expRows = [this.skillGridRows - 2, this.skillGridRows - 1];
 
-        const barHeight = this.gameBounds.height * 0.01;
-        const barWidth = this.gameBounds.width;
-        const barX = this.gameBounds.x;
-        const barY = this.gameBounds.y + this.gameBounds.height - barHeight;
+        // 先繪製所有底部格子為黑底（優先渲染）
+        for (const row of expRows) {
+            for (let col = 0; col < this.skillGridCols; col++) {
+                const index = row * this.skillGridCols + col;
+                const cell = this.skillGridCells[index];
+                if (!cell) continue;
 
-        // 計算填充寬度
-        const fillRatio = this.currentExp / this.maxExp;
-        const fillWidth = barWidth * fillRatio;
-
-        if (fillWidth <= 0) return;
-
-        // 繪製藍紫色漸層流動效果（只有一次漸層，從左到右）
-        const numSegments = Math.ceil(fillWidth / 2) + 1; // 每 2 像素一個段落
-
-        for (let i = 0; i < numSegments; i++) {
-            const x = barX + i * 2;
-            if (x >= barX + fillWidth) break;
-
-            // 計算漸層位置（整條經驗條為一個漸層週期，加入流動偏移）
-            // 流動偏移範圍 0~1，讓顏色在藍紫之間緩慢移動
-            const baseT = (x - barX) / barWidth; // 0 到 1（位置比例）
-            const flowT = this.expBarFlowOffset; // 流動偏移 0~1
-            const t = (baseT + flowT) % 1; // 合併後的漸層位置
-
-            // 使用正弦波讓頭尾同色（藍→紫→藍）
-            const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2; // 0→1→0
-
-            // 藍色 (0x4488ff) 到 紫色 (0x8844ff) 漸層
-            const r = Math.floor(0x44 + (0x88 - 0x44) * wave);
-            const g = Math.floor(0x88 - (0x88 - 0x44) * wave);
-            const b = 0xff;
-
-            const color = (r << 16) | (g << 8) | b;
-            this.expBarFill.fillStyle(color, 1);
-
-            const segmentWidth = Math.min(2, barX + fillWidth - x);
-            this.expBarFill.fillRect(x, barY, segmentWidth, barHeight);
+                // 設置黑底並顯示
+                cell.setFillStyle(0x000000, 0.9);
+                cell.setVisible(true);
+                // 提升到最高層級
+                cell.setDepth(1000);
+            }
         }
 
-        // 頂部高光
-        this.expBarFill.fillStyle(0xffffff, 0.2);
-        this.expBarFill.fillRect(barX, barY, fillWidth, barHeight * 0.4);
+        // 計算填充格子數
+        const fillRatio = this.currentExp / this.maxExp;
+        const totalExpCells = this.skillGridCols; // 一行的格子數
+        const fillCells = Math.floor(totalExpCells * fillRatio);
+
+        if (fillCells <= 0) return;
+
+        // 繪製經驗格子（底部 2 行，漸層流動效果）
+        for (const row of expRows) {
+            for (let col = 0; col < fillCells; col++) {
+                const index = row * this.skillGridCols + col;
+                const cell = this.skillGridCells[index];
+                if (!cell) continue;
+
+                // 計算漸層位置（加入流動偏移）
+                const baseT = col / totalExpCells;
+                const flowT = this.expBarFlowOffset;
+                const t = (baseT + flowT) % 1;
+
+                // 使用正弦波讓頭尾同色（藍→紫→藍）
+                const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+
+                // 藍色 (0x4488ff) 到 紫色 (0x8844ff) 漸層
+                const r = Math.floor(0x44 + (0x88 - 0x44) * wave);
+                const g = Math.floor(0x88 - (0x88 - 0x44) * wave);
+                const b = 0xff;
+                const color = (r << 16) | (g << 8) | b;
+
+                // 上排稍微亮一點（高光效果）
+                const alpha = row === this.skillGridRows - 2 ? 0.95 : 0.8;
+
+                cell.setFillStyle(color, alpha);
+            }
+        }
     }
 
     private updateExpBarFlow(delta: number) {
-        // 流動速度（緩慢，從左到右）
-        const flowSpeed = 0.1; // 每秒移動 10% 的漸層
+        // 流動速度加快 2 倍
+        const flowSpeed = 0.2; // 每秒移動 20% 的漸層
         this.expBarFlowOffset += (flowSpeed * delta) / 1000;
 
         // 保持在 0~1 範圍內循環
@@ -2961,55 +3355,57 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private createSkillBar() {
-        const bounds = this.gameBounds;
-
-        // 根據遊戲區域寬度計算縮放比例
-        const scale = Math.min(1, bounds.width / MainScene.BASE_WIDTH);
-        // 限制最小縮放，避免太小
-        const clampedScale = Math.max(0.4, scale);
-
-        const iconSize = Math.floor(MainScene.BASE_ICON_SIZE * clampedScale);
-        const iconGap = Math.floor(MainScene.BASE_ICON_GAP * clampedScale);
-        const groupGap = Math.floor(MainScene.BASE_GROUP_GAP * clampedScale);
-        const bottomMargin = Math.floor(MainScene.BASE_BOTTOM_MARGIN * clampedScale);
-        const strokeWidth = Math.max(1, Math.floor(2 * clampedScale));
+        // 技能框使用網格格子繪製
+        // 每個技能框 8x8 格，邊線間隔 1 格，主被動群組間隔 2 格
+        const cellSize = this.skillGridCellSize;
+        const gap = MainScene.SKILL_GRID_GAP;
+        const iconGridSize = 8; // 每個技能框 8x8 格
+        const iconPixelSize = iconGridSize * (cellSize + gap) - gap;
+        const iconGapCells = 1; // 技能框間隔 1 格
+        const groupGapCells = 2; // 群組間隔 2 格
 
         const activeCount = MainScene.ACTIVE_SKILLS;
         const passiveCount = MainScene.PASSIVE_SKILLS;
 
-        // 計算總寬度
-        const activeGroupWidth = activeCount * iconSize + (activeCount - 1) * iconGap;
-        const passiveGroupWidth = passiveCount * iconSize + (passiveCount - 1) * iconGap;
-        const totalWidth = activeGroupWidth + groupGap + passiveGroupWidth;
+        // 計算總寬度（格子數）
+        const activeGroupCells = activeCount * iconGridSize + (activeCount - 1) * iconGapCells;
+        const passiveGroupCells = passiveCount * iconGridSize + (passiveCount - 1) * iconGapCells;
+        const totalCells = activeGroupCells + groupGapCells + passiveGroupCells;
+        const totalWidth = totalCells * (cellSize + gap) - gap;
 
-        // 起始 X 位置（在遊戲區域內置中）
-        const startX = bounds.x + (bounds.width - totalWidth) / 2 + iconSize / 2;
-        // Y 位置（遊戲區域底部，留一點邊距）
-        const y = bounds.y + bounds.height - iconSize / 2 - bottomMargin;
+        // 起始位置（置中）
+        const startX = this.gameBounds.x + (this.gameBounds.width - totalWidth) / 2;
+        // Y 位置：在經驗條（底部 2 行）上方，離經驗條 1 格
+        const expBarHeight = 2 * (cellSize + gap);
+        const bottomMargin = cellSize + gap; // 1 格間距
+        const y = this.gameBounds.y + this.gameBounds.height - expBarHeight - iconPixelSize - bottomMargin;
 
         // 主動技能（4個）
+        let currentX = startX;
         for (let i = 0; i < activeCount; i++) {
-            const x = startX + i * (iconSize + iconGap);
-            const container = this.add.container(x, y);
+            const iconCenterX = currentX + iconPixelSize / 2;
+            const iconCenterY = y + iconPixelSize / 2;
+            const container = this.add.container(iconCenterX, iconCenterY);
 
-            // 技能框背景
-            const icon = this.add.rectangle(0, 0, iconSize, iconSize);
-            icon.setStrokeStyle(strokeWidth, 0xffffff);
+            // 技能框背景（使用透明填充）
+            const icon = this.add.rectangle(0, 0, iconPixelSize, iconPixelSize);
+            icon.setStrokeStyle(0, 0xffffff, 0); // 不用邊線，用網格繪製
             icon.setFillStyle(0x000000, 0);
             container.add(icon);
 
             // 技能顏色指示（預設透明，由 updateSkillBarDisplay 設定）
-            const colorBg = this.add.rectangle(0, 0, iconSize - 4, iconSize - 4, 0x333333, 0);
+            const colorBg = this.add.rectangle(0, 0, iconPixelSize - 4, iconPixelSize - 4, 0x333333, 0);
             container.add(colorBg);
 
             // 等級文字
-            const levelText = this.add.text(0, iconSize * 0.3, '', {
+            const fontSize = Math.floor(iconPixelSize * 0.2);
+            const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
                 fontFamily: 'monospace',
-                fontSize: `${Math.floor(iconSize * 0.25)}px`,
+                fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
                 stroke: '#000000',
-                strokeThickness: 2
+                strokeThickness: 3
             });
             levelText.setOrigin(0.5, 0.5);
             container.add(levelText);
@@ -3018,32 +3414,41 @@ export default class MainScene extends Phaser.Scene {
             this.skillIconContainers.push(container);
             this.skillLevelTexts.push(levelText);
             this.uiContainer.add(container);
+
+            // 繪製網格邊框
+            this.drawSkillIconGrid(currentX, y, iconGridSize, i);
+
+            currentX += iconPixelSize + iconGapCells * (cellSize + gap);
         }
 
+        // 群組間隔
+        currentX += (groupGapCells - iconGapCells) * (cellSize + gap);
+
         // 被動技能（3個）
-        const passiveStartX = startX + activeGroupWidth + groupGap;
         for (let i = 0; i < passiveCount; i++) {
-            const x = passiveStartX + i * (iconSize + iconGap);
-            const container = this.add.container(x, y);
+            const iconCenterX = currentX + iconPixelSize / 2;
+            const iconCenterY = y + iconPixelSize / 2;
+            const container = this.add.container(iconCenterX, iconCenterY);
 
             // 技能框背景
-            const icon = this.add.rectangle(0, 0, iconSize, iconSize);
-            icon.setStrokeStyle(strokeWidth, 0xffffff);
+            const icon = this.add.rectangle(0, 0, iconPixelSize, iconPixelSize);
+            icon.setStrokeStyle(0, 0xffffff, 0);
             icon.setFillStyle(0x000000, 0);
             container.add(icon);
 
-            // 技能顏色指示（預設透明，由 updateSkillBarDisplay 設定）
-            const colorBg = this.add.rectangle(0, 0, iconSize - 4, iconSize - 4, 0x333333, 0);
+            // 技能顏色指示
+            const colorBg = this.add.rectangle(0, 0, iconPixelSize - 4, iconPixelSize - 4, 0x333333, 0);
             container.add(colorBg);
 
             // 等級文字
-            const levelText = this.add.text(0, iconSize * 0.3, '', {
+            const fontSize = Math.floor(iconPixelSize * 0.2);
+            const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
                 fontFamily: 'monospace',
-                fontSize: `${Math.floor(iconSize * 0.25)}px`,
+                fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
                 stroke: '#000000',
-                strokeThickness: 2
+                strokeThickness: 3
             });
             levelText.setOrigin(0.5, 0.5);
             container.add(levelText);
@@ -3052,6 +3457,11 @@ export default class MainScene extends Phaser.Scene {
             this.skillIconContainers.push(container);
             this.skillLevelTexts.push(levelText);
             this.uiContainer.add(container);
+
+            // 繪製網格邊框
+            this.drawSkillIconGrid(currentX, y, iconGridSize, activeCount + i);
+
+            currentX += iconPixelSize + iconGapCells * (cellSize + gap);
         }
 
         // 建立技能資訊窗格
@@ -3059,6 +3469,161 @@ export default class MainScene extends Phaser.Scene {
 
         // 為技能圖示添加點擊事件
         this.setupSkillIconInteractions();
+    }
+
+    // 繪製技能框的網格邊框
+    private drawSkillIconGrid(startX: number, startY: number, gridSize: number, skillIndex: number) {
+        // 建立一個 Graphics 來繪製邊框
+        const graphics = this.add.graphics();
+        graphics.setDepth(1001);
+        this.uiContainer.add(graphics);
+
+        // 儲存位置資料供 CD 更新使用
+        this.skillIconGridData[skillIndex] = { startX, startY, gridSize };
+
+        // 初始繪製（灰黑色邊框）
+        this.redrawSkillIconGrid(skillIndex, 0);
+
+        // 儲存 graphics
+        this.skillIconGridGraphics[skillIndex] = graphics;
+    }
+
+    // 重繪技能框邊框（支援 CD 進度顯示）
+    // cdProgress: 0 = 無 CD，0~1 = CD 進行中
+    private redrawSkillIconGrid(skillIndex: number, cdProgress: number) {
+        const graphics = this.skillIconGridGraphics[skillIndex];
+        const data = this.skillIconGridData[skillIndex];
+        if (!graphics || !data) return;
+
+        graphics.clear();
+
+        const cellSize = this.skillGridCellSize;
+        const gap = MainScene.SKILL_GRID_GAP;
+        const { startX, startY, gridSize } = data;
+
+        // 計算邊框格子順序（從 12 點鐘方向順時針）
+        // 頂邊（中間往右）-> 右邊 -> 底邊 -> 左邊 -> 頂邊（左上角到中間）
+        const edgeCells: { row: number; col: number }[] = [];
+
+        // 頂邊（從中間開始往右）
+        const midCol = Math.floor(gridSize / 2);
+        for (let col = midCol; col < gridSize; col++) {
+            edgeCells.push({ row: 0, col });
+        }
+        // 右邊（上到下，跳過右上角）
+        for (let row = 1; row < gridSize; row++) {
+            edgeCells.push({ row, col: gridSize - 1 });
+        }
+        // 底邊（右到左，跳過右下角）
+        for (let col = gridSize - 2; col >= 0; col--) {
+            edgeCells.push({ row: gridSize - 1, col });
+        }
+        // 左邊（下到上，跳過左下角和左上角）
+        for (let row = gridSize - 2; row >= 1; row--) {
+            edgeCells.push({ row, col: 0 });
+        }
+        // 左上角
+        edgeCells.push({ row: 0, col: 0 });
+        // 頂邊左半部（col 1 到中間前）
+        for (let col = 1; col < midCol; col++) {
+            edgeCells.push({ row: 0, col });
+        }
+
+        const totalCells = edgeCells.length;
+        const cdCellCount = Math.floor(totalCells * cdProgress);
+
+        // 繪製邊框格子
+        for (let i = 0; i < totalCells; i++) {
+            const { row, col } = edgeCells[i];
+            const x = startX + col * (cellSize + gap);
+            const y = startY + row * (cellSize + gap);
+
+            if (i < cdCellCount) {
+                // CD 進行中的格子：技能顏色（亮色）
+                const skillColor = this.getSkillColorForIndex(skillIndex);
+                graphics.fillStyle(skillColor, 0.9);
+            } else {
+                // 未到的格子：黑色 30% 透明度
+                graphics.fillStyle(0x000000, 0.3);
+            }
+            graphics.fillRect(x, y, cellSize, cellSize);
+        }
+    }
+
+    // 取得技能顏色
+    private getSkillColorForIndex(skillIndex: number): number {
+        const activeCount = MainScene.ACTIVE_SKILLS;
+        const isActive = skillIndex < activeCount;
+        const skills = isActive
+            ? this.skillManager.getPlayerActiveSkills()
+            : this.skillManager.getPlayerPassiveSkills();
+        const idx = isActive ? skillIndex : skillIndex - activeCount;
+        const skill = skills[idx];
+        if (skill) {
+            return skill.definition.color;
+        }
+        return 0x666666; // 預設灰色
+    }
+
+    // 更新技能 CD 進度顯示
+    private updateSkillCooldownDisplay() {
+        const now = this.time.now;
+        const activeSkills = this.skillManager.getPlayerActiveSkills();
+
+        for (let i = 0; i < activeSkills.length; i++) {
+            const skill = activeSkills[i];
+            if (!skill) {
+                // 沒有技能，顯示灰黑色邊框
+                this.redrawSkillIconGrid(i, 0);
+                continue;
+            }
+
+            const def = skill.definition;
+            let baseCooldown = def.cooldown || 1000;
+            if (def.id === 'active_architect') {
+                baseCooldown = baseCooldown - skill.level * 500;
+            }
+            const cooldown = this.skillManager.calculateFinalCooldown(baseCooldown);
+            const lastActivation = this.skillCooldowns.get(def.id) || 0;
+            const elapsed = now - lastActivation;
+
+            if (elapsed >= cooldown) {
+                // CD 完成，顯示全滿的技能顏色邊框
+                this.redrawSkillIconGrid(i, 1);
+            } else {
+                // CD 進行中，計算進度
+                const progress = elapsed / cooldown;
+                this.redrawSkillIconGrid(i, progress);
+            }
+        }
+
+        // 被動技能計時顯示
+        const passiveSkills = this.skillManager.getPlayerPassiveSkills();
+        const activeCount = MainScene.ACTIVE_SKILLS;
+        for (let i = 0; i < passiveSkills.length; i++) {
+            const skill = passiveSkills[i];
+            if (!skill) {
+                this.redrawSkillIconGrid(activeCount + i, 0);
+                continue;
+            }
+
+            const def = skill.definition;
+            let progress = 1; // 預設滿格
+
+            switch (def.id) {
+                case 'passive_titanium_liver': {
+                    // 鈦金肝：HP 回復計時
+                    const regenInterval = this.skillManager.getTitaniumLiverRegenInterval();
+                    if (regenInterval > 0 && this.currentHp < this.maxHp) {
+                        progress = this.hpRegenTimer / regenInterval;
+                    }
+                    break;
+                }
+                // 其他被動技能目前沒有計時，保持滿格
+            }
+
+            this.redrawSkillIconGrid(activeCount + i, progress);
+        }
     }
 
     // 建立技能資訊窗格
@@ -3226,8 +3791,10 @@ export default class MainScene extends Phaser.Scene {
         switch (skill.definition.id) {
             case 'passive_titanium_liver': {
                 const bonus = this.skillManager.getTitaniumLiverHpBonus();
+                const regenInterval = this.skillManager.getTitaniumLiverRegenInterval() / 1000;
                 lines.push(`HP 加成: +${Math.round(bonus * 100)}%`);
                 lines.push(`最大 HP: ${this.maxHp}`);
+                lines.push(`回復: 每 ${regenInterval} 秒 +1% HP`);
                 break;
             }
             case 'passive_sync_rate': {
@@ -3722,7 +4289,7 @@ export default class MainScene extends Phaser.Scene {
             }
         }
 
-        // 放在 uiContainer 中，這樣不會隨鏡頭移動
+        // 放在 uiContainer 中
         this.uiContainer.add(this.skillGridContainer);
     }
 
@@ -3880,9 +4447,22 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 清除所有技能範圍格子
+    // 清除所有技能範圍格子（保留邊緣紅暈格子）
     clearSkillGrid() {
-        this.skillGridCells.forEach(cell => {
+        this.skillGridCells.forEach((cell, index) => {
+            // 如果是邊緣格子且有低血量或護盾效果，不清除
+            if (this.vignetteEdgeCells.has(index) && (this.isLowHp || this.currentShield > 0)) {
+                return;
+            }
+            const row = Math.floor(index / this.skillGridCols);
+            // 如果是頂部 2 行（HP/護盾條），不清除
+            if (row < 2) {
+                return;
+            }
+            // 如果是底部 2 行（經驗條），不清除
+            if (row >= this.skillGridRows - 2) {
+                return;
+            }
             cell.setVisible(false);
         });
     }

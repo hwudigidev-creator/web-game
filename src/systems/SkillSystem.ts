@@ -71,7 +71,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_titanium_liver',
         name: '鈦金肝',
-        description: '提升 10% HP 總量，每級再 +10%',
+        description: '提升 10% HP 總量並每 15 秒回復 1% 最大 HP，每級再 +10% HP、回復間隔 -1 秒',
         type: 'passive',
         color: 0xaabbcc, // 銀灰色
         maxLevel: 5
@@ -307,6 +307,19 @@ export class SkillManager {
         const skill = this.playerSkills.get('passive_titanium_liver');
         if (!skill) return 0;
         return (skill.level + 1) * 0.10; // Lv.0=10%, Lv.5=60%
+    }
+
+    // 取得鈦金肝的 HP 回復間隔（基礎 15 秒，每級 -1 秒）
+    // 回傳 0 表示未持有此技能
+    getTitaniumLiverRegenInterval(): number {
+        const skill = this.playerSkills.get('passive_titanium_liver');
+        if (!skill) return 0;
+        return (15 - skill.level) * 1000; // Lv.0=15s, Lv.5=10s (毫秒)
+    }
+
+    // 檢查是否擁有鈦金肝技能
+    hasTitaniumLiver(): boolean {
+        return this.playerSkills.has('passive_titanium_liver');
     }
 
     // 取得精神同步率強化的移動速度加成百分比（每級 10%，Lv.0 也有效果）
