@@ -94,6 +94,12 @@ export class MonsterManager {
         return MonsterManager.DAMAGE_UNIT * damageUnits;
     }
 
+    // 計算怪物經驗值（每 5 級翻倍）
+    private calculateMonsterExp(baseExp: number): number {
+        const doubleCount = Math.floor(this.playerLevel / 5);
+        return baseExp * Math.pow(2, doubleCount);
+    }
+
     // 開始生成怪物
     startSpawning() {
         this.isSpawning = true;
@@ -292,7 +298,7 @@ export class MonsterManager {
         this.flashMonster(monster);
 
         if (monster.hp <= 0) {
-            const exp = monster.definition.exp;
+            const exp = this.calculateMonsterExp(monster.definition.exp);
             this.removeMonster(monsterId);
             return { killed: true, exp };
         }

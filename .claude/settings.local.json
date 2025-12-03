@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev:*)",
+      "Bash(npm install)",
+      "Bash(git checkout:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(npm run build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: 新增怪物生成倍增、護盾回血修正、技能說明更新、技能資訊窗格\n\n- 怪物生成：每5級多生成1隻怪物\n- 護盾系統：改用 maxShield 變數，護盾消失時正確回復等值 HP\n- 技能說明：更新所有技能描述以符合實際實作\n- 技能資訊窗格：點擊技能欄圖示可查看詳細數值，3秒後自動隱藏\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
