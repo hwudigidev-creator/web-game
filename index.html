@@ -100,8 +100,8 @@
       transform: scale(0.95);
     }
 
-    /* 音量控制區 - 直式排列，與全螢幕按鈕同寬 */
-    #volume-control {
+    /* 控制區共用樣式 - 直式排列 */
+    .control-group {
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -114,7 +114,7 @@
       gap: 2px;
     }
 
-    .volume-btn {
+    .control-btn {
       width: clamp(22px, 3.5vw, 30px);
       height: clamp(20px, 3vw, 26px);
       background: transparent;
@@ -130,12 +130,20 @@
       border-radius: 4px;
     }
 
-    .volume-btn:hover {
+    .control-btn:hover {
       background: rgba(255, 255, 255, 0.2);
     }
 
-    .volume-btn:active {
+    .control-btn:active {
       transform: scale(0.9);
+    }
+
+    /* 控制區數值顯示 */
+    .control-value {
+      font-family: monospace;
+      font-size: clamp(10px, 1.5vw, 14px);
+      color: #fff;
+      padding: 2px 0;
     }
 
     /* 音量條容器 */
@@ -174,6 +182,13 @@
     }
     body:not(.is-fullscreen) #fullscreen-btn .compress-icon {
       display: none;
+    }
+
+    /* 手機版隱藏全螢幕按鈕 */
+    @media screen and (max-width: 1024px) and (pointer: coarse) {
+      #fullscreen-btn {
+        display: none;
+      }
     }
 
     /* 強制橫向提示 */
@@ -250,16 +265,24 @@
 
   <!-- 右上角控制列（預設隱藏，轉場後顯示） -->
   <div id="controls">
+    <!-- 重整按鈕 -->
+    <button id="reload-btn" class="ctrl-btn" title="重新開始">↻</button>
+    <!-- 網格倍率控制 -->
+    <div id="grid-control" class="control-group" title="網格精細度">
+      <button id="grid-up" class="control-btn">+</button>
+      <span id="grid-value" class="control-value">3X</span>
+      <button id="grid-down" class="control-btn">−</button>
+    </div>
     <!-- 全螢幕按鈕 -->
     <button id="fullscreen-btn" class="ctrl-btn" title="全螢幕">
       <span class="expand-icon">⛶</span>
       <span class="compress-icon">⛶</span>
     </button>
-    <!-- 音量控制 - 直式，在全螢幕按鈕下方 -->
-    <div id="volume-control">
-      <button id="volume-up" class="volume-btn" title="增加音量">+</button>
+    <!-- 音量控制 -->
+    <div id="volume-control" class="control-group" title="音量">
+      <button id="volume-up" class="control-btn">+</button>
       <div id="volume-bars"></div>
-      <button id="volume-down" class="volume-btn" title="降低音量">−</button>
+      <button id="volume-down" class="control-btn">−</button>
     </div>
   </div>
 
@@ -406,6 +429,40 @@
     document.addEventListener('webkitfullscreenchange', updateFullscreenState);
     document.addEventListener('mozfullscreenchange', updateFullscreenState);
     document.addEventListener('MSFullscreenChange', updateFullscreenState);
+
+    // ===== 重整按鈕 =====
+    const reloadBtn = document.getElementById('reload-btn');
+    reloadBtn.addEventListener('click', () => {
+      location.reload();
+    });
+
+    // ===== 網格倍率控制 =====
+    const gridUp = document.getElementById('grid-up');
+    const gridDown = document.getElementById('grid-down');
+    const gridValue = document.getElementById('grid-value');
+    // 判斷是否為手機（觸控裝置且螢幕較小）
+    const isMobileDevice = ('ontouchstart' in window) && window.innerWidth < 1024;
+    let gridScale = isMobileDevice ? 2 : 3; // 手機預設 2X，電腦預設 3X
+    gridValue.textContent = `${gridScale}X`;
+
+    function updateGridDisplay() {
+      gridValue.textContent = `${gridScale}X`;
+      window.dispatchEvent(new CustomEvent('gridscalechange', { detail: { scale: gridScale } }));
+    }
+
+    gridUp.addEventListener('click', () => {
+      if (gridScale < 3) {
+        gridScale++;
+        updateGridDisplay();
+      }
+    });
+
+    gridDown.addEventListener('click', () => {
+      if (gridScale > 1) {
+        gridScale--;
+        updateGridDisplay();
+      }
+    });
 
     // ===== 註冊 Service Worker =====
     if ('serviceWorker' in navigator) {

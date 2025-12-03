@@ -191,6 +191,7 @@ export default class MainScene extends Phaser.Scene {
     private skillGridRows: number = 0;
     private skillGridCellSize: number = 10;
     private static readonly SKILL_GRID_GAP = 1;
+    private gridScaleMultiplier: number = 3; // 網格倍率（1X 粗，2X 中，3X 細）預設會由 isMobile 覆蓋
 
     constructor() {
         super('MainScene');
@@ -202,6 +203,9 @@ export default class MainScene extends Phaser.Scene {
 
         // 判斷是否為手機裝置（觸控為主或螢幕較小）
         this.isMobile = this.sys.game.device.input.touch && window.innerWidth < 1024;
+
+        // 根據裝置設定預設網格倍率（手機 2X，電腦 3X）
+        this.gridScaleMultiplier = this.isMobile ? 2 : 3;
 
         const screenWidth = this.cameras.main.width;
         const screenHeight = this.cameras.main.height;
@@ -315,6 +319,12 @@ export default class MainScene extends Phaser.Scene {
 
         // 建立技能範圍格子覆蓋層（放在 UI 層）
         this.createSkillGrid();
+
+        // 監聽網格倍率變更事件
+        window.addEventListener('gridscalechange', ((e: CustomEvent) => {
+            this.gridScaleMultiplier = e.detail.scale;
+            this.recreateSkillGrid();
+        }) as EventListener);
 
         // 把角色容器加入 UI 層，深度高於網格（50）
         this.characterContainer.setDepth(60);
@@ -3311,9 +3321,9 @@ export default class MainScene extends Phaser.Scene {
     // ===== 經驗條系統（使用底部 2 行網格格子）=====
 
     private createExpBar() {
-        // 經驗條容器（不再需要，改用技能網格）
+        // 經驗條容器
         this.expBarContainer = this.add.container(0, 0);
-        this.expBarContainer.setDepth(100);
+        this.expBarContainer.setDepth(1002); // 在網格之上
 
         // 等級文字（左下角，在網格之上）
         const fontSize = Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(this.gameBounds.height * 0.03));
@@ -3337,6 +3347,9 @@ export default class MainScene extends Phaser.Scene {
         this.levelText.setOrigin(0, 1);
         this.expBarContainer.add(this.levelText);
         // 經驗條現在使用網格格子繪製
+
+        // 加入 UI 容器
+        this.uiContainer.add(this.expBarContainer);
     }
 
     private drawExpBarFill() {
@@ -3527,6 +3540,7 @@ export default class MainScene extends Phaser.Scene {
             this.skillIcons.push(icon);
             this.skillIconContainers.push(container);
             this.skillLevelTexts.push(levelText);
+            container.setDepth(1002); // 在網格之上
             this.uiContainer.add(container);
 
             // 繪製網格邊框
@@ -3570,6 +3584,7 @@ export default class MainScene extends Phaser.Scene {
             this.skillIcons.push(icon);
             this.skillIconContainers.push(container);
             this.skillLevelTexts.push(levelText);
+            container.setDepth(1002); // 在網格之上
             this.uiContainer.add(container);
 
             // 繪製網格邊框
@@ -3774,7 +3789,7 @@ export default class MainScene extends Phaser.Scene {
         const y = bounds.y + bounds.height - panelHeight - padding - 60; // 在技能欄上方
 
         this.skillInfoPanel = this.add.container(x, y);
-        this.skillInfoPanel.setDepth(200);
+        this.skillInfoPanel.setDepth(1003); // 在網格和技能欄之上
 
         // 半透明黑色背景
         this.skillInfoBg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x000000, 0.7);
@@ -4398,11 +4413,12 @@ export default class MainScene extends Phaser.Scene {
 
     // 建立技能範圍格子覆蓋層（只覆蓋遊玩區域）
     private createSkillGrid() {
-        // 格子大小：與 GridScene 一致的計算方式
+        // 格子大小：倍率越高，格子越小（越細）
+        // 1X = 粗（baseCellSize 20），2X = 中（10），3X = 細（6.67）
         const screenWidth = this.cameras.main.width;
         const baseWidth = 1920;
-        const baseCellSize = 10;
-        const minCellSize = 4;
+        const baseCellSize = 20 / this.gridScaleMultiplier;
+        const minCellSize = 6 / this.gridScaleMultiplier;
 
         const scale = Math.min(1, screenWidth / baseWidth);
         this.skillGridCellSize = Math.max(minCellSize, Math.floor(baseCellSize * scale));
@@ -4430,8 +4446,96 @@ export default class MainScene extends Phaser.Scene {
             }
         }
 
-        // 放在 uiContainer 中
-        this.uiContainer.add(this.skillGridContainer);
+        // 放在 uiContainer 中（加到最前面，讓其他 UI 在上層）
+        this.uiContainer.addAt(this.skillGridContainer, 0);
+    }
+
+    // 重新建立技能範圍格子（用於切換網格倍率）
+    private recreateSkillGrid() {
+        // 清除舊的格子
+        this.skillGridCells.forEach(cell => cell.destroy());
+        this.skillGridCells = [];
+
+        // 移除舊的容器
+        if (this.skillGridContainer) {
+            this.skillGridContainer.destroy();
+        }
+
+        // 重新建立格子
+        this.createSkillGrid();
+
+        // 重新建立技能欄（因為格子大小改變）
+        this.recreateSkillBar();
+
+        // 將 UI 元素移到容器頂層（確保在新網格之上）
+        this.bringUIToTop();
+    }
+
+    // 將所有 UI 元素移到容器頂層
+    private bringUIToTop() {
+        // 把重要的 UI 元素移到 uiContainer 頂層（依渲染順序由下至上）
+
+        // 角色容器
+        if (this.characterContainer) {
+            this.uiContainer.bringToTop(this.characterContainer);
+        }
+
+        // HP 條容器
+        if (this.hpBarContainer) {
+            this.uiContainer.bringToTop(this.hpBarContainer);
+        }
+
+        // 護盾文字
+        if (this.shieldText) {
+            this.uiContainer.bringToTop(this.shieldText);
+        }
+
+        // 經驗條容器
+        if (this.expBarContainer) {
+            this.uiContainer.bringToTop(this.expBarContainer);
+        }
+
+        // 技能圖示容器
+        this.skillIconContainers.forEach(container => {
+            this.uiContainer.bringToTop(container);
+        });
+
+        // 技能網格邊框
+        this.skillIconGridGraphics.forEach(graphics => {
+            this.uiContainer.bringToTop(graphics);
+        });
+
+        // 技能資訊面板
+        if (this.skillInfoPanel) {
+            this.uiContainer.bringToTop(this.skillInfoPanel);
+        }
+
+        // 技能選擇面板（最上層）
+        if (this.skillPanelContainer) {
+            this.uiContainer.bringToTop(this.skillPanelContainer);
+        }
+    }
+
+    // 重新建立技能欄
+    private recreateSkillBar() {
+        // 清除舊的技能欄元素
+        this.skillIcons.forEach(icon => icon.destroy());
+        this.skillIcons = [];
+        this.skillIconContainers.forEach(container => container.destroy());
+        this.skillIconContainers = [];
+        this.skillLevelTexts.forEach(text => text.destroy());
+        this.skillLevelTexts = [];
+        this.skillIconGridGraphics.forEach(graphics => graphics.destroy());
+        this.skillIconGridGraphics = [];
+        this.skillIconGridData = [];
+
+        // 清除技能資訊面板
+        if (this.skillInfoPanel) {
+            this.skillInfoPanel.destroy();
+        }
+
+        // 重新建立技能欄
+        this.createSkillBar();
     }
 
     // 世界座標轉換為螢幕座標（相對於遊玩區域）
