@@ -87,6 +87,12 @@ export default class MainScene extends Phaser.Scene {
     private skillIconContainers: Phaser.GameObjects.Container[] = []; // 技能欄圖示容器
     private skillLevelTexts: Phaser.GameObjects.Text[] = []; // 技能等級文字
 
+    // 技能資訊窗格
+    private skillInfoPanel!: Phaser.GameObjects.Container;
+    private skillInfoBg!: Phaser.GameObjects.Rectangle;
+    private skillInfoText!: Phaser.GameObjects.Text;
+    private skillInfoHideTimer?: Phaser.Time.TimerEvent;
+
     // 經驗值和等級系統
     private currentExp: number = 0;
     private maxExp: number = 100;
@@ -106,7 +112,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 護盾系統
     private currentShield: number = 0;
-    private initialShield: number = 0; // 護盾啟動時的初始值（用於計算回血）
+    private maxShield: number = 0; // 護盾最大值（用於計算回血）
     private shieldBarFill!: Phaser.GameObjects.Graphics;
     private shieldBarFlowOffset: number = 0; // 護盾流動效果偏移
     private shieldReflectDamage: number = 0; // 護盾反傷傷害值
@@ -826,7 +832,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 設定護盾值（不疊加，直接設定）
         this.currentShield = shieldAmount;
-        this.initialShield = shieldAmount; // 記錄初始護盾值用於回血計算
+        this.maxShield = shieldAmount; // 記錄護盾最大值用於回血計算
 
         // 反傷傷害：1 單位 + 每級 1.5 單位（Lv.0=1單位，Lv.5=8.5單位）
         const reflectUnits = 1 + skill.level * 1.5;
@@ -1687,9 +1693,9 @@ export default class MainScene extends Phaser.Scene {
         const hpBarY = skillBarY - hpBarHeight - 8;
         const barY = hpBarY - barHeight;
 
-        // 計算填充寬度（護盾值相對於最大 HP 的 30%）
-        const maxShield = this.maxHp * 0.3;
-        const fillRatio = this.currentShield / maxShield;
+        // 計算填充寬度（護盾值相對於護盾最大值）
+        if (this.maxShield <= 0) return;
+        const fillRatio = this.currentShield / this.maxShield;
         const fillWidth = barWidth * Math.min(1, fillRatio);
 
         if (fillWidth <= 0) return;
@@ -1736,8 +1742,7 @@ export default class MainScene extends Phaser.Scene {
         this.shieldBarFill.strokeRect(barX, barY, fillWidth, barHeight);
 
         // 更新護盾文字
-        const maxShieldDisplay = Math.floor(maxShield);
-        this.shieldText.setText(`${this.currentShield} / ${maxShieldDisplay}`);
+        this.shieldText.setText(`${this.currentShield} / ${this.maxShield}`);
         this.shieldText.setPosition(barX + barWidth / 2, barY + barHeight / 2);
         this.shieldText.setVisible(true);
     }
@@ -1783,11 +1788,10 @@ export default class MainScene extends Phaser.Scene {
                 this.currentShield = 0;
             }
 
-            // 護盾剛被打破時，恢復初始護盾等值的 HP
-            if (hadShield && this.currentShield === 0 && this.initialShield > 0) {
-                const healAmount = this.initialShield;
+            // 護盾剛被打破時，恢復護盾最大值等值的 HP
+            if (hadShield && this.currentShield === 0 && this.maxShield > 0) {
+                const healAmount = this.maxShield;
                 this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
-                this.initialShield = 0; // 重置初始護盾值
                 console.log(`Shield broken! Healed ${healAmount} HP, current HP: ${this.currentHp}/${this.maxHp}`);
 
                 // 更新 HP 顯示
@@ -2232,6 +2236,203 @@ export default class MainScene extends Phaser.Scene {
             this.skillIconContainers.push(container);
             this.skillLevelTexts.push(levelText);
             this.uiContainer.add(container);
+        }
+
+        // 建立技能資訊窗格
+        this.createSkillInfoPanel();
+
+        // 為技能圖示添加點擊事件
+        this.setupSkillIconInteractions();
+    }
+
+    // 建立技能資訊窗格
+    private createSkillInfoPanel() {
+        const bounds = this.gameBounds;
+        const panelWidth = 200;
+        const panelHeight = 80;
+        const padding = 10;
+
+        // 窗格位置：左下角
+        const x = bounds.x + padding;
+        const y = bounds.y + bounds.height - panelHeight - padding - 60; // 在技能欄上方
+
+        this.skillInfoPanel = this.add.container(x, y);
+        this.skillInfoPanel.setDepth(200);
+
+        // 半透明黑色背景
+        this.skillInfoBg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x000000, 0.7);
+        this.skillInfoBg.setOrigin(0, 0);
+        this.skillInfoBg.setStrokeStyle(1, 0x666666);
+        this.skillInfoPanel.add(this.skillInfoBg);
+
+        // 技能資訊文字
+        this.skillInfoText = this.add.text(padding, padding, '', {
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            color: '#ffffff',
+            wordWrap: { width: panelWidth - padding * 2 }
+        });
+        this.skillInfoPanel.add(this.skillInfoText);
+
+        // 初始隱藏
+        this.skillInfoPanel.setVisible(false);
+        this.uiContainer.add(this.skillInfoPanel);
+    }
+
+    // 為技能圖示設定點擊互動
+    private setupSkillIconInteractions() {
+        const activeSkillCount = MainScene.ACTIVE_SKILLS;
+
+        for (let i = 0; i < this.skillIconContainers.length; i++) {
+            const container = this.skillIconContainers[i];
+            const isActive = i < activeSkillCount;
+            const skillIndex = isActive ? i : i - activeSkillCount;
+
+            // 設定為可互動
+            container.setSize(container.getBounds().width, container.getBounds().height);
+            container.setInteractive({ useHandCursor: true });
+
+            // 點擊事件
+            container.on('pointerdown', () => {
+                this.showSkillInfo(isActive, skillIndex);
+            });
+        }
+    }
+
+    // 顯示技能資訊
+    private showSkillInfo(isActive: boolean, skillIndex: number) {
+        const skills = isActive
+            ? this.skillManager.getPlayerActiveSkills()
+            : this.skillManager.getPlayerPassiveSkills();
+
+        const skill = skills[skillIndex];
+        if (!skill) {
+            // 沒有技能，隱藏窗格
+            this.skillInfoPanel.setVisible(false);
+            return;
+        }
+
+        // 組合技能資訊文字
+        const infoLines: string[] = [];
+        infoLines.push(`【${skill.definition.name}】${SkillManager.formatLevel(skill.level, skill.definition.maxLevel)}`);
+
+        if (isActive) {
+            // 主動技能：顯示當前數值
+            this.appendActiveSkillInfo(infoLines, skill);
+        } else {
+            // 被動技能：顯示累積效果
+            this.appendPassiveSkillInfo(infoLines, skill);
+        }
+
+        this.skillInfoText.setText(infoLines.join('\n'));
+
+        // 調整背景大小
+        const textBounds = this.skillInfoText.getBounds();
+        const padding = 10;
+        this.skillInfoBg.setSize(
+            Math.max(180, textBounds.width + padding * 2),
+            textBounds.height + padding * 2
+        );
+
+        // 顯示窗格
+        this.skillInfoPanel.setVisible(true);
+
+        // 清除之前的計時器
+        if (this.skillInfoHideTimer) {
+            this.skillInfoHideTimer.destroy();
+        }
+
+        // 3 秒後自動隱藏
+        this.skillInfoHideTimer = this.time.delayedCall(3000, () => {
+            this.skillInfoPanel.setVisible(false);
+        });
+    }
+
+    // 添加主動技能資訊
+    private appendActiveSkillInfo(lines: string[], skill: PlayerSkill) {
+        const level = skill.level;
+        const damageBonus = this.skillManager.getAiEnhancementDamageBonus();
+        const cdReduction = this.skillManager.getSyncRateCooldownReduction();
+
+        switch (skill.definition.id) {
+            case 'active_soul_render': {
+                const angle = 60 + level * 10;
+                const damageUnits = 2 + level;
+                const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+                const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+                const baseCd = skill.definition.cooldown || 1000;
+                const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+                lines.push(`扇形角度: ${angle}°`);
+                lines.push(`傷害: ${finalDamage}`);
+                lines.push(`冷卻: ${finalCd}s`);
+                break;
+            }
+            case 'active_coder': {
+                const rangeUnits = 2 + level * 0.5;
+                const damageUnits = 1 + level;
+                const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+                const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+                const baseCd = skill.definition.cooldown || 1500;
+                const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+                lines.push(`範圍: ${rangeUnits} 單位`);
+                lines.push(`傷害: ${finalDamage}`);
+                lines.push(`冷卻: ${finalCd}s`);
+                break;
+            }
+            case 'active_vfx': {
+                const beamCount = level + 1;
+                const damageUnits = 1 + level;
+                const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+                const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+                const baseCd = skill.definition.cooldown || 2500;
+                const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+                lines.push(`光束數: ${beamCount} 道`);
+                lines.push(`傷害: ${finalDamage}`);
+                lines.push(`冷卻: ${finalCd}s`);
+                break;
+            }
+            case 'active_architect': {
+                const shieldAmount = Math.floor(this.maxHp * 0.3);
+                const reflectUnits = 1 + level * 1.5;
+                const reflectDamage = MainScene.DAMAGE_UNIT * reflectUnits;
+                const baseCd = skill.definition.cooldown || 10000;
+                const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+                lines.push(`護盾: ${shieldAmount}`);
+                lines.push(`反傷: ${reflectDamage}`);
+                lines.push(`冷卻: ${finalCd}s`);
+                break;
+            }
+        }
+    }
+
+    // 添加被動技能資訊
+    private appendPassiveSkillInfo(lines: string[], skill: PlayerSkill) {
+        switch (skill.definition.id) {
+            case 'passive_titanium_liver': {
+                const bonus = this.skillManager.getTitaniumLiverHpBonus();
+                lines.push(`HP 加成: +${Math.round(bonus * 100)}%`);
+                lines.push(`最大 HP: ${this.maxHp}`);
+                break;
+            }
+            case 'passive_sync_rate': {
+                const speedBonus = this.skillManager.getSyncRateSpeedBonus();
+                const cdReduction = this.skillManager.getSyncRateCooldownReduction();
+                lines.push(`移速加成: +${Math.round(speedBonus * 100)}%`);
+                lines.push(`冷卻減少: -${Math.round(cdReduction * 100)}%`);
+                break;
+            }
+            case 'passive_retina_module': {
+                const expBonus = this.skillManager.getRetinaModuleExpBonus();
+                lines.push(`經驗加成: +${Math.round(expBonus * 100)}%`);
+                break;
+            }
+            case 'passive_ai_enhancement': {
+                const damageBonus = this.skillManager.getAiEnhancementDamageBonus();
+                const defenseBonus = this.skillManager.getAiEnhancementDefenseBonus();
+                lines.push(`攻擊加成: +${Math.round(damageBonus * 100)}%`);
+                lines.push(`防禦加成: +${Math.round(defenseBonus * 100)}%`);
+                break;
+            }
         }
     }
 

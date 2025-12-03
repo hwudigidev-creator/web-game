@@ -27,7 +27,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'active_soul_render',
         name: '靈魂渲染',
         subtitle: '動畫大師',
-        description: '釋放靈魂能量波動，對周圍敵人造成傷害',
+        description: '朝最近敵人發射 3 單位扇形攻擊，每級擴大 10°',
         type: 'active',
         color: 0x6699ff, // 藍色
         flashColor: 0x66ccff, // 閃藍光
@@ -38,7 +38,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'active_coder',
         name: '編碼者',
         subtitle: '遊戲先知',
-        description: '釋放程式碼能量，對周圍 3 單位範圍敵人造成傷害',
+        description: '對周圍 2 單位敵人造成傷害，每級增加 0.5 單位範圍',
         type: 'active',
         color: 0xaa66ff, // 紫色
         flashColor: 0xcc88ff, // 閃紫光
@@ -49,7 +49,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'active_vfx',
         name: '視效師',
         subtitle: '超級導演',
-        description: '投射貫穿光束，對直線 10 單位範圍敵人造成傷害',
+        description: '朝隨機敵人發射 10 單位貫穿光束，每級增加 1 道',
         type: 'active',
         color: 0x66ff66, // 綠色
         flashColor: 0x88ff88, // 閃綠光
@@ -60,7 +60,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'active_architect',
         name: '架構師',
         subtitle: '靈魂統領',
-        description: '建構護盾抵擋傷害，並反傷攻擊者',
+        description: '產生 30% HP 護盾並反傷攻擊者，護盾消失時回復等值 HP',
         type: 'active',
         color: 0xffcc00, // 金色
         flashColor: 0xffdd44, // 閃金光
@@ -71,7 +71,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_titanium_liver',
         name: '鈦金肝',
-        description: '每級提升 10% HP 總量',
+        description: '提升 10% HP 總量，每級再 +10%',
         type: 'passive',
         color: 0xaabbcc, // 銀灰色
         maxLevel: 5
@@ -79,7 +79,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_sync_rate',
         name: '精神同步率強化',
-        description: '每級提升 10% 移動速度、減少 8% 技能冷卻',
+        description: '提升 10% 移速、減少 8% 冷卻，每級再疊加',
         type: 'passive',
         color: 0xdd8844, // 暗橘色
         maxLevel: 5
@@ -87,7 +87,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_retina_module',
         name: '視網膜增強模組',
-        description: '每級提升 30% 經驗取得量',
+        description: '提升 30% 經驗取得，每級再 +30%',
         type: 'passive',
         color: 0x99ff66, // 螢光綠
         maxLevel: 5
@@ -95,7 +95,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_ai_enhancement',
         name: 'AI賦能強化',
-        description: '每級提升 25% 攻擊、5% 防禦',
+        description: '提升 25% 攻擊、5% 防禦，每級再疊加',
         type: 'passive',
         color: 0xff6699, // 粉紅色
         maxLevel: 5

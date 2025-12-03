@@ -119,7 +119,11 @@ export class MonsterManager {
 
         // 檢查是否需要生成新怪物
         if (this.isSpawning && now - this.lastSpawnTime >= this.spawnInterval) {
-            this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
+            // 每5級多生成1隻怪物（等級0-4生成1隻，5-9生成2隻，10-14生成3隻...）
+            const spawnCount = 1 + Math.floor(this.playerLevel / 5);
+            for (let i = 0; i < spawnCount; i++) {
+                this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
+            }
             this.lastSpawnTime = now;
         }
 
