@@ -81,6 +81,9 @@ export default class MainScene extends Phaser.Scene {
     private selectedSkillIndex: number = 0; // 當前選中的技能索引
     private currentSkillChoices: SkillDefinition[] = []; // 當前可選的技能
 
+    // 技能升級 CUT IN
+    private skillCutInContainer!: Phaser.GameObjects.Container;
+
     // 技能系統
     private skillManager: SkillManager = new SkillManager();
     private skillIconContainers: Phaser.GameObjects.Container[] = []; // 技能欄圖示容器
@@ -390,6 +393,9 @@ export default class MainScene extends Phaser.Scene {
 
         // 建立技能選擇面板
         this.createSkillPanel();
+
+        // 建立技能升級 CUT IN
+        this.createSkillCutIn();
 
         // 建立低血量紅暈效果
         this.createLowHpVignette();
@@ -4134,9 +4140,9 @@ export default class MainScene extends Phaser.Scene {
         // 建立 3 個技能選項
         this.createSkillOptions();
 
-        // 底部提示文字（手機版簡化）
+        // 底部提示文字（手機版與 PC 版統一為點兩次確認）
         const hintY = this.gameBounds.y + this.gameBounds.height * 0.92;
-        const hintText = this.isMobile ? '點選選擇' : '重複按同一鍵確認';
+        const hintText = this.isMobile ? '點兩次確認' : '重複按同一鍵確認';
         const hint = this.add.text(
             this.gameBounds.x + this.gameBounds.width / 2,
             hintY,
@@ -4149,6 +4155,178 @@ export default class MainScene extends Phaser.Scene {
         );
         hint.setOrigin(0.5, 0.5);
         this.skillPanelContainer.add(hint);
+    }
+
+    // 建立技能升級 CUT IN 容器
+    private createSkillCutIn() {
+        this.skillCutInContainer = this.add.container(0, 0);
+        this.skillCutInContainer.setVisible(false);
+        this.skillCutInContainer.setDepth(1000); // 確保在最上層
+        this.uiContainer.add(this.skillCutInContainer);
+    }
+
+    // 顯示技能升級 CUT IN
+    private showSkillCutIn(skillDef: SkillDefinition, newLevel: number) {
+        // 清除之前的內容
+        this.skillCutInContainer.removeAll(true);
+
+        // CUT IN 條的高度和位置（畫面上半中間）
+        const barHeight = this.gameBounds.height * 0.12;
+        const barY = this.gameBounds.y + this.gameBounds.height * 0.25;
+        const fadeWidth = this.gameBounds.width * 0.15; // 兩側漸層區域寬度
+        const solidWidth = this.gameBounds.width - fadeWidth * 2; // 中間實心區域
+
+        // 中間實心黑色背景
+        const bgCenter = this.add.rectangle(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY,
+            solidWidth,
+            barHeight,
+            0x000000,
+            0.75
+        );
+        this.skillCutInContainer.add(bgCenter);
+
+        // 左側漸層（從透明到黑色）
+        const leftFade = this.add.graphics();
+        const leftStartX = this.gameBounds.x;
+        const leftEndX = this.gameBounds.x + fadeWidth;
+        const fadeSteps = 20;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.75; // 從 0 漸變到 0.75
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1; // +1 避免間隙
+            leftFade.fillStyle(0x000000, alpha);
+            leftFade.fillRect(x, barY - barHeight / 2, w, barHeight);
+        }
+        this.skillCutInContainer.add(leftFade);
+
+        // 右側漸層（從黑色到透明）
+        const rightFade = this.add.graphics();
+        const rightStartX = this.gameBounds.x + this.gameBounds.width - fadeWidth;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.75; // 從 0.75 漸變到 0
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            rightFade.fillStyle(0x000000, alpha);
+            rightFade.fillRect(x, barY - barHeight / 2, w, barHeight);
+        }
+        this.skillCutInContainer.add(rightFade);
+
+        // 技能顏色的邊線（上下，同樣兩側漸層）
+        const lineThickness = 3;
+
+        // 上邊線
+        const topLineGraphics = this.add.graphics();
+        const lineY = barY - barHeight / 2 - lineThickness / 2;
+        // 左側漸層
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.8;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            topLineGraphics.fillStyle(skillDef.color, alpha);
+            topLineGraphics.fillRect(x, lineY, w, lineThickness);
+        }
+        // 中間實心
+        topLineGraphics.fillStyle(skillDef.color, 0.8);
+        topLineGraphics.fillRect(leftEndX, lineY, solidWidth, lineThickness);
+        // 右側漸層
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.8;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            topLineGraphics.fillStyle(skillDef.color, alpha);
+            topLineGraphics.fillRect(x, lineY, w, lineThickness);
+        }
+        this.skillCutInContainer.add(topLineGraphics);
+
+        // 下邊線
+        const bottomLineGraphics = this.add.graphics();
+        const bottomLineY = barY + barHeight / 2 - lineThickness / 2;
+        // 左側漸層
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.8;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            bottomLineGraphics.fillStyle(skillDef.color, alpha);
+            bottomLineGraphics.fillRect(x, bottomLineY, w, lineThickness);
+        }
+        // 中間實心
+        bottomLineGraphics.fillStyle(skillDef.color, 0.8);
+        bottomLineGraphics.fillRect(leftEndX, bottomLineY, solidWidth, lineThickness);
+        // 右側漸層
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.8;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            bottomLineGraphics.fillStyle(skillDef.color, alpha);
+            bottomLineGraphics.fillRect(x, bottomLineY, w, lineThickness);
+        }
+        this.skillCutInContainer.add(bottomLineGraphics);
+
+        // 等級顯示文字
+        const levelDisplay = newLevel >= skillDef.maxLevel ? 'MAX' : `Lv.${newLevel}`;
+
+        // 主標題：技能名稱提升到等級
+        const titleText = `${skillDef.name} 提升到 ${levelDisplay}`;
+        const title = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY - barHeight * 0.18,
+            titleText,
+            {
+                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.35))}px`,
+                color: '#ffffff',
+                fontStyle: 'bold'
+            }
+        );
+        title.setOrigin(0.5, 0.5);
+        this.skillCutInContainer.add(title);
+
+        // 副標題：自訂描述
+        let descriptionText = skillDef.description;
+        if (skillDef.levelUpMessages && skillDef.levelUpMessages[newLevel]) {
+            descriptionText = skillDef.levelUpMessages[newLevel];
+        }
+        const description = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY + barHeight * 0.22,
+            descriptionText,
+            {
+                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.22))}px`,
+                color: Phaser.Display.Color.IntegerToColor(skillDef.color).rgba
+            }
+        );
+        description.setOrigin(0.5, 0.5);
+        this.skillCutInContainer.add(description);
+
+        // 從左邊滑入動畫
+        this.skillCutInContainer.setX(-this.gameBounds.width);
+        this.skillCutInContainer.setVisible(true);
+        this.skillCutInContainer.setAlpha(1);
+
+        this.tweens.add({
+            targets: this.skillCutInContainer,
+            x: 0,
+            duration: 250,
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                // 停留 1.5 秒後滑出
+                this.time.delayedCall(1500, () => {
+                    this.tweens.add({
+                        targets: this.skillCutInContainer,
+                        x: this.gameBounds.width,
+                        duration: 250,
+                        ease: 'Power2.easeIn',
+                        onComplete: () => {
+                            this.skillCutInContainer.setVisible(false);
+                            this.skillCutInContainer.setX(0);
+                        }
+                    });
+                });
+            }
+        });
     }
 
     private createSkillOptions() {
@@ -4165,9 +4343,9 @@ export default class MainScene extends Phaser.Scene {
             return;
         }
 
-        // 選項卡片設定
+        // 選項卡片設定（手機版增加高度避免文字超出邊框）
         const cardWidth = this.gameBounds.width * 0.25;
-        const cardHeight = this.gameBounds.height * 0.5;
+        const cardHeight = this.gameBounds.height * (this.isMobile ? 0.55 : 0.5);
         const cardGap = this.gameBounds.width * 0.05;
         const numCards = this.currentSkillChoices.length;
         const totalWidth = cardWidth * numCards + cardGap * (numCards - 1);
@@ -4284,10 +4462,20 @@ export default class MainScene extends Phaser.Scene {
                 this.setSelectedSkill(skillIndex);
             });
 
-            // 點擊選擇（直接確認）
+            // 點擊選擇（PC 直接確認，手機需點兩次）
             cardBg.on('pointerdown', () => {
-                this.setSelectedSkill(skillIndex);
-                this.confirmSkillSelection();
+                if (this.isMobile) {
+                    // 手機版：第一次點擊選中，第二次點擊確認（比照 PC 鍵盤操作）
+                    if (this.selectedSkillIndex === skillIndex) {
+                        this.confirmSkillSelection();
+                    } else {
+                        this.setSelectedSkill(skillIndex);
+                    }
+                } else {
+                    // PC 版：直接確認（因為有 hover 預覽）
+                    this.setSelectedSkill(skillIndex);
+                    this.confirmSkillSelection();
+                }
             });
 
             this.skillPanelContainer.add(optionContainer);
@@ -4373,6 +4561,9 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private selectSkill(index: number, skillId: string) {
+        // 取得升級前的技能定義（用於 CUT IN 顯示）
+        const skillDef = this.currentSkillChoices[index];
+
         // 學習或升級技能
         const success = this.skillManager.learnOrUpgradeSkill(skillId);
         if (!success) {
@@ -4381,7 +4572,8 @@ export default class MainScene extends Phaser.Scene {
         }
 
         const skill = this.skillManager.getPlayerSkill(skillId);
-        console.log(`Skill upgraded: ${skillId} -> Lv.${skill?.level}`);
+        const newLevel = skill?.level ?? 0;
+        console.log(`Skill upgraded: ${skillId} -> Lv.${newLevel}`);
 
         // 更新技能欄顯示
         this.updateSkillBarDisplay();
@@ -4405,6 +4597,8 @@ export default class MainScene extends Phaser.Scene {
             yoyo: true,
             onComplete: () => {
                 this.hideSkillPanel();
+                // 面板關閉後顯示 CUT IN
+                this.showSkillCutIn(skillDef, newLevel);
             }
         });
     }

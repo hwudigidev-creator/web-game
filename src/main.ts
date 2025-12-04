@@ -32,6 +32,7 @@ function createGame() {
         height: getViewportHeight(),
         parent: 'app',
         backgroundColor: '#111111',
+        pixelArt: true, // 使用最近鄰縮放，保持像素清晰不模糊
         scale: {
             mode: Phaser.Scale.RESIZE,
             autoCenter: Phaser.Scale.CENTER_BOTH

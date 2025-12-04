@@ -12,6 +12,7 @@ export interface SkillDefinition {
     flashColor?: number; // 發動時的閃光顏色
     cooldown?: number; // 冷卻時間（毫秒）
     maxLevel: number; // 最大等級，預設為 5
+    levelUpMessages?: string[]; // 每級升級時的自訂描述（索引 0 = Lv.0，索引 5 = Lv.5/MAX）
 }
 
 // 玩家持有的技能實例
@@ -32,7 +33,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         color: 0x6699ff, // 藍色
         flashColor: 0x66ccff, // 閃藍光
         cooldown: 1000, // 1 秒
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '60° 扇形、2 傷害',
+            '70° 扇形、3 傷害',
+            '80° 扇形、4 傷害',
+            '90° 扇形、5 傷害',
+            '100° 扇形、6 傷害',
+            '110° 扇形、7 傷害，已達最大等級！'
+        ]
     },
     {
         id: 'active_coder',
@@ -43,7 +52,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         color: 0xaa66ff, // 紫色
         flashColor: 0xcc88ff, // 閃紫光
         cooldown: 1500, // 1.5 秒
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '2 單位範圍、1 傷害',
+            '2.5 單位範圍、2 傷害',
+            '3 單位範圍、3 傷害',
+            '3.5 單位範圍、4 傷害',
+            '4 單位範圍、5 傷害',
+            '4.5 單位範圍、6 傷害，已達最大等級！'
+        ]
     },
     {
         id: 'active_vfx',
@@ -54,7 +71,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         color: 0x66ff66, // 綠色
         flashColor: 0x88ff88, // 閃綠光
         cooldown: 2500, // 2.5 秒
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '1 道光束、1 傷害',
+            '2 道光束、2 傷害',
+            '3 道光束、3 傷害',
+            '4 道光束、4 傷害',
+            '5 道光束、5 傷害',
+            '6 道光束、6 傷害，已達最大等級！'
+        ]
     },
     {
         id: 'active_architect',
@@ -65,7 +90,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         color: 0xffcc00, // 金色
         flashColor: 0xffdd44, // 閃金光
         cooldown: 10000, // 10 秒
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '30% HP 護盾、1 反傷',
+            '30% HP 護盾、2.5 反傷',
+            '30% HP 護盾、4 反傷',
+            '30% HP 護盾、5.5 反傷',
+            '30% HP 護盾、7 反傷',
+            '30% HP 護盾、8.5 反傷，已達最大等級！'
+        ]
     },
     // 被動型技能 (4個，但玩家最多持有3個)
     {
@@ -74,7 +107,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         description: '提升 10% HP 總量並每 15 秒回復 1% 最大 HP，每級再 +10% HP、回復間隔 -1 秒',
         type: 'passive',
         color: 0xaabbcc, // 銀灰色
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '+10% HP、每 15 秒回血',
+            '+20% HP、每 14 秒回血',
+            '+30% HP、每 13 秒回血',
+            '+40% HP、每 12 秒回血',
+            '+50% HP、每 11 秒回血',
+            '+60% HP、每 10 秒回血，已達最大等級！'
+        ]
     },
     {
         id: 'passive_sync_rate',
@@ -82,7 +123,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         description: '提升 10% 移速、減少 8% 冷卻，每級再疊加',
         type: 'passive',
         color: 0xdd8844, // 暗橘色
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '+10% 移速、-8% 冷卻',
+            '+20% 移速、-16% 冷卻',
+            '+30% 移速、-24% 冷卻',
+            '+40% 移速、-32% 冷卻',
+            '+50% 移速、-40% 冷卻',
+            '+60% 移速、-48% 冷卻，已達最大等級！'
+        ]
     },
     {
         id: 'passive_retina_module',
@@ -90,15 +139,31 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         description: '提升 30% 經驗取得，每級再 +30%',
         type: 'passive',
         color: 0x992233, // 暗紅色
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '+30% 經驗',
+            '+60% 經驗',
+            '+90% 經驗',
+            '+120% 經驗',
+            '+150% 經驗',
+            '+180% 經驗，已達最大等級！'
+        ]
     },
     {
         id: 'passive_ai_enhancement',
         name: 'AI賦能強化',
-        description: '提升 25% 攻擊、5% 防禦，每級再疊加',
+        description: '提升 25% 攻擊、15% 防禦，每級再疊加',
         type: 'passive',
         color: 0x6688aa, // 灰藍色
-        maxLevel: 5
+        maxLevel: 5,
+        levelUpMessages: [
+            '+25% 攻擊、+15% 防禦',
+            '+50% 攻擊、+30% 防禦',
+            '+75% 攻擊、+45% 防禦',
+            '+100% 攻擊、+60% 防禦',
+            '+125% 攻擊、+75% 防禦',
+            '+150% 攻擊、+90% 防禦，已達最大等級！'
+        ]
     }
 ];
 
@@ -350,11 +415,11 @@ export class SkillManager {
         return (skill.level + 1) * 0.25; // Lv.0=25%, Lv.5=150%
     }
 
-    // 取得AI賦能強化的防禦加成百分比（每級 5%，Lv.0 也有效果）
+    // 取得AI賦能強化的防禦加成百分比（每級 15%，Lv.0 也有效果）
     getAiEnhancementDefenseBonus(): number {
         const skill = this.playerSkills.get('passive_ai_enhancement');
         if (!skill) return 0;
-        return (skill.level + 1) * 0.05; // Lv.0=5%, Lv.5=30%
+        return (skill.level + 1) * 0.15; // Lv.0=15%, Lv.5=90%
     }
 
     // 計算最終 HP（套用所有被動加成）
