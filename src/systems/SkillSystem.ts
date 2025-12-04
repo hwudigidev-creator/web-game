@@ -1,6 +1,16 @@
 // 技能類型
 export type SkillType = 'active' | 'passive';
 
+// MAX 後額外能力定義
+export interface MaxExtraAbility {
+    name: string;           // 額外能力名稱
+    description: string;    // 描述（包含 {value} 佔位符）
+    baseValue: number;      // 基礎數值（42 級時的值）
+    perLevel: number;       // 每級增加的數值
+    unit: string;           // 單位（如 %、點、秒）
+    isPercentage?: boolean; // 是否為百分比（顯示時 *100）
+}
+
 // 技能定義（技能庫中的基礎資料）
 export interface SkillDefinition {
     id: string;
@@ -13,6 +23,7 @@ export interface SkillDefinition {
     cooldown?: number; // 冷卻時間（毫秒）
     maxLevel: number; // 最大等級，預設為 5
     levelUpMessages?: string[]; // 每級升級時的自訂描述（索引 0 = Lv.0，索引 5 = Lv.5/MAX）
+    maxExtraAbility?: MaxExtraAbility; // MAX 後的額外能力
 }
 
 // 玩家持有的技能實例
@@ -41,7 +52,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '90° 扇形、5 傷害',
             '100° 扇形、6 傷害',
             '110° 扇形、7 傷害，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '穿透',
+            description: '攻擊後 {value} 機率發射扇形波',
+            baseValue: 0,
+            perLevel: 0.004, // 每級 +0.4%
+            unit: '%',
+            isPercentage: true
+        }
     },
     {
         id: 'active_coder',
@@ -60,7 +79,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '3.5 單位範圍、4 傷害',
             '4 單位範圍、5 傷害',
             '4.5 單位範圍、6 傷害，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '爆發',
+            description: '擊殺時 {value} 機率再發動',
+            baseValue: 0,
+            perLevel: 0.002, // 每級 +0.2%
+            unit: '%',
+            isPercentage: true
+        }
     },
     {
         id: 'active_vfx',
@@ -79,7 +106,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '4 道光束、4 傷害',
             '5 道光束、5 傷害',
             '6 道光束、6 傷害，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '連鎖',
+            description: '擊殺時 {value} 機率再發射',
+            baseValue: 0,
+            perLevel: 0.002, // 每級 +0.2%
+            unit: '%',
+            isPercentage: true
+        }
     },
     {
         id: 'active_architect',
@@ -98,7 +133,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '30% HP 護盾、5.5 反傷',
             '30% HP 護盾、7 反傷',
             '30% HP 護盾、8.5 反傷，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '堅守',
+            description: '護盾覆蓋時 {value} 機率炸開',
+            baseValue: 0,
+            perLevel: 0.01, // 每級 +1%
+            unit: '%',
+            isPercentage: true
+        }
     },
     // 被動型技能 (4個，但玩家最多持有3個)
     {
@@ -115,7 +158,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+40% HP、每 12 秒回血',
             '+50% HP、每 11 秒回血',
             '+60% HP、每 10 秒回血，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '再生',
+            description: '回復量 +{value}',
+            baseValue: 0,
+            perLevel: 0.001, // 每級 +0.1%
+            unit: '%',
+            isPercentage: true
+        }
     },
     {
         id: 'passive_sync_rate',
@@ -131,7 +182,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+40% 移速、-32% 冷卻',
             '+50% 移速、-40% 冷卻',
             '+60% 移速、-48% 冷卻，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '迅捷',
+            description: '閃避機率 +{value}',
+            baseValue: 0,
+            perLevel: 0.001, // 每級 +0.1%
+            unit: '%',
+            isPercentage: true
+        }
     },
     {
         id: 'passive_retina_module',
@@ -147,7 +206,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+120% 經驗',
             '+150% 經驗',
             '+180% 經驗，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '洞察',
+            description: '暴擊率 +{value}',
+            baseValue: 0,
+            perLevel: 0.001, // 每級 +0.1%
+            unit: '%',
+            isPercentage: true
+        }
     },
     {
         id: 'passive_ai_enhancement',
@@ -163,7 +230,15 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+100% 攻擊、+60% 防禦',
             '+125% 攻擊、+75% 防禦',
             '+150% 攻擊、+90% 防禦，已達最大等級！'
-        ]
+        ],
+        maxExtraAbility: {
+            name: '超載',
+            description: '暴擊傷害 +{value}',
+            baseValue: 0,
+            perLevel: 0.002, // 每級 +0.2%
+            unit: '%',
+            isPercentage: true
+        }
     }
 ];
 
@@ -456,5 +531,100 @@ export class SkillManager {
     calculateFinalDamageTaken(incomingDamage: number): number {
         const defenseBonus = this.getAiEnhancementDefenseBonus();
         return Math.floor(incomingDamage * (1 - defenseBonus));
+    }
+
+    // ===== MAX 後額外能力系統 =====
+
+    // 計算 MAX 後額外能力的數值
+    // playerLevel: 玩家當前等級
+    // 技能滿級後立即生效，隨玩家等級成長
+    getMaxExtraAbilityValue(skillId: string, playerLevel: number): number {
+        const skill = this.playerSkills.get(skillId);
+        if (!skill) return 0;
+
+        // 未滿級不啟用額外能力
+        if (skill.level < skill.definition.maxLevel) return 0;
+
+        const extra = skill.definition.maxExtraAbility;
+        if (!extra) return 0;
+
+        // 從技能滿級時開始，每級玩家等級增加 perLevel
+        // baseValue 是基礎值，perLevel 是每級成長
+        return extra.baseValue + extra.perLevel * playerLevel;
+    }
+
+    // 取得格式化的額外能力顯示文字
+    getMaxExtraAbilityText(skillId: string, playerLevel: number): string | null {
+        const skill = this.playerSkills.get(skillId);
+        if (!skill) return null;
+
+        // 未滿級不顯示
+        if (skill.level < skill.definition.maxLevel) return null;
+
+        const extra = skill.definition.maxExtraAbility;
+        if (!extra) return null;
+
+        const value = this.getMaxExtraAbilityValue(skillId, playerLevel);
+        const displayValue = extra.isPercentage
+            ? (value * 100).toFixed(1)
+            : value.toFixed(1);
+
+        return `【${extra.name}】${extra.description.replace('{value}', displayValue + extra.unit)}`;
+    }
+
+    // 取得所有已滿級技能的額外能力資訊
+    getAllMaxExtraAbilities(playerLevel: number): { skillId: string; text: string }[] {
+        const results: { skillId: string; text: string }[] = [];
+
+        this.playerSkills.forEach((_skill, skillId) => {
+            const text = this.getMaxExtraAbilityText(skillId, playerLevel);
+            if (text) {
+                results.push({ skillId, text });
+            }
+        });
+
+        return results;
+    }
+
+    // ===== 具體額外能力數值取得 =====
+
+    // 靈魂渲染：衝擊波（發射扇形波機率）
+    getSoulRenderWaveChance(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('active_soul_render', playerLevel);
+    }
+
+    // 遊戲先知：爆發（擊殺時再發動機率）
+    getCoderBurstChance(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('active_coder', playerLevel);
+    }
+
+    // 超級導演：連鎖（命中時再發射機率）
+    getVfxChainChance(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('active_vfx', playerLevel);
+    }
+
+    // 靈魂統領：堅守（護盾覆蓋時炸開機率）
+    getArchitectExplosionChance(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('active_architect', playerLevel);
+    }
+
+    // 鈦金肝：再生（額外回復百分比）
+    getTitaniumLiverExtraRegen(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('passive_titanium_liver', playerLevel);
+    }
+
+    // 精神同步率強化：迅捷（閃避機率）
+    getSyncRateDodgeChance(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('passive_sync_rate', playerLevel);
+    }
+
+    // 視網膜增強模組：洞察（暴擊率）
+    getRetinaModuleCritChance(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('passive_retina_module', playerLevel);
+    }
+
+    // AI賦能強化：超載（暴擊傷害加成）
+    getAiEnhancementCritDamage(playerLevel: number): number {
+        return this.getMaxExtraAbilityValue('passive_ai_enhancement', playerLevel);
     }
 }

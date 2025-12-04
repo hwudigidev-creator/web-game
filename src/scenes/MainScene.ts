@@ -754,6 +754,12 @@ export default class MainScene extends Phaser.Scene {
             this.shakeScreen(hitMonsters.length);
             console.log(`Soul Render hit ${hitMonsters.length} monsters for ${finalDamage} damage, killed ${result.killCount}, exp +${result.totalExp}`);
         }
+
+        // MAX 後額外能力：衝擊波（從扇形末端發射持續前進的扇形波）
+        const waveChance = this.skillManager.getSoulRenderWaveChance(this.currentLevel);
+        if (waveChance > 0 && Math.random() < waveChance) {
+            this.triggerSoulRenderWave(targetAngle, range, halfAngle, finalDamage, skill);
+        }
     }
 
     // 繪製扇形攻擊特效（從發射點漸漸淡出到外圍，帶高亮漸層）
@@ -951,12 +957,12 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 繪製圓形邊緣線（60% 透明度，與網格特效同時顯示）
-    private drawCircleEdge(radius: number, color: number) {
+    private drawCircleEdge(radius: number, color: number, customOriginX?: number, customOriginY?: number) {
         const graphics = this.add.graphics();
         this.worldContainer.add(graphics);
 
-        const originX = this.characterX;
-        const originY = this.characterY;
+        const originX = customOriginX ?? this.characterX;
+        const originY = customOriginY ?? this.characterY;
 
         const duration = 500;
         const holdTime = 300;
@@ -1006,12 +1012,12 @@ export default class MainScene extends Phaser.Scene {
 
     // 繪製光束邊緣線（60% 透明度，與網格特效同時顯示）
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    private drawBeamEdge(angle: number, length: number, _width: number, _color: number) {
+    private drawBeamEdge(angle: number, length: number, _width: number, _color: number, customOriginX?: number, customOriginY?: number) {
         const graphics = this.add.graphics();
         this.worldContainer.add(graphics);
 
-        const originX = this.characterX;
-        const originY = this.characterY;
+        const originX = customOriginX ?? this.characterX;
+        const originY = customOriginY ?? this.characterY;
         const cosA = Math.cos(angle);
         const sinA = Math.sin(angle);
 
@@ -1152,6 +1158,288 @@ export default class MainScene extends Phaser.Scene {
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
             console.log(`Coder hit ${hitMonsters.length} monsters for ${finalDamage} damage, killed ${result.killCount}, exp +${result.totalExp}`);
+
+            // MAX 後額外能力：爆發（從擊殺位置再次發動）
+            const burstChance = this.skillManager.getCoderBurstChance(this.currentLevel);
+            if (burstChance > 0 && result.killedPositions.length > 0) {
+                this.triggerCoderBurst(result.killedPositions, range, finalDamage, skill, burstChance);
+            }
+        }
+    }
+
+    // 靈魂渲染穿透效果：整片扇形往外推移 5 單位
+    private triggerSoulRenderWave(
+        angle: number,
+        startRange: number,
+        halfAngle: number,
+        damage: number,
+        skill: PlayerSkill
+    ) {
+        const unitSize = this.gameBounds.height * 0.1; // 1 單位 = 畫面高度 10%
+        const travelDistance = unitSize * 5; // 移動 5 單位
+        const arcLength = startRange * halfAngle * 2; // 原本弧長
+        const flashColor = skill.definition.flashColor || skill.definition.color;
+
+        // 記錄起始位置（玩家位置）
+        const originX = this.characterX;
+        const originY = this.characterY;
+
+        // 已經傷害過的怪物 ID（避免重複傷害）
+        const damagedMonsters = new Set<number>();
+
+        // 繪製移動中的扇形網格
+        this.flashSkillAreaSectorMoving(originX, originY, startRange, angle, halfAngle, flashColor, travelDistance);
+
+        // 傷害檢測動畫
+        const duration = 500;
+        const startTime = this.time.now;
+        const hitThickness = unitSize * 0.5;
+
+        const updateDamage = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 當前弧線的半徑位置
+            const currentRadius = startRange + travelDistance * progress;
+            // 保持弧長不變，計算新的半角
+            const currentHalfAngle = arcLength / (2 * currentRadius);
+
+            // 檢測弧線範圍內的怪物
+            const monsters = this.monsterManager.getMonsters();
+            const hitMonsters: number[] = [];
+
+            for (const monster of monsters) {
+                if (damagedMonsters.has(monster.id)) continue;
+
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+                const dx = monster.x - originX;
+                const dy = monster.y - originY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // 檢查是否在弧線厚度範圍內
+                if (Math.abs(dist - currentRadius) > hitThickness + monsterRadius) continue;
+
+                // 檢查角度
+                const monsterAngle = Math.atan2(dy, dx);
+                let angleDiff = monsterAngle - angle;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+                const angleOffset = dist > 0 ? Math.atan2(monsterRadius, dist) : Math.PI;
+                if (Math.abs(angleDiff) <= currentHalfAngle + angleOffset) {
+                    hitMonsters.push(monster.id);
+                    damagedMonsters.add(monster.id);
+                }
+            }
+
+            // 對命中的怪物造成傷害
+            if (hitMonsters.length > 0) {
+                const hitPositions = monsters
+                    .filter(m => hitMonsters.includes(m.id))
+                    .map(m => ({ x: m.x, y: m.y }));
+
+                const result = this.monsterManager.damageMonsters(hitMonsters, damage);
+                if (result.totalExp > 0) {
+                    this.addExp(result.totalExp);
+                }
+
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
+
+            if (progress < 1) {
+                this.time.delayedCall(16, updateDamage);
+            }
+        };
+
+        updateDamage();
+    }
+
+    // 繪製移動中的扇形網格特效（整片扇形往外推）
+    private flashSkillAreaSectorMoving(
+        centerX: number, centerY: number,
+        startRadius: number, angle: number, halfAngle: number,
+        color: number, travelDistance: number
+    ) {
+        const screen = this.worldToScreen(centerX, centerY);
+        const screenCenterX = screen.x;
+        const screenCenterY = screen.y;
+
+        const gap = MainScene.SKILL_GRID_GAP;
+        const cellTotal = this.skillGridCellSize + gap;
+
+        const duration = 500;
+        const startTime = this.time.now;
+
+        // 扇形的虛擬圓心會沿著 angle 方向移動
+        // 計算移動的方向向量
+        const dirX = Math.cos(angle);
+        const dirY = Math.sin(angle);
+
+        // 收集所有可能涉及的格子（擴大範圍以涵蓋移動路徑）
+        const maxRange = startRadius + travelDistance + startRadius;
+        const cellsData: { col: number; row: number; screenX: number; screenY: number }[] = [];
+
+        const minCol = Math.max(0, Math.floor((screenCenterX - maxRange) / cellTotal));
+        const maxCol = Math.min(this.skillGridCols - 1, Math.ceil((screenCenterX + maxRange) / cellTotal));
+        const minRow = Math.max(0, Math.floor((screenCenterY - maxRange) / cellTotal));
+        const maxRow = Math.min(this.skillGridRows - 1, Math.ceil((screenCenterY + maxRange) / cellTotal));
+
+        for (let row = minRow; row <= maxRow; row++) {
+            for (let col = minCol; col <= maxCol; col++) {
+                const cellCenterX = col * cellTotal + this.skillGridCellSize / 2;
+                const cellCenterY = row * cellTotal + this.skillGridCellSize / 2;
+                cellsData.push({ col, row, screenX: cellCenterX, screenY: cellCenterY });
+            }
+        }
+
+        if (cellsData.length === 0) return;
+
+        const flashCells: Phaser.GameObjects.Rectangle[] = [];
+        for (const { col, row } of cellsData) {
+            const x = col * cellTotal + this.skillGridCellSize / 2;
+            const y = row * cellTotal + this.skillGridCellSize / 2;
+            const cell = this.add.rectangle(x, y, this.skillGridCellSize, this.skillGridCellSize, color, 0);
+            cell.setVisible(false);
+            this.skillGridContainer.add(cell);
+            flashCells.push(cell);
+        }
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 虛擬圓心的當前位置（沿著攻擊方向移動）
+            const offset = travelDistance * progress;
+            const virtualCenterX = screenCenterX + dirX * offset;
+            const virtualCenterY = screenCenterY + dirY * offset;
+
+            // 淡出（後半段開始淡出）
+            const fadeStart = 0.5;
+            const fadeProgress = progress > fadeStart ? (progress - fadeStart) / (1 - fadeStart) : 0;
+
+            let i = 0;
+            for (const { screenX, screenY } of cellsData) {
+                const cell = flashCells[i++];
+                if (!cell) continue;
+
+                // 計算格子相對於虛擬圓心的距離和角度
+                const dx = screenX - virtualCenterX;
+                const dy = screenY - virtualCenterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // 檢查是否在扇形範圍內（只顯示外半部分，50%~100% 半徑）
+                const innerRadius = startRadius * 0.5;
+                if (dist >= innerRadius && dist <= startRadius) {
+                    const cellAngle = Math.atan2(dy, dx);
+                    let angleDiff = cellAngle - angle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+                    if (Math.abs(angleDiff) <= halfAngle) {
+                        // 使用與原本扇形相同的樣式，但基於外半部分計算
+                        // distRatio: 0 = 內緣(50%), 1 = 外緣(100%)
+                        const distRatio = (dist - innerRadius) / (startRadius - innerRadius);
+                        const angleRatio = Math.abs(angleDiff) / halfAngle;
+
+                        // 綜合邊緣值（取較大者，越接近邊緣值越高）
+                        const edgeness = Math.max(distRatio, angleRatio);
+
+                        // 使用平滑的 S 曲線（smoothstep）讓過渡更自然
+                        const t = Math.max(0, Math.min(1, (edgeness - 0.3) / 0.7));
+                        const smoothT = t * t * (3 - 2 * t);
+
+                        // 透明度：內緣 15%，外緣 75%
+                        const baseAlpha = 0.15 + smoothT * 0.60;
+                        const currentAlpha = baseAlpha * (1 - fadeProgress);
+
+                        if (currentAlpha > 0.01) {
+                            // 明度：中心壓暗，邊緣保持原色
+                            const brightnessMult = 0.5 + smoothT * 0.5;
+
+                            const r = ((color >> 16) & 0xff);
+                            const g = ((color >> 8) & 0xff);
+                            const b = (color & 0xff);
+
+                            const finalR = Math.floor(r * brightnessMult);
+                            const finalG = Math.floor(g * brightnessMult);
+                            const finalB = Math.floor(b * brightnessMult);
+                            const finalColor = (finalR << 16) | (finalG << 8) | finalB;
+
+                            cell.setFillStyle(finalColor, currentAlpha);
+                            cell.setVisible(true);
+                        } else {
+                            cell.setVisible(false);
+                        }
+                    } else {
+                        cell.setVisible(false);
+                    }
+                } else {
+                    cell.setVisible(false);
+                }
+            }
+
+            if (progress >= 1) {
+                for (const cell of flashCells) {
+                    cell.destroy();
+                }
+            } else {
+                this.time.delayedCall(16, updateEffect);
+            }
+        };
+
+        updateEffect();
+    }
+
+    // 遊戲先知爆發效果：從擊殺位置再次發動圓形攻擊（範圍 50%）
+    private triggerCoderBurst(
+        killedPositions: { x: number; y: number }[],
+        range: number,
+        damage: number,
+        skill: PlayerSkill,
+        burstChance: number
+    ) {
+        const monsters = this.monsterManager.getMonsters();
+        if (monsters.length === 0) return;
+
+        // 爆發範圍為原範圍的 50%
+        const burstRange = range * 0.5;
+
+        for (const pos of killedPositions) {
+            // 每個擊殺位置獨立判定機率
+            if (Math.random() >= burstChance) continue;
+            // 收集這次爆發命中的怪物
+            const burstHitMonsters: number[] = [];
+            for (const monster of monsters) {
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+                const dx = monster.x - pos.x;
+                const dy = monster.y - pos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist - monsterRadius <= burstRange) {
+                    burstHitMonsters.push(monster.id);
+                }
+            }
+
+            // 繪製圓形邊緣線
+            this.drawCircleEdge(burstRange, skill.definition.color, pos.x, pos.y);
+
+            // 繪製打擊區網格特效
+            this.flashSkillAreaCircle(pos.x, pos.y, burstRange, skill.definition.flashColor || skill.definition.color);
+
+            // 對爆發命中的怪物造成傷害
+            if (burstHitMonsters.length > 0) {
+                const burstHitPositions = monsters
+                    .filter(m => burstHitMonsters.includes(m.id))
+                    .map(m => ({ x: m.x, y: m.y }));
+
+                const burstResult = this.monsterManager.damageMonsters(burstHitMonsters, damage);
+                if (burstResult.totalExp > 0) {
+                    this.addExp(burstResult.totalExp);
+                }
+
+                this.flashWhiteCrossAtPositions(burstHitPositions);
+                console.log(`Coder Burst hit ${burstHitMonsters.length} monsters for ${damage} damage`);
+            }
         }
     }
 
@@ -1353,9 +1641,8 @@ export default class MainScene extends Phaser.Scene {
         const hitMonsterIds = Array.from(allHitMonsters);
         if (hitMonsterIds.length > 0) {
             // 取得命中怪物的位置（在造成傷害前）
-            const hitPositions = monsters
-                .filter(m => hitMonsterIds.includes(m.id))
-                .map(m => ({ x: m.x, y: m.y }));
+            const hitMonsters = monsters.filter(m => hitMonsterIds.includes(m.id));
+            const hitPositions = hitMonsters.map(m => ({ x: m.x, y: m.y }));
 
             const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
             if (result.totalExp > 0) {
@@ -1373,6 +1660,89 @@ export default class MainScene extends Phaser.Scene {
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsterIds.length);
             console.log(`VFX (${beamCount} beams) hit ${hitMonsterIds.length} monsters for ${finalDamage} damage, killed ${result.killCount}, exp +${result.totalExp}`);
+
+            // MAX 後額外能力：連鎖（從擊殺位置再發射）
+            const chainChance = this.skillManager.getVfxChainChance(this.currentLevel);
+            if (chainChance > 0 && result.killedPositions.length > 0) {
+                this.triggerVfxChain(result.killedPositions, finalDamage, chainChance, skill);
+            }
+        }
+    }
+
+    // 超級導演連鎖效果：從擊殺位置朝隨機目標再發射
+    private triggerVfxChain(
+        killedPositions: { x: number; y: number }[],
+        damage: number,
+        chainChance: number,
+        skill: PlayerSkill
+    ) {
+        const monsters = this.monsterManager.getMonsters();
+        if (monsters.length === 0) return;
+
+        const range = this.gameBounds.height * 1.0;
+        const beamWidth = this.gameBounds.height * 0.05;
+
+        for (const pos of killedPositions) {
+            // 每個擊殺位置獨立判定機率
+            if (Math.random() >= chainChance) continue;
+
+            // 從命中位置找一個隨機目標
+            const validTargets = monsters.filter(m => {
+                const dx = m.x - pos.x;
+                const dy = m.y - pos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                return dist > 10; // 排除太近的（可能是自己）
+            });
+
+            if (validTargets.length === 0) continue;
+
+            const target = validTargets[Math.floor(Math.random() * validTargets.length)];
+            const targetAngle = Math.atan2(target.y - pos.y, target.x - pos.x);
+
+            // 收集這道連鎖光束命中的怪物
+            const chainHitMonsters: number[] = [];
+            for (const monster of monsters) {
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+                const dx = monster.x - pos.x;
+                const dy = monster.y - pos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist - monsterRadius > range) continue;
+
+                const dirX = Math.cos(targetAngle);
+                const dirY = Math.sin(targetAngle);
+                const projLength = dx * dirX + dy * dirY;
+
+                if (projLength < -monsterRadius) continue;
+
+                const perpDist = Math.abs(dx * dirY - dy * dirX);
+                if (perpDist <= beamWidth / 2 + monsterRadius) {
+                    chainHitMonsters.push(monster.id);
+                }
+            }
+
+            // 繪製連鎖光束邊緣線
+            this.drawBeamEdge(targetAngle, range, beamWidth, skill.definition.color, pos.x, pos.y);
+
+            // 繪製連鎖光束網格特效
+            const endX = pos.x + Math.cos(targetAngle) * range;
+            const endY = pos.y + Math.sin(targetAngle) * range;
+            this.flashSkillAreaLine(pos.x, pos.y, endX, endY, beamWidth, skill.definition.flashColor || skill.definition.color);
+
+            // 對連鎖命中的怪物造成傷害
+            if (chainHitMonsters.length > 0) {
+                const chainHitPositions = monsters
+                    .filter(m => chainHitMonsters.includes(m.id))
+                    .map(m => ({ x: m.x, y: m.y }));
+
+                const chainResult = this.monsterManager.damageMonsters(chainHitMonsters, damage);
+                if (chainResult.totalExp > 0) {
+                    this.addExp(chainResult.totalExp);
+                }
+
+                this.flashWhiteCrossAtPositions(chainHitPositions);
+                console.log(`VFX Chain hit ${chainHitMonsters.length} monsters for ${damage} damage`);
+            }
         }
     }
 
@@ -1666,7 +2036,14 @@ export default class MainScene extends Phaser.Scene {
     // 架構師：產生護盾，護盾吸收傷害並反傷給攻擊者
     // 反傷傷害：1 單位 + 每級 1.5 單位（Lv.0=1單位，Lv.5=8.5單位）
     // 護盾消失時恢復等值 HP
+    // MAX 額外能力：堅守 - 護盾覆蓋時有機率炸開並回血
     private activateArchitect(skill: PlayerSkill) {
+        // MAX 後額外能力：堅守 - 護盾覆蓋時炸開並回血
+        const explosionChance = this.skillManager.getArchitectExplosionChance(this.currentLevel);
+        if (explosionChance > 0 && this.currentShield > 0 && Math.random() < explosionChance) {
+            this.triggerShieldExplosion(skill);
+        }
+
         // 護盾值為最大 HP 的 30%
         const shieldAmount = Math.floor(this.maxHp * 0.3);
 
@@ -1691,6 +2068,69 @@ export default class MainScene extends Phaser.Scene {
         this.flashSkillAreaCircle(this.characterX, this.characterY, shieldRadius, skill.definition.flashColor || skill.definition.color);
 
         console.log(`Architect activated: Shield ${shieldAmount}, Reflect damage ${this.shieldReflectDamage} (${reflectUnits} units)`);
+    }
+
+    // 護盾堅守效果：向外 3 單位圓形攻擊 + 觸發回血
+    private triggerShieldExplosion(skill: PlayerSkill) {
+        const unitSize = this.gameBounds.height * 0.1;
+        const explosionRadius = unitSize * 3; // 3 單位範圍
+        const color = skill.definition.color;
+        const flashColor = skill.definition.flashColor || color;
+
+        // 傷害：使用當前護盾反傷值
+        const damage = this.shieldReflectDamage;
+
+        // 觸發護盾消耗時的回血效果（與護盾被打破相同）
+        if (this.maxShield > 0) {
+            const healAmount = this.maxShield;
+            this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
+            console.log(`Shield explosion! Healed ${healAmount} HP, current HP: ${this.currentHp}/${this.maxHp}`);
+
+            // 更新 HP 顯示
+            this.drawHpBarFill();
+            this.updateHpText();
+            this.updateLowHpVignette();
+
+            // 顯示 HP 回復特效
+            this.showHpHealEffect(healAmount);
+        }
+
+        // 繪製圓形邊緣線
+        this.drawCircleEdge(explosionRadius, color);
+
+        // 繪製圓形網格特效
+        this.flashSkillAreaCircle(this.characterX, this.characterY, explosionRadius, flashColor);
+
+        // 檢測範圍內的怪物
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+
+        for (const monster of monsters) {
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+            const dx = monster.x - this.characterX;
+            const dy = monster.y - this.characterY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist - monsterRadius <= explosionRadius) {
+                hitMonsters.push(monster.id);
+            }
+        }
+
+        // 對命中的怪物造成傷害
+        if (hitMonsters.length > 0) {
+            const hitPositions = monsters
+                .filter(m => hitMonsters.includes(m.id))
+                .map(m => ({ x: m.x, y: m.y }));
+
+            const result = this.monsterManager.damageMonsters(hitMonsters, damage);
+            if (result.totalExp > 0) {
+                this.addExp(result.totalExp);
+            }
+
+            this.flashWhiteCrossAtPositions(hitPositions);
+            this.shakeScreen(hitMonsters.length);
+            console.log(`Shield Explosion hit ${hitMonsters.length} monsters for ${damage} damage`);
+        }
     }
 
     // 繪製護盾啟動特效（帶高亮漸層和長殘留）
@@ -3950,7 +4390,8 @@ export default class MainScene extends Phaser.Scene {
                 break;
             }
             case 'active_architect': {
-                const shieldAmount = Math.floor(this.maxHp * 0.3);
+                const shieldPercent = 0.3;
+                const shieldAmount = Math.floor(this.maxHp * shieldPercent);
                 const reflectUnits = 1 + level * 1.5;
                 const reflectDamage = MainScene.DAMAGE_UNIT * reflectUnits;
                 const baseCd = skill.definition.cooldown || 10000;
@@ -3962,6 +4403,18 @@ export default class MainScene extends Phaser.Scene {
                 break;
             }
         }
+
+        // 添加 MAX 後額外能力
+        this.appendMaxExtraAbility(lines, skill);
+    }
+
+    // 添加 MAX 後額外能力資訊
+    private appendMaxExtraAbility(lines: string[], skill: PlayerSkill) {
+        const extraText = this.skillManager.getMaxExtraAbilityText(skill.definition.id, this.currentLevel);
+        if (extraText) {
+            lines.push('');  // 空行分隔
+            lines.push(extraText);
+        }
     }
 
     // 添加被動技能資訊
@@ -3970,9 +4423,11 @@ export default class MainScene extends Phaser.Scene {
             case 'passive_titanium_liver': {
                 const bonus = this.skillManager.getTitaniumLiverHpBonus();
                 const regenInterval = this.skillManager.getTitaniumLiverRegenInterval() / 1000;
+                const extraRegen = this.skillManager.getTitaniumLiverExtraRegen(this.currentLevel);
+                const totalRegenPercent = 1 + Math.round(extraRegen * 100);
                 lines.push(`HP 加成: +${Math.round(bonus * 100)}%`);
                 lines.push(`最大 HP: ${this.maxHp}`);
-                lines.push(`回復: 每 ${regenInterval} 秒 +1% HP`);
+                lines.push(`回復: 每 ${regenInterval} 秒 +${totalRegenPercent}% HP`);
                 break;
             }
             case 'passive_sync_rate': {
@@ -3995,6 +4450,9 @@ export default class MainScene extends Phaser.Scene {
                 break;
             }
         }
+
+        // 添加 MAX 後額外能力
+        this.appendMaxExtraAbility(lines, skill);
     }
 
     // 更新技能欄顯示

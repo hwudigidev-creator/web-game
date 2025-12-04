@@ -508,18 +508,24 @@ export class MonsterManager {
     }
 
     // 批量對多個怪物造成傷害
-    damageMonsters(monsterIds: number[], damage: number): { totalExp: number; killCount: number } {
+    damageMonsters(monsterIds: number[], damage: number): { totalExp: number; killCount: number; killedPositions: { x: number; y: number }[] } {
         let totalExp = 0;
         let killCount = 0;
+        const killedPositions: { x: number; y: number }[] = [];
 
         for (const id of monsterIds) {
+            // 先取得怪物位置（在造成傷害前）
+            const monster = this.monsters.find(m => m.id === id);
+            const posBeforeDamage = monster ? { x: monster.x, y: monster.y } : null;
+
             const result = this.damageMonster(id, damage);
-            if (result.killed) {
+            if (result.killed && posBeforeDamage) {
                 totalExp += result.exp;
                 killCount++;
+                killedPositions.push(posBeforeDamage);
             }
         }
 
-        return { totalExp, killCount };
+        return { totalExp, killCount, killedPositions };
     }
 }
