@@ -6,24 +6,11 @@ export default class BootScene extends Phaser.Scene {
     }
 
     preload() {
-        // Minimal load for the loading bar itself
-        // this.load.image('logo', 'assets/logo.png'); // Example
+        // 預留給未來資源載入
     }
 
     create() {
-        // Create loading bar UI here
-        const width = this.cameras.main.width;
-        const height = this.cameras.main.height;
-
-        this.add.text(width / 2, height / 2, 'Loading...', {
-            font: '20px monospace',
-            color: '#ffffff'
-        }).setOrigin(0.5, 0.5);
-
-        // Simulate lazy loading of heavy assets or start loading main assets
-        // In a real app, we would load the MainScene assets here
-
-        // For now, just transition to MainScene
+        // 跳轉到主場景
         this.scene.start('MainScene');
     }
 }

@@ -19,6 +19,12 @@ export interface Monster {
     hp: number; // 當前血量
     graphics: Phaser.GameObjects.Graphics;
     lastDamageTime: number; // 上次造成傷害的時間
+    // Q彈動畫參數
+    bouncePhase: number; // 彈跳相位 (0 ~ 2π)
+    bounceSpeed: number; // 彈跳速度（隨機化讓每隻不同步）
+    squashStretch: number; // 當前壓扁/拉伸比例
+    // 受傷閃爍狀態
+    flashStartTime: number; // 閃爍開始時間，0 表示不閃爍
 }
 
 // 預設怪物類型
@@ -27,7 +33,7 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         id: 'slime',
         name: '史萊姆',
         color: 0x66ff66,
-        speed: 1.5, // 每秒 1.5 單位
+        speed: 1, // 每秒 1 單位
         damage: 1,
         size: 0.08, // 畫面高度的 8%
         hp: 30,
@@ -64,6 +70,11 @@ export class MonsterManager {
     // 基礎攻擊單位（1 單位 = 10 傷害）
     private static readonly DAMAGE_UNIT = 10;
 
+    // 網格繪製設定
+    private gridCellSize: number = 4; // 怪物網格格子大小
+    private static readonly GRID_GAP = 1; // 格子間隔
+    private gridScaleMultiplier: number = 3; // 網格倍率（與技能特效一致）
+
     constructor(
         scene: Phaser.Scene,
         container: Phaser.GameObjects.Container,
@@ -76,11 +87,29 @@ export class MonsterManager {
         this.gameBounds = gameBounds;
         this.mapWidth = mapWidth;
         this.mapHeight = mapHeight;
+        this.updateGridCellSize();
     }
 
     // 設定玩家等級（用於怪物血量成長）
     setPlayerLevel(level: number) {
         this.playerLevel = level;
+    }
+
+    // 設定網格倍率（與技能特效同步）
+    setGridScaleMultiplier(multiplier: number) {
+        this.gridScaleMultiplier = multiplier;
+        this.updateGridCellSize();
+    }
+
+    // 更新網格格子大小（根據倍率和螢幕寬度）
+    private updateGridCellSize() {
+        const screenWidth = this.scene.cameras.main.width;
+        const baseWidth = 1920;
+        // 與 MainScene 的 createSkillGrid 使用相同的計算方式
+        const baseCellSize = 20 / this.gridScaleMultiplier;
+        const minCellSize = 6 / this.gridScaleMultiplier;
+        const scale = Math.min(1, screenWidth / baseWidth);
+        this.gridCellSize = Math.max(minCellSize, Math.floor(baseCellSize * scale));
     }
 
     // 計算怪物血量（根據玩家等級）
@@ -164,8 +193,8 @@ export class MonsterManager {
                 }
             }
 
-            // 更新繪製
-            this.drawMonster(monster, monsterSize, cameraOffsetX, cameraOffsetY);
+            // 更新繪製（傳遞 delta 給 Q 彈動畫）
+            this.drawMonster(monster, monsterSize, cameraOffsetX, cameraOffsetY, delta);
         });
 
         return { damage: totalDamage, hitMonsters };
@@ -228,35 +257,191 @@ export class MonsterManager {
             y: spawnY,
             hp: scaledHp,
             graphics,
-            lastDamageTime: 0
+            lastDamageTime: 0,
+            // Q彈動畫參數（隨機化讓每隻史萊姆不同步）
+            bouncePhase: Math.random() * Math.PI * 2,
+            bounceSpeed: 3 + Math.random() * 2, // 3~5 的隨機速度
+            squashStretch: 1,
+            flashStartTime: 0
         };
 
         this.monsters.push(monster);
         this.container.add(graphics);
     }
 
-    // 繪製怪物
+    // 繪製怪物（網格式 Q 彈史萊姆，底部平坦）
     private drawMonster(
         monster: Monster,
         size: number,
         _cameraOffsetX: number,
-        _cameraOffsetY: number
+        _cameraOffsetY: number,
+        delta: number = 16
     ) {
         const graphics = monster.graphics;
         graphics.clear();
 
-        // 怪物在世界座標中的位置（直接使用世界座標，因為 graphics 在 worldContainer 中）
+        // 更新 Q 彈動畫相位
+        monster.bouncePhase += (monster.bounceSpeed * delta) / 1000;
+        if (monster.bouncePhase > Math.PI * 2) {
+            monster.bouncePhase -= Math.PI * 2;
+        }
+
+        // 計算壓扁/拉伸比例（sin 波形：0.92 ~ 1.08）
+        const squashAmount = 0.08;
+        monster.squashStretch = 1 + Math.sin(monster.bouncePhase) * squashAmount;
+
+        // 怪物在世界座標中的位置
         const screenX = monster.x;
         const screenY = monster.y;
 
-        // 繪製簡單的圓形怪物
-        graphics.fillStyle(monster.definition.color, 0.8);
-        graphics.fillCircle(screenX, screenY - size / 2, size / 2);
+        // 網格參數
+        const cellSize = this.gridCellSize;
+        const gap = MonsterManager.GRID_GAP;
+        const cellTotal = cellSize + gap;
 
-        // 繪製眼睛
+        // 史萊姆形狀的網格尺寸（基於怪物大小）
+        const gridRadius = Math.ceil(size / cellTotal / 2);
+
+        // 顏色
+        const baseColor = monster.definition.color;
+        let r = (baseColor >> 16) & 0xff;
+        let g = (baseColor >> 8) & 0xff;
+        let b = baseColor & 0xff;
+
+        // 檢查是否正在閃爍
+        const flashDuration = 300; // 閃爍持續時間 300ms
+        let isFlashing = false;
+        let flashPhase = 0; // 0~1 閃爍階段
+
+        if (monster.flashStartTime > 0) {
+            const elapsed = this.scene.time.now - monster.flashStartTime;
+            if (elapsed < flashDuration) {
+                isFlashing = true;
+                // 閃爍頻率：每 60ms 切換一次（白→紅→白→紅...）
+                flashPhase = Math.floor(elapsed / 60) % 2;
+
+                // 閃爍強度（前半強，後半漸弱）
+                const intensity = elapsed < flashDuration / 2 ? 1 : 1 - (elapsed - flashDuration / 2) / (flashDuration / 2);
+
+                if (flashPhase === 0) {
+                    // 白色閃光
+                    r = Math.min(255, Math.floor(r + (255 - r) * intensity));
+                    g = Math.min(255, Math.floor(g + (255 - g) * intensity));
+                    b = Math.min(255, Math.floor(b + (255 - b) * intensity));
+                } else {
+                    // 紅色閃光
+                    r = Math.min(255, Math.floor(r + (255 - r) * intensity));
+                    g = Math.floor(g * (1 - intensity * 0.8));
+                    b = Math.floor(b * (1 - intensity * 0.8));
+                }
+            } else {
+                // 閃爍結束
+                monster.flashStartTime = 0;
+            }
+        }
+
+        // 繪製史萊姆身體（半橢圓形網格，底部平坦，套用 squash/stretch）
+        const stretchY = monster.squashStretch; // 垂直方向拉伸
+        const stretchX = 1 / monster.squashStretch; // 水平方向壓縮（保持體積）
+
+        // 史萊姆底部對齊地面
+        const bottomY = screenY;
+        const height = size * stretchY;
+
+        for (let row = -gridRadius; row <= 0; row++) { // 只繪製上半部（row <= 0）
+            for (let col = -gridRadius; col <= gridRadius; col++) {
+                // 計算格子在半橢圓中的位置
+                const normalizedX = col / gridRadius / stretchX;
+                // 將 row 映射到 -1 ~ 0 範圍（上半部橢圓）
+                const normalizedY = row / gridRadius;
+
+                // 半橢圓方程：x² + y² <= 1（只取上半部）
+                const distSq = normalizedX * normalizedX + normalizedY * normalizedY;
+
+                if (distSq <= 1.1) { // 稍微擴大範圍讓邊緣更圓滑
+                    // 計算透明度（中心亮、邊緣淡）
+                    const edgeFade = 1 - Math.pow(Math.min(1, distSq), 0.5);
+                    const alpha = 0.5 + edgeFade * 0.5; // 0.5 ~ 1.0（更不透明）
+
+                    // 計算亮度漸變（上方較亮，模擬光澤）
+                    const lightFactor = isFlashing ? 1 : 1 + (1 - normalizedY) * 0.4; // 閃爍時不加亮度
+                    const cellR = Math.min(255, Math.floor(r * lightFactor));
+                    const cellG = Math.min(255, Math.floor(g * lightFactor));
+                    const cellB = Math.min(255, Math.floor(b * lightFactor));
+                    const cellColor = (cellR << 16) | (cellG << 8) | cellB;
+
+                    // 繪製格子（從底部往上）
+                    const cellX = screenX + col * cellTotal * stretchX;
+                    const cellY = bottomY + row * cellTotal * stretchY;
+
+                    graphics.fillStyle(cellColor, alpha * (distSq <= 1 ? 1 : (1.1 - distSq) / 0.1));
+                    graphics.fillRect(
+                        cellX - cellSize / 2,
+                        cellY - cellSize / 2,
+                        cellSize,
+                        cellSize
+                    );
+                }
+            }
+        }
+
+        // 底部平坦部分（填滿底部那一行）
+        const bottomRow = 0;
+        for (let col = -gridRadius; col <= gridRadius; col++) {
+            const normalizedX = col / gridRadius / stretchX;
+            if (Math.abs(normalizedX) <= 1) {
+                const cellX = screenX + col * cellTotal * stretchX;
+                const cellY = bottomY + bottomRow * cellTotal * stretchY;
+
+                // 底部顏色（閃爍時用閃爍色，否則稍暗）
+                const darkFactor = isFlashing ? 1 : 0.7;
+                const cellR = Math.floor(r * darkFactor);
+                const cellG = Math.floor(g * darkFactor);
+                const cellB = Math.floor(b * darkFactor);
+                const cellColor = (cellR << 16) | (cellG << 8) | cellB;
+
+                graphics.fillStyle(cellColor, 0.9);
+                graphics.fillRect(
+                    cellX - cellSize / 2,
+                    cellY - cellSize / 2,
+                    cellSize,
+                    cellSize
+                );
+            }
+        }
+
+        // 繪製眼睛（兩個黑色網格格子）
+        const eyeOffsetX = size * 0.18 * stretchX;
+        const eyeY = bottomY - height * 0.5; // 眼睛在中間偏上
+
+        // 左眼
         graphics.fillStyle(0x000000, 1);
-        graphics.fillCircle(screenX - size * 0.15, screenY - size * 0.6, size * 0.08);
-        graphics.fillCircle(screenX + size * 0.15, screenY - size * 0.6, size * 0.08);
+        graphics.fillRect(
+            screenX - eyeOffsetX - cellSize / 2,
+            eyeY - cellSize / 2,
+            cellSize,
+            cellSize
+        );
+        // 右眼
+        graphics.fillRect(
+            screenX + eyeOffsetX - cellSize / 2,
+            eyeY - cellSize / 2,
+            cellSize,
+            cellSize
+        );
+
+        // 高光（左上角的白色小格子）- 閃爍時隱藏
+        if (!isFlashing) {
+            const highlightX = screenX - size * 0.22 * stretchX;
+            const highlightY = bottomY - height * 0.7;
+            graphics.fillStyle(0xffffff, 0.8);
+            graphics.fillRect(
+                highlightX - cellSize / 2,
+                highlightY - cellSize / 2,
+                cellSize,
+                cellSize
+            );
+        }
     }
 
     // 移除怪物
@@ -299,6 +484,8 @@ export class MonsterManager {
 
         if (monster.hp <= 0) {
             const exp = this.calculateMonsterExp(monster.definition.exp);
+            // 播放死亡煙霧效果
+            this.playDeathSmoke(monster.x, monster.y);
             this.removeMonster(monsterId);
             return { killed: true, exp };
         }
@@ -306,33 +493,18 @@ export class MonsterManager {
         return { killed: false, exp: 0 };
     }
 
-    // 怪物受傷閃白效果
+    // 怪物受傷閃紅白效果（設定閃爍開始時間，由 drawMonster 處理動畫）
     private flashMonster(monster: Monster) {
-        const originalColor = monster.definition.color;
+        monster.flashStartTime = this.scene.time.now;
+    }
 
-        // 暫時改變顏色為白色
-        // 由於我們用 graphics 繪製，需要在下一幀恢復
-        // 這裡用一個簡單的方式：設定一個臨時標記
-        const graphics = monster.graphics;
-
-        // 清除並繪製白色
-        const monsterSize = this.gameBounds.height * 0.10;
-        graphics.clear();
-        graphics.fillStyle(0xffffff, 1);
-        graphics.fillCircle(monster.x, monster.y - monsterSize / 2, monsterSize / 2);
-
-        // 50ms 後恢復原色
-        this.scene.time.delayedCall(50, () => {
-            if (monster.hp > 0) {
-                graphics.clear();
-                graphics.fillStyle(originalColor, 0.8);
-                graphics.fillCircle(monster.x, monster.y - monsterSize / 2, monsterSize / 2);
-                // 重繪眼睛
-                graphics.fillStyle(0x000000, 1);
-                graphics.fillCircle(monster.x - monsterSize * 0.15, monster.y - monsterSize * 0.6, monsterSize * 0.08);
-                graphics.fillCircle(monster.x + monsterSize * 0.15, monster.y - monsterSize * 0.6, monsterSize * 0.08);
-            }
-        });
+    // 播放死亡擴散效果（呼叫 MainScene 的網格特效）
+    private playDeathSmoke(x: number, y: number) {
+        // 呼叫 MainScene 的死亡特效方法
+        const mainScene = this.scene as any;
+        if (mainScene.flashDeathEffect) {
+            mainScene.flashDeathEffect(x, y);
+        }
     }
 
     // 批量對多個怪物造成傷害

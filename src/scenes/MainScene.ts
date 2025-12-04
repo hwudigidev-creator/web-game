@@ -300,6 +300,8 @@ export default class MainScene extends Phaser.Scene {
             this.mapWidth,
             this.mapHeight
         );
+        // 設定初始網格倍率（與技能特效同步）
+        this.monsterManager.setGridScaleMultiplier(this.gridScaleMultiplier);
 
         // 把世界容器加入遊戲區域容器
         this.gameAreaContainer.add([this.boundsBorder, this.worldContainer]);
@@ -323,10 +325,12 @@ export default class MainScene extends Phaser.Scene {
         // 建立技能範圍格子覆蓋層（放在 UI 層）
         this.createSkillGrid();
 
-        // 監聽網格倍率變更事件
+        // 監聯網格倍率變更事件
         window.addEventListener('gridscalechange', ((e: CustomEvent) => {
             this.gridScaleMultiplier = e.detail.scale;
             this.recreateSkillGrid();
+            // 同步更新怪物網格倍率
+            this.monsterManager.setGridScaleMultiplier(e.detail.scale);
         }) as EventListener);
 
         // 把角色容器加入 UI 層，深度高於網格（50）
@@ -690,12 +694,15 @@ export default class MainScene extends Phaser.Scene {
         // 檢查哪些怪物在扇形範圍內
         const hitMonsters: number[] = [];
         for (const monster of monsters) {
+            // 計算怪物碰撞半徑（體型的一半）
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
             const dx = monster.x - this.characterX;
             const dy = monster.y - this.characterY;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // 檢查距離
-            if (dist > range) continue;
+            // 檢查距離（扣除怪物半徑，讓邊緣碰到就算命中）
+            if (dist - monsterRadius > range) continue;
 
             // 計算怪物相對於玩家的角度
             const monsterAngle = Math.atan2(dy, dx);
@@ -705,8 +712,9 @@ export default class MainScene extends Phaser.Scene {
             while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
             while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-            // 檢查是否在扇形內
-            if (Math.abs(angleDiff) <= halfAngle) {
+            // 檢查是否在扇形內（考慮怪物體型的角度偏移）
+            const angleOffset = dist > 0 ? Math.atan2(monsterRadius, dist) : Math.PI;
+            if (Math.abs(angleDiff) <= halfAngle + angleOffset) {
                 hitMonsters.push(monster.id);
             }
         }
@@ -1097,11 +1105,15 @@ export default class MainScene extends Phaser.Scene {
         // 檢查哪些怪物在範圍內
         const hitMonsters: number[] = [];
         for (const monster of monsters) {
+            // 計算怪物碰撞半徑（體型的一半）
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
             const dx = monster.x - this.characterX;
             const dy = monster.y - this.characterY;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (dist <= range) {
+            // 扣除怪物半徑，讓邊緣碰到就算命中
+            if (dist - monsterRadius <= range) {
                 hitMonsters.push(monster.id);
             }
         }
@@ -1288,12 +1300,15 @@ export default class MainScene extends Phaser.Scene {
 
             // 檢查哪些怪物在這道光束範圍內
             for (const monster of monsters) {
+                // 計算怪物碰撞半徑（體型的一半）
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
                 const dx = monster.x - this.characterX;
                 const dy = monster.y - this.characterY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // 檢查距離
-                if (dist > range) continue;
+                // 檢查距離（扣除怪物半徑）
+                if (dist - monsterRadius > range) continue;
 
                 // 計算怪物到光束中心線的垂直距離
                 const dirX = Math.cos(targetAngle);
@@ -1302,14 +1317,14 @@ export default class MainScene extends Phaser.Scene {
                 // 投影長度
                 const projLength = dx * dirX + dy * dirY;
 
-                // 只考慮在角色前方的怪物
-                if (projLength < 0) continue;
+                // 只考慮在角色前方的怪物（扣除怪物半徑）
+                if (projLength < -monsterRadius) continue;
 
                 // 垂直距離
                 const perpDist = Math.abs(dx * dirY - dy * dirX);
 
-                // 檢查是否在光束寬度內
-                if (perpDist <= beamWidth / 2) {
+                // 檢查是否在光束寬度內（加上怪物半徑）
+                if (perpDist <= beamWidth / 2 + monsterRadius) {
                     allHitMonsters.add(monster.id);
                 }
             }
@@ -3199,16 +3214,21 @@ export default class MainScene extends Phaser.Scene {
 
     // 角色閃紅白效果
     private flashCharacter() {
-        // 閃白（80% 覆蓋，混合淺白色）
-        this.character.setTint(0xffcccc);
+        // 閃純白（強烈）
+        this.character.setTint(0xffffff);
 
-        // 50ms 後閃紅（80% 覆蓋，混合淺紅色）
+        // 50ms 後閃亮紅（強烈）
         this.time.delayedCall(50, () => {
-            this.character.setTint(0xff6666);
+            this.character.setTint(0xff3333);
         });
 
-        // 100ms 後恢復正常
+        // 100ms 後再閃白
         this.time.delayedCall(100, () => {
+            this.character.setTint(0xffffff);
+        });
+
+        // 150ms 後恢復正常
+        this.time.delayedCall(150, () => {
             this.character.clearTint();
         });
     }
@@ -5031,7 +5051,7 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 在擊中位置顯示白色十字高光
+    // 在擊中位置顯示白色十字高光（邊擴散邊旋轉）
     flashWhiteCrossAt(worldX: number, worldY: number) {
         const screen = this.worldToScreen(worldX, worldY);
         const gap = MainScene.SKILL_GRID_GAP;
@@ -5039,18 +5059,22 @@ export default class MainScene extends Phaser.Scene {
 
         const centerCol = Math.floor(screen.x / cellTotal);
         const centerRow = Math.floor(screen.y / cellTotal);
+        const centerX = centerCol * cellTotal + this.skillGridCellSize / 2;
+        const centerY = centerRow * cellTotal + this.skillGridCellSize / 2;
 
         const crossLength = 3; // 十字臂長度（格子數）
         const duration = 300; // 總時長 300ms
         const startTime = this.time.now;
 
-        // 收集十字形狀的格子（中心 + 四個方向）
-        const crossCells: { col: number, row: number, dist: number }[] = [];
+        // 隨機旋轉方向和角度（20~50度）
+        const rotateDirection = Math.random() < 0.5 ? 1 : -1;
+        const rotateAngle = (Math.PI / 9 + Math.random() * Math.PI / 6) * rotateDirection; // 20~50度
+
+        // 收集十字形狀的格子（中心 + 四個方向），記錄相對中心的偏移
+        const crossCells: { offsetX: number, offsetY: number, dist: number }[] = [];
 
         // 中心格子
-        if (centerCol >= 0 && centerCol < this.skillGridCols && centerRow >= 0 && centerRow < this.skillGridRows) {
-            crossCells.push({ col: centerCol, row: centerRow, dist: 0 });
-        }
+        crossCells.push({ offsetX: 0, offsetY: 0, dist: 0 });
 
         // 四個方向
         const directions = [
@@ -5062,11 +5086,11 @@ export default class MainScene extends Phaser.Scene {
 
         for (const { dc, dr } of directions) {
             for (let i = 1; i <= crossLength; i++) {
-                const col = centerCol + dc * i;
-                const row = centerRow + dr * i;
-                if (col >= 0 && col < this.skillGridCols && row >= 0 && row < this.skillGridRows) {
-                    crossCells.push({ col, row, dist: i });
-                }
+                crossCells.push({
+                    offsetX: dc * i * cellTotal,
+                    offsetY: dr * i * cellTotal,
+                    dist: i
+                });
             }
         }
 
@@ -5074,10 +5098,8 @@ export default class MainScene extends Phaser.Scene {
 
         // 建立十字格子
         const flashCells: Phaser.GameObjects.Rectangle[] = [];
-        for (const { col, row } of crossCells) {
-            const x = col * cellTotal + this.skillGridCellSize / 2;
-            const y = row * cellTotal + this.skillGridCellSize / 2;
-            const cell = this.add.rectangle(x, y, this.skillGridCellSize, this.skillGridCellSize, 0xffffff, 0);
+        for (let i = 0; i < crossCells.length; i++) {
+            const cell = this.add.rectangle(centerX, centerY, this.skillGridCellSize, this.skillGridCellSize, 0xffffff, 0);
             cell.setVisible(false);
             this.skillGridContainer.add(cell);
             flashCells.push(cell);
@@ -5087,14 +5109,23 @@ export default class MainScene extends Phaser.Scene {
             const elapsed = this.time.now - startTime;
             const progress = Math.min(elapsed / duration, 1);
 
-            // 從中心往外淡出
-            const fadeProgress = progress;
-            const fadeDistance = crossLength * fadeProgress;
+            // 當前旋轉角度
+            const currentAngle = rotateAngle * progress;
+            const cos = Math.cos(currentAngle);
+            const sin = Math.sin(currentAngle);
 
-            let i = 0;
-            for (const { dist } of crossCells) {
-                const cell = flashCells[i++];
+            // 從中心往外淡出
+            const fadeDistance = crossLength * progress;
+
+            for (let i = 0; i < crossCells.length; i++) {
+                const { offsetX, offsetY, dist } = crossCells[i];
+                const cell = flashCells[i];
                 if (!cell) continue;
+
+                // 旋轉後的位置
+                const rotatedX = centerX + offsetX * cos - offsetY * sin;
+                const rotatedY = centerY + offsetX * sin + offsetY * cos;
+                cell.setPosition(rotatedX, rotatedY);
 
                 if (dist >= fadeDistance) {
                     // 距離越遠透明度越低
@@ -5149,6 +5180,127 @@ export default class MainScene extends Phaser.Scene {
     flashWhiteCrossAtPositions(positions: { x: number, y: number }[]) {
         positions.forEach(pos => {
             this.flashWhiteCrossAt(pos.x, pos.y);
+        });
+    }
+
+    // 怪物死亡擴散特效（3個隨機起點圓形擴散）
+    flashDeathEffect(worldX: number, worldY: number) {
+        const screen = this.worldToScreen(worldX, worldY);
+        const gap = MainScene.SKILL_GRID_GAP;
+        const cellTotal = this.skillGridCellSize + gap;
+
+        const centerCol = Math.floor(screen.x / cellTotal);
+        const centerRow = Math.floor(screen.y / cellTotal);
+
+        const numSeeds = 3; // 3 個擴散起點
+        const duration = 400; // 總時長
+        const startTime = this.time.now;
+
+        // 隨機選擇 3 個起點（在怪物周邊，距離中心 2~4 格）
+        const seeds: { col: number; row: number; radius: number }[] = [];
+        for (let i = 0; i < numSeeds; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 2 + Math.random() * 2; // 距離中心 2~4 格
+            seeds.push({
+                col: centerCol + Math.round(Math.cos(angle) * dist),
+                row: centerRow + Math.round(Math.sin(angle) * dist),
+                radius: 3 + Math.floor(Math.random() * 3) // 半徑 3~5 格（大小不一）
+            });
+        }
+
+        // 收集所有需要繪製的格子（從各起點圓形擴散）
+        const cellsMap = new Map<string, { col: number; row: number; dist: number }>();
+
+        for (const seed of seeds) {
+            const maxR = seed.radius;
+            for (let r = -maxR; r <= maxR; r++) {
+                for (let c = -maxR; c <= maxR; c++) {
+                    // 歐幾里得距離（圓形）
+                    const dist = Math.sqrt(r * r + c * c);
+                    if (dist <= maxR) {
+                        const col = seed.col + c;
+                        const row = seed.row + r;
+                        // 確保在螢幕範圍內
+                        if (col >= 0 && col < this.skillGridCols && row >= 0 && row < this.skillGridRows) {
+                            const key = `${col},${row}`;
+                            const existing = cellsMap.get(key);
+                            if (!existing || dist < existing.dist) {
+                                cellsMap.set(key, { col, row, dist });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        const cells = Array.from(cellsMap.values());
+        if (cells.length === 0) return;
+
+        // 計算最大距離用於動畫
+        const maxDist = Math.max(...cells.map(c => c.dist));
+
+        // 建立格子物件
+        const flashCells: { rect: Phaser.GameObjects.Rectangle; dist: number }[] = [];
+        for (const { col, row, dist } of cells) {
+            const x = col * cellTotal + this.skillGridCellSize / 2;
+            const y = row * cellTotal + this.skillGridCellSize / 2;
+            const rect = this.add.rectangle(x, y, this.skillGridCellSize, this.skillGridCellSize, 0xffffff, 0);
+            rect.setVisible(false);
+            this.skillGridContainer.add(rect);
+            flashCells.push({ rect, dist });
+        }
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            for (const { rect, dist } of flashCells) {
+                // 格子出現時機：距離越近越早出現（用 maxDist 標準化）
+                const appearTime = dist / (maxDist + 1);
+                const fadeEnd = appearTime + 0.5;
+
+                let alpha = 0;
+                if (progress >= appearTime && progress <= fadeEnd) {
+                    if (progress < appearTime + 0.1) {
+                        alpha = (progress - appearTime) / 0.1;
+                    } else {
+                        alpha = 1 - (progress - appearTime - 0.1) / (fadeEnd - appearTime - 0.1);
+                    }
+                    alpha = Math.max(0, Math.min(0.8, alpha));
+                }
+
+                if (alpha > 0.01) {
+                    // 隨機灰白色
+                    const brightness = 200 + Math.floor(Math.random() * 55);
+                    const color = (brightness << 16) | (brightness << 8) | brightness;
+                    rect.setFillStyle(color, alpha);
+                    rect.setVisible(true);
+                } else {
+                    rect.setVisible(false);
+                }
+            }
+
+            if (progress >= 1) {
+                for (const { rect } of flashCells) {
+                    rect.destroy();
+                }
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            timerEvent.remove();
+            for (const { rect } of flashCells) {
+                if (rect.active) rect.destroy();
+            }
         });
     }
 
