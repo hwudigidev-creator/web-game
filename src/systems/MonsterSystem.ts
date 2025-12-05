@@ -17,7 +17,6 @@ export interface Monster {
     x: number;
     y: number;
     hp: number; // 當前血量
-    graphics: Phaser.GameObjects.Graphics;
     lastDamageTime: number; // 上次造成傷害的時間
     // Q彈動畫參數
     bouncePhase: number; // 彈跳相位 (0 ~ 2π)
@@ -25,6 +24,13 @@ export interface Monster {
     squashStretch: number; // 當前壓扁/拉伸比例
     // 受傷閃爍狀態
     flashStartTime: number; // 閃爍開始時間，0 表示不閃爍
+}
+
+// 怪物網格格子資料（畫面固定位置）
+interface MonsterGridCell {
+    rect: Phaser.GameObjects.Rectangle;
+    screenCol: number;
+    screenRow: number;
 }
 
 // 預設怪物類型
@@ -49,7 +55,8 @@ export class MonsterManager {
     private scene: Phaser.Scene;
     private monsters: Monster[] = [];
     private nextMonsterId: number = 0;
-    private container: Phaser.GameObjects.Container;
+    private gameAreaContainer: Phaser.GameObjects.Container;
+    private clipMask: Phaser.Display.Masks.GeometryMask | null = null;
 
     // 生成設定
     private spawnInterval: number = 2000; // 每 2 秒生成一隻
@@ -72,22 +79,28 @@ export class MonsterManager {
 
     // 網格繪製設定
     private gridCellSize: number = 4; // 怪物網格格子大小
-    private static readonly GRID_GAP = 1; // 格子間隔
     private gridScaleMultiplier: number = 3; // 網格倍率（與技能特效一致）
+
+    // 怪物網格層（畫面固定網格）
+    private monsterGridContainer!: Phaser.GameObjects.Container;
+    private monsterGridCells: MonsterGridCell[] = [];
+    private screenGridCols: number = 0;
+    private screenGridRows: number = 0;
 
     constructor(
         scene: Phaser.Scene,
-        container: Phaser.GameObjects.Container,
+        gameAreaContainer: Phaser.GameObjects.Container, // 遊戲區域容器，用於正確層級
         gameBounds: { x: number; y: number; width: number; height: number },
         mapWidth: number,
         mapHeight: number
     ) {
         this.scene = scene;
-        this.container = container;
+        this.gameAreaContainer = gameAreaContainer;
         this.gameBounds = gameBounds;
         this.mapWidth = mapWidth;
         this.mapHeight = mapHeight;
         this.updateGridCellSize();
+        this.createMonsterGrid();
     }
 
     // 設定玩家等級（用於怪物血量成長）
@@ -99,6 +112,7 @@ export class MonsterManager {
     setGridScaleMultiplier(multiplier: number) {
         this.gridScaleMultiplier = multiplier;
         this.updateGridCellSize();
+        this.recreateMonsterGrid();
     }
 
     // 更新網格格子大小（根據倍率和螢幕寬度）
@@ -110,6 +124,66 @@ export class MonsterManager {
         const minCellSize = 6 / this.gridScaleMultiplier;
         const scale = Math.min(1, screenWidth / baseWidth);
         this.gridCellSize = Math.max(minCellSize, Math.floor(baseCellSize * scale));
+    }
+
+    // 設定遮罩（限制渲染在遊戲區域內）
+    setClipMask(mask: Phaser.Display.Masks.GeometryMask) {
+        this.clipMask = mask;
+        if (this.monsterGridContainer) {
+            this.monsterGridContainer.setMask(mask);
+        }
+    }
+
+    // 建立怪物網格層（畫面固定網格，緊密排列無間隙）
+    private createMonsterGrid() {
+        // 加到 gameAreaContainer，位置固定在遊戲區域，層級在 UI 之下
+        this.monsterGridContainer = this.scene.add.container(this.gameBounds.x, this.gameBounds.y);
+        this.monsterGridContainer.setDepth(58); // 在技能網格(50)、邊線(55)之上，角色(60)之下
+        this.gameAreaContainer.add(this.monsterGridContainer);
+
+        // 套用遮罩（如果已設定）
+        if (this.clipMask) {
+            this.monsterGridContainer.setMask(this.clipMask);
+        }
+
+        // 計算覆蓋整個畫面需要的網格數量
+        this.screenGridCols = Math.ceil(this.gameBounds.width / this.gridCellSize) + 1;
+        this.screenGridRows = Math.ceil(this.gameBounds.height / this.gridCellSize) + 1;
+
+        // 建立網格格子（固定在畫面位置，緊密排列）
+        for (let row = 0; row < this.screenGridRows; row++) {
+            for (let col = 0; col < this.screenGridCols; col++) {
+                // 格子位置固定在畫面上（origin 0,0 讓格子從左上角開始緊密排列）
+                const x = col * this.gridCellSize;
+                const y = row * this.gridCellSize;
+                const rect = this.scene.add.rectangle(
+                    x, y,
+                    this.gridCellSize,
+                    this.gridCellSize,
+                    0x000000, 0
+                );
+                rect.setOrigin(0, 0);
+                rect.setVisible(false);
+                this.monsterGridContainer.add(rect);
+                this.monsterGridCells.push({
+                    rect,
+                    screenCol: col,
+                    screenRow: row
+                });
+            }
+        }
+    }
+
+    // 重建怪物網格（當倍率變更時）
+    private recreateMonsterGrid() {
+        // 清除舊網格
+        this.monsterGridCells.forEach(cell => cell.rect.destroy());
+        this.monsterGridCells = [];
+        if (this.monsterGridContainer) {
+            this.monsterGridContainer.destroy();
+        }
+        // 重新建立
+        this.createMonsterGrid();
     }
 
     // 計算怪物血量（根據玩家等級）
@@ -167,7 +241,7 @@ export class MonsterManager {
         // 玩家碰撞範圍（1 個單位 = 畫面高度 10%）
         const collisionRange = this.gameBounds.height * 0.10;
 
-        // 更新每隻怪物
+        // 更新每隻怪物的位置和動畫狀態
         this.monsters.forEach(monster => {
             // 計算方向向量
             const dx = playerX - monster.x;
@@ -193,9 +267,18 @@ export class MonsterManager {
                 }
             }
 
-            // 更新繪製（傳遞 delta 給 Q 彈動畫）
-            this.drawMonster(monster, monsterSize, cameraOffsetX, cameraOffsetY, delta);
+            // 更新 Q 彈動畫相位
+            monster.bouncePhase += (monster.bounceSpeed * delta) / 1000;
+            if (monster.bouncePhase > Math.PI * 2) {
+                monster.bouncePhase -= Math.PI * 2;
+            }
+            // 計算壓扁/拉伸比例（sin 波形：0.92 ~ 1.08）
+            const squashAmount = 0.08;
+            monster.squashStretch = 1 + Math.sin(monster.bouncePhase) * squashAmount;
         });
+
+        // 使用共用網格渲染所有怪物
+        this.renderMonstersToGrid(monsterSize, cameraOffsetX, cameraOffsetY);
 
         return { damage: totalDamage, hitMonsters };
     }
@@ -243,9 +326,8 @@ export class MonsterManager {
         spawnX = Phaser.Math.Clamp(spawnX, 0, this.mapWidth);
         spawnY = Phaser.Math.Clamp(spawnY, 0, this.mapHeight);
 
-        // 建立怪物
+        // 建立怪物（不再使用個別的 graphics）
         const definition = MONSTER_TYPES[0]; // 目前只有一種怪物
-        const graphics = this.scene.add.graphics();
 
         // 根據玩家等級計算怪物血量
         const scaledHp = this.calculateMonsterHp(definition.hp);
@@ -256,7 +338,6 @@ export class MonsterManager {
             x: spawnX,
             y: spawnY,
             hp: scaledHp,
-            graphics,
             lastDamageTime: 0,
             // Q彈動畫參數（隨機化讓每隻史萊姆不同步）
             bouncePhase: Math.random() * Math.PI * 2,
@@ -266,181 +347,168 @@ export class MonsterManager {
         };
 
         this.monsters.push(monster);
-        this.container.add(graphics);
     }
 
-    // 繪製怪物（網格式 Q 彈史萊姆，底部平坦）
-    private drawMonster(
-        monster: Monster,
-        size: number,
-        _cameraOffsetX: number,
-        _cameraOffsetY: number,
-        delta: number = 16
+    // 使用畫面固定網格渲染所有怪物（馬賽克拼貼風格）
+    private renderMonstersToGrid(
+        monsterSize: number,
+        cameraOffsetX: number,
+        cameraOffsetY: number
     ) {
-        const graphics = monster.graphics;
-        graphics.clear();
-
-        // 更新 Q 彈動畫相位
-        monster.bouncePhase += (monster.bounceSpeed * delta) / 1000;
-        if (monster.bouncePhase > Math.PI * 2) {
-            monster.bouncePhase -= Math.PI * 2;
-        }
-
-        // 計算壓扁/拉伸比例（sin 波形：0.92 ~ 1.08）
-        const squashAmount = 0.08;
-        monster.squashStretch = 1 + Math.sin(monster.bouncePhase) * squashAmount;
-
-        // 怪物在世界座標中的位置
-        const screenX = monster.x;
-        const screenY = monster.y;
-
-        // 網格參數
         const cellSize = this.gridCellSize;
-        const gap = MonsterManager.GRID_GAP;
-        const cellTotal = cellSize + gap;
+        const now = this.scene.time.now;
 
-        // 史萊姆形狀的網格尺寸（基於怪物大小）
-        const gridRadius = Math.ceil(size / cellTotal / 2);
+        // 建立一個 Map 來儲存每個畫面網格格子的渲染資料
+        // key: "screenCol,screenRow", value: { color, alpha }
+        const gridData = new Map<string, { color: number; alpha: number }>();
 
-        // 顏色
-        const baseColor = monster.definition.color;
-        let r = (baseColor >> 16) & 0xff;
-        let g = (baseColor >> 8) & 0xff;
-        let b = baseColor & 0xff;
+        // 為每隻怪物計算要渲染到哪些畫面格子
+        this.monsters.forEach(monster => {
+            // Q彈效果：用 squashStretch 調整形狀範圍
+            const stretchY = monster.squashStretch;
+            const stretchX = 1 / monster.squashStretch;
 
-        // 檢查是否正在閃爍
-        const flashDuration = 300; // 閃爍持續時間 300ms
-        let isFlashing = false;
-        let flashPhase = 0; // 0~1 閃爍階段
+            // 怪物在畫面上的位置（世界座標轉畫面座標）
+            const screenX = monster.x - cameraOffsetX;
+            const screenY = monster.y - cameraOffsetY;
 
-        if (monster.flashStartTime > 0) {
-            const elapsed = this.scene.time.now - monster.flashStartTime;
-            if (elapsed < flashDuration) {
-                isFlashing = true;
-                // 閃爍頻率：每 60ms 切換一次（白→紅→白→紅...）
-                flashPhase = Math.floor(elapsed / 60) % 2;
+            // 怪物中心對應的畫面網格座標
+            const centerCol = Math.floor(screenX / cellSize);
+            const bottomRow = Math.floor(screenY / cellSize);
 
-                // 閃爍強度（前半強，後半漸弱）
-                const intensity = elapsed < flashDuration / 2 ? 1 : 1 - (elapsed - flashDuration / 2) / (flashDuration / 2);
+            // 計算怪物的網格半徑（基礎值）
+            const baseGridRadius = Math.ceil(monsterSize / cellSize / 2);
+            // 根據 stretch 調整實際顯示的格子數量
+            const gridRadiusX = Math.ceil(baseGridRadius * stretchX);
+            const gridRadiusY = Math.ceil(baseGridRadius * stretchY);
 
-                if (flashPhase === 0) {
-                    // 白色閃光
-                    r = Math.min(255, Math.floor(r + (255 - r) * intensity));
-                    g = Math.min(255, Math.floor(g + (255 - g) * intensity));
-                    b = Math.min(255, Math.floor(b + (255 - b) * intensity));
+            // 計算顏色（含閃爍效果）
+            const baseColor = monster.definition.color;
+            let r = (baseColor >> 16) & 0xff;
+            let g = (baseColor >> 8) & 0xff;
+            let b = baseColor & 0xff;
+
+            let isFlashing = false;
+            const flashDuration = 300;
+
+            if (monster.flashStartTime > 0) {
+                const elapsed = now - monster.flashStartTime;
+                if (elapsed < flashDuration) {
+                    isFlashing = true;
+                    const flashPhase = Math.floor(elapsed / 60) % 2;
+                    const intensity = elapsed < flashDuration / 2 ? 1 : 1 - (elapsed - flashDuration / 2) / (flashDuration / 2);
+
+                    if (flashPhase === 0) {
+                        r = Math.min(255, Math.floor(r + (255 - r) * intensity));
+                        g = Math.min(255, Math.floor(g + (255 - g) * intensity));
+                        b = Math.min(255, Math.floor(b + (255 - b) * intensity));
+                    } else {
+                        r = Math.min(255, Math.floor(r + (255 - r) * intensity));
+                        g = Math.floor(g * (1 - intensity * 0.8));
+                        b = Math.floor(b * (1 - intensity * 0.8));
+                    }
                 } else {
-                    // 紅色閃光
-                    r = Math.min(255, Math.floor(r + (255 - r) * intensity));
-                    g = Math.floor(g * (1 - intensity * 0.8));
-                    b = Math.floor(b * (1 - intensity * 0.8));
+                    monster.flashStartTime = 0;
                 }
-            } else {
-                // 閃爍結束
-                monster.flashStartTime = 0;
             }
-        }
 
-        // 繪製史萊姆身體（半橢圓形網格，底部平坦，套用 squash/stretch）
-        const stretchY = monster.squashStretch; // 垂直方向拉伸
-        const stretchX = 1 / monster.squashStretch; // 水平方向壓縮（保持體積）
+            // 繪製半橢圓形身體（選擇畫面上的哪些格子要顯示）
+            for (let row = -gridRadiusY; row <= 0; row++) {
+                for (let col = -gridRadiusX; col <= gridRadiusX; col++) {
+                    // 正規化座標（根據當前的 stretch 範圍）
+                    const normalizedX = col / gridRadiusX;
+                    const normalizedY = row / gridRadiusY;
+                    const distSq = normalizedX * normalizedX + normalizedY * normalizedY;
 
-        // 史萊姆底部對齊地面
-        const bottomY = screenY;
-        const height = size * stretchY;
+                    if (distSq <= 1.1) {
+                        const edgeFade = 1 - Math.pow(Math.min(1, distSq), 0.5);
+                        const alpha = (0.5 + edgeFade * 0.5) * (distSq <= 1 ? 1 : (1.1 - distSq) / 0.1);
 
-        for (let row = -gridRadius; row <= 0; row++) { // 只繪製上半部（row <= 0）
-            for (let col = -gridRadius; col <= gridRadius; col++) {
-                // 計算格子在半橢圓中的位置
-                const normalizedX = col / gridRadius / stretchX;
-                // 將 row 映射到 -1 ~ 0 範圍（上半部橢圓）
-                const normalizedY = row / gridRadius;
+                        const lightFactor = isFlashing ? 1 : 1 + (1 - normalizedY) * 0.4;
+                        const cellR = Math.min(255, Math.floor(r * lightFactor));
+                        const cellG = Math.min(255, Math.floor(g * lightFactor));
+                        const cellB = Math.min(255, Math.floor(b * lightFactor));
+                        const cellColor = (cellR << 16) | (cellG << 8) | cellB;
 
-                // 半橢圓方程：x² + y² <= 1（只取上半部）
-                const distSq = normalizedX * normalizedX + normalizedY * normalizedY;
+                        // 畫面網格座標
+                        const targetCol = centerCol + col;
+                        const targetRow = bottomRow + row;
 
-                if (distSq <= 1.1) { // 稍微擴大範圍讓邊緣更圓滑
-                    // 計算透明度（中心亮、邊緣淡）
-                    const edgeFade = 1 - Math.pow(Math.min(1, distSq), 0.5);
-                    const alpha = 0.5 + edgeFade * 0.5; // 0.5 ~ 1.0（更不透明）
+                        // 只處理在畫面範圍內的格子
+                        if (targetCol >= 0 && targetCol < this.screenGridCols &&
+                            targetRow >= 0 && targetRow < this.screenGridRows) {
+                            const key = `${targetCol},${targetRow}`;
+                            const existing = gridData.get(key);
+                            if (!existing || alpha > existing.alpha) {
+                                gridData.set(key, { color: cellColor, alpha });
+                            }
+                        }
+                    }
+                }
+            }
 
-                    // 計算亮度漸變（上方較亮，模擬光澤）
-                    const lightFactor = isFlashing ? 1 : 1 + (1 - normalizedY) * 0.4; // 閃爍時不加亮度
-                    const cellR = Math.min(255, Math.floor(r * lightFactor));
-                    const cellG = Math.min(255, Math.floor(g * lightFactor));
-                    const cellB = Math.min(255, Math.floor(b * lightFactor));
+            // 底部平坦部分
+            for (let col = -gridRadiusX; col <= gridRadiusX; col++) {
+                const normalizedX = col / gridRadiusX;
+                if (Math.abs(normalizedX) <= 1) {
+                    const darkFactor = isFlashing ? 1 : 0.7;
+                    const cellR = Math.floor(r * darkFactor);
+                    const cellG = Math.floor(g * darkFactor);
+                    const cellB = Math.floor(b * darkFactor);
                     const cellColor = (cellR << 16) | (cellG << 8) | cellB;
 
-                    // 繪製格子（從底部往上）
-                    const cellX = screenX + col * cellTotal * stretchX;
-                    const cellY = bottomY + row * cellTotal * stretchY;
+                    const targetCol = centerCol + col;
+                    const targetRow = bottomRow;
 
-                    graphics.fillStyle(cellColor, alpha * (distSq <= 1 ? 1 : (1.1 - distSq) / 0.1));
-                    graphics.fillRect(
-                        cellX - cellSize / 2,
-                        cellY - cellSize / 2,
-                        cellSize,
-                        cellSize
-                    );
+                    if (targetCol >= 0 && targetCol < this.screenGridCols &&
+                        targetRow >= 0 && targetRow < this.screenGridRows) {
+                        const key = `${targetCol},${targetRow}`;
+                        gridData.set(key, { color: cellColor, alpha: 0.9 });
+                    }
                 }
             }
-        }
 
-        // 底部平坦部分（填滿底部那一行）
-        const bottomRow = 0;
-        for (let col = -gridRadius; col <= gridRadius; col++) {
-            const normalizedX = col / gridRadius / stretchX;
-            if (Math.abs(normalizedX) <= 1) {
-                const cellX = screenX + col * cellTotal * stretchX;
-                const cellY = bottomY + bottomRow * cellTotal * stretchY;
+            // 眼睛位置（根據當前範圍調整）
+            const eyeOffsetCols = Math.max(1, Math.floor(gridRadiusX * 0.35));
+            const eyeRowOffset = Math.floor(gridRadiusY * 0.5);
 
-                // 底部顏色（閃爍時用閃爍色，否則稍暗）
-                const darkFactor = isFlashing ? 1 : 0.7;
-                const cellR = Math.floor(r * darkFactor);
-                const cellG = Math.floor(g * darkFactor);
-                const cellB = Math.floor(b * darkFactor);
-                const cellColor = (cellR << 16) | (cellG << 8) | cellB;
+            const leftEyeCol = centerCol - eyeOffsetCols;
+            const rightEyeCol = centerCol + eyeOffsetCols;
+            const eyeRow = bottomRow - eyeRowOffset;
 
-                graphics.fillStyle(cellColor, 0.9);
-                graphics.fillRect(
-                    cellX - cellSize / 2,
-                    cellY - cellSize / 2,
-                    cellSize,
-                    cellSize
-                );
+            if (leftEyeCol >= 0 && leftEyeCol < this.screenGridCols &&
+                eyeRow >= 0 && eyeRow < this.screenGridRows) {
+                gridData.set(`${leftEyeCol},${eyeRow}`, { color: 0x000000, alpha: 1 });
             }
-        }
+            if (rightEyeCol >= 0 && rightEyeCol < this.screenGridCols &&
+                eyeRow >= 0 && eyeRow < this.screenGridRows) {
+                gridData.set(`${rightEyeCol},${eyeRow}`, { color: 0x000000, alpha: 1 });
+            }
 
-        // 繪製眼睛（兩個黑色網格格子）
-        const eyeOffsetX = size * 0.18 * stretchX;
-        const eyeY = bottomY - height * 0.5; // 眼睛在中間偏上
+            // 高光
+            if (!isFlashing) {
+                const highlightColOffset = Math.floor(gridRadiusX * 0.4);
+                const highlightRowOffset = Math.floor(gridRadiusY * 0.7);
+                const highlightCol = centerCol - highlightColOffset;
+                const highlightRow = bottomRow - highlightRowOffset;
+                if (highlightCol >= 0 && highlightCol < this.screenGridCols &&
+                    highlightRow >= 0 && highlightRow < this.screenGridRows) {
+                    gridData.set(`${highlightCol},${highlightRow}`, { color: 0xffffff, alpha: 0.8 });
+                }
+            }
+        });
 
-        // 左眼
-        graphics.fillStyle(0x000000, 1);
-        graphics.fillRect(
-            screenX - eyeOffsetX - cellSize / 2,
-            eyeY - cellSize / 2,
-            cellSize,
-            cellSize
-        );
-        // 右眼
-        graphics.fillRect(
-            screenX + eyeOffsetX - cellSize / 2,
-            eyeY - cellSize / 2,
-            cellSize,
-            cellSize
-        );
+        // 遍歷所有畫面固定格子，根據 gridData 決定顯示與否
+        for (const cell of this.monsterGridCells) {
+            const key = `${cell.screenCol},${cell.screenRow}`;
+            const data = gridData.get(key);
 
-        // 高光（左上角的白色小格子）- 閃爍時隱藏
-        if (!isFlashing) {
-            const highlightX = screenX - size * 0.22 * stretchX;
-            const highlightY = bottomY - height * 0.7;
-            graphics.fillStyle(0xffffff, 0.8);
-            graphics.fillRect(
-                highlightX - cellSize / 2,
-                highlightY - cellSize / 2,
-                cellSize,
-                cellSize
-            );
+            if (data) {
+                cell.rect.setFillStyle(data.color, data.alpha);
+                cell.rect.setVisible(true);
+            } else {
+                cell.rect.setVisible(false);
+            }
         }
     }
 
@@ -448,8 +516,6 @@ export class MonsterManager {
     removeMonster(monsterId: number) {
         const index = this.monsters.findIndex(m => m.id === monsterId);
         if (index !== -1) {
-            const monster = this.monsters[index];
-            monster.graphics.destroy();
             this.monsters.splice(index, 1);
         }
     }
@@ -461,9 +527,6 @@ export class MonsterManager {
 
     // 清除所有怪物
     clearAllMonsters() {
-        this.monsters.forEach(monster => {
-            monster.graphics.destroy();
-        });
         this.monsters = [];
     }
 

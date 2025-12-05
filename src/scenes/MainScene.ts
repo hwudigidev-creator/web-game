@@ -31,10 +31,9 @@ export default class MainScene extends Phaser.Scene {
     private characterX!: number; // 角色在地圖上的 X 座標
     private characterY!: number; // 角色在地圖上的 Y 座標
     private characterSize!: number; // 角色大小
-    private isMoving: boolean = false; // 是否正在移動
     private isPointerDown: boolean = false; // 是否按住滑鼠/觸控
-    private targetX!: number; // 目標 X
-    private targetY!: number; // 目標 Y
+    private moveDirX: number = 0; // 移動方向 X（-1, 0, 1 或連續值）
+    private moveDirY: number = 0; // 移動方向 Y（-1, 0, 1 或連續值）
     private baseMoveSpeed: number = 0; // 基礎移動速度（像素/秒），在 create 中根據畫面大小初始化
     private moveSpeed: number = 0; // 實際移動速度（套用加成後）
 
@@ -295,7 +294,7 @@ export default class MainScene extends Phaser.Scene {
         // 建立怪物管理系統
         this.monsterManager = new MonsterManager(
             this,
-            this.worldContainer,
+            this.gameAreaContainer,
             this.gameBounds,
             this.mapWidth,
             this.mapHeight
@@ -317,6 +316,9 @@ export default class MainScene extends Phaser.Scene {
         );
         const geometryMask = clipMask.createGeometryMask();
         this.worldContainer.setMask(geometryMask);
+
+        // 套用遮罩到怪物網格
+        this.monsterManager.setClipMask(geometryMask);
 
         // 建立 UI 容器（固定在螢幕上，不隨鏡頭移動）
         this.uiContainer = this.add.container(0, 0);
@@ -440,7 +442,7 @@ export default class MainScene extends Phaser.Scene {
             this.isAttacking = false;
             this.character.clearTint();
             // 攻擊結束，恢復之前的動畫
-            if (this.isMoving || this.isKeyboardMoving) {
+            if (this.isPointerDown || this.isKeyboardMoving) {
                 this.setCharacterState('run', true);
             } else {
                 this.setCharacterState('idle', true);
@@ -452,8 +454,8 @@ export default class MainScene extends Phaser.Scene {
             // 處理鍵盤移動
             this.handleKeyboardInput(delta);
 
-            // 處理點擊移動
-            if (this.isMoving && !this.isKeyboardMoving) {
+            // 處理點擊移動（只有按住時才移動）
+            if (this.isPointerDown && !this.isKeyboardMoving) {
                 this.moveCharacter(delta);
             }
         }
@@ -866,15 +868,18 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 繪製扇形邊緣線（60% 透明度，與網格特效同時顯示）
-    private drawSectorEdge(angle: number, radius: number, halfAngle: number, color: number) {
+    // 繪製扇形邊緣線（白色，與網格特效同時顯示）
+    private drawSectorEdge(angle: number, radius: number, halfAngle: number, _color: number) {
         const graphics = this.add.graphics();
-        this.worldContainer.add(graphics);
+        // 加到 skillGridContainer 並設定深度在網格之上
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(55);
 
         const startAngle = angle - halfAngle;
         const endAngle = angle + halfAngle;
-        const originX = this.characterX;
-        const originY = this.characterY;
+        // 記錄世界座標
+        const worldOriginX = this.characterX;
+        const worldOriginY = this.characterY;
 
         const duration = 500; // 與網格特效同步
         const holdTime = 300;
@@ -884,7 +889,7 @@ export default class MainScene extends Phaser.Scene {
         const segments = 15;
 
         // 繪製漸淡線段的輔助函數
-        const drawFadedLine = (lineAngle: number, lineColor: number, lineWidth: number, baseAlpha: number, lengthMult: number = 1) => {
+        const drawFadedLine = (lineAngle: number, lineWidth: number, baseAlpha: number, originX: number, originY: number) => {
             for (let i = 0; i < segments; i++) {
                 const t1 = i / segments;
                 const t2 = (i + 1) / segments;
@@ -897,14 +902,15 @@ export default class MainScene extends Phaser.Scene {
                 const segmentAlpha = baseAlpha * segmentFade * segmentFade;
 
                 if (segmentAlpha > 0.01) {
-                    const r1 = radius * t1 * lengthMult;
-                    const r2 = radius * t2 * lengthMult;
+                    const r1 = radius * t1;
+                    const r2 = radius * t2;
                     const x1 = originX + Math.cos(lineAngle) * r1;
                     const y1 = originY + Math.sin(lineAngle) * r1;
                     const x2 = originX + Math.cos(lineAngle) * r2;
                     const y2 = originY + Math.sin(lineAngle) * r2;
 
-                    graphics.lineStyle(lineWidth, lineColor, segmentAlpha);
+                    // 白色線條
+                    graphics.lineStyle(lineWidth, 0xffffff, segmentAlpha);
                     graphics.beginPath();
                     graphics.moveTo(x1, y1);
                     graphics.lineTo(x2, y2);
@@ -919,21 +925,22 @@ export default class MainScene extends Phaser.Scene {
 
             graphics.clear();
 
+            // 每幀重新計算螢幕座標以跟隨鏡頭
+            const screen = this.worldToScreen(worldOriginX, worldOriginY);
+            const originX = screen.x;
+            const originY = screen.y;
+
             // 淡出進度
             let fadeProgress = 0;
             if (elapsed > holdTime) {
                 fadeProgress = (elapsed - holdTime) / (duration - holdTime);
             }
-            const alpha = 0.6 * (1 - fadeProgress);
+            const alpha = 1.0 * (1 - fadeProgress);
 
             if (alpha > 0.01) {
-                // 兩條切線（從原點到弧線兩端）- 頭尾漸淡
-                drawFadedLine(startAngle, color, 3, alpha);
-                drawFadedLine(endAngle, color, 3, alpha);
-
-                // 白色高光切線 - 頭尾漸淡
-                drawFadedLine(startAngle, 0xffffff, 1.5, alpha * 0.5, 0.98);
-                drawFadedLine(endAngle, 0xffffff, 1.5, alpha * 0.5, 0.98);
+                // 兩條白色切線（從原點到弧線兩端）- 頭尾漸淡，與射線同粗細
+                drawFadedLine(startAngle, 2, alpha, originX, originY);
+                drawFadedLine(endAngle, 2, alpha, originX, originY);
             }
 
             if (progress >= 1) {
@@ -956,17 +963,26 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 繪製圓形邊緣線（60% 透明度，與網格特效同時顯示）
-    private drawCircleEdge(radius: number, color: number, customOriginX?: number, customOriginY?: number) {
+    // 繪製圓形邊緣線（白色，每120度一段漸層透明）
+    private drawCircleEdge(radius: number, _color: number, customOriginX?: number, customOriginY?: number) {
         const graphics = this.add.graphics();
-        this.worldContainer.add(graphics);
+        // 加到 skillGridContainer 並設定深度在網格之上
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(55); // 在網格 (50) 之上
 
-        const originX = customOriginX ?? this.characterX;
-        const originY = customOriginY ?? this.characterY;
+        // 記錄世界座標（每幀重新計算螢幕座標以跟隨鏡頭）
+        const worldOriginX = customOriginX ?? this.characterX;
+        const worldOriginY = customOriginY ?? this.characterY;
 
         const duration = 500;
         const holdTime = 300;
         const startTime = this.time.now;
+
+        // 每段 120 度，分成 3 段
+        const segmentCount = 3;
+        const segmentAngle = (Math.PI * 2) / segmentCount;
+        // 每段內分成多個小段來繪製漸層
+        const subSegments = 24;
 
         const updateEffect = () => {
             const elapsed = this.time.now - startTime;
@@ -974,20 +990,45 @@ export default class MainScene extends Phaser.Scene {
 
             graphics.clear();
 
+            // 每幀重新計算螢幕座標以跟隨鏡頭
+            const screen = this.worldToScreen(worldOriginX, worldOriginY);
+            const originX = screen.x;
+            const originY = screen.y;
+
             let fadeProgress = 0;
             if (elapsed > holdTime) {
                 fadeProgress = (elapsed - holdTime) / (duration - holdTime);
             }
-            const alpha = 0.6 * (1 - fadeProgress);
+            const baseAlpha = 1.0 * (1 - fadeProgress);
 
-            if (alpha > 0.01) {
-                // 外圈圓線
-                graphics.lineStyle(3, color, alpha);
-                graphics.strokeCircle(originX, originY, radius);
+            if (baseAlpha > 0.01) {
+                // 繪製 3 段，每段 120 度，帶漸層透明（兩端亮、中間暗）
+                for (let seg = 0; seg < segmentCount; seg++) {
+                    const segStartAngle = seg * segmentAngle - Math.PI / 2; // 從頂部開始
 
-                // 白色高光邊緣
-                graphics.lineStyle(1.5, 0xffffff, alpha * 0.5);
-                graphics.strokeCircle(originX, originY, radius * 0.98);
+                    for (let i = 0; i < subSegments; i++) {
+                        // 計算這個小段的透明度（兩端 1.0，中間 0.2）
+                        const t = i / subSegments;
+                        // 使用 cos 曲線：0->1->0 對應 兩端亮->中間暗->兩端亮
+                        const alphaFactor = 0.2 + 0.8 * Math.abs(Math.cos(t * Math.PI));
+                        const segmentAlpha = baseAlpha * alphaFactor;
+
+                        const angle1 = segStartAngle + (i / subSegments) * segmentAngle;
+                        const angle2 = segStartAngle + ((i + 1) / subSegments) * segmentAngle;
+
+                        const x1 = originX + Math.cos(angle1) * radius;
+                        const y1 = originY + Math.sin(angle1) * radius;
+                        const x2 = originX + Math.cos(angle2) * radius;
+                        const y2 = originY + Math.sin(angle2) * radius;
+
+                        // 白色圓弧線段（與射線同粗細）
+                        graphics.lineStyle(2, 0xffffff, segmentAlpha);
+                        graphics.beginPath();
+                        graphics.moveTo(x1, y1);
+                        graphics.lineTo(x2, y2);
+                        graphics.strokePath();
+                    }
+                }
             }
 
             if (progress >= 1) {
@@ -2544,7 +2585,7 @@ export default class MainScene extends Phaser.Scene {
         // 如果有按鍵按下
         if (dx !== 0 || dy !== 0) {
             this.isKeyboardMoving = true;
-            this.isMoving = false; // 取消點擊移動
+            this.isPointerDown = false; // 取消點擊移動
 
             // 更新角色面向
             if (dx !== 0) {
@@ -2588,7 +2629,7 @@ export default class MainScene extends Phaser.Scene {
         } else {
             this.isKeyboardMoving = false;
             // 沒有按鍵時，如果也沒有點擊移動，切換到待機
-            if (!this.isMoving) {
+            if (!this.isPointerDown) {
                 this.setCharacterState('idle');
                 this.updateCharacterSprite();
             }
@@ -2605,22 +2646,26 @@ export default class MainScene extends Phaser.Scene {
         }
 
         this.isPointerDown = true;
-        this.updateTargetFromPointer(pointer);
-        this.isMoving = true;
+        this.updateMoveDirectionFromPointer(pointer);
     }
 
     private onPointerMove(pointer: Phaser.Input.Pointer) {
-        // 只有在按住時才更新目標
+        // 只有在按住時才更新方向
         if (!this.isPointerDown || this.isPaused) return;
 
         // 檢查是否仍在遊戲區域內
         if (this.isPointerInGameArea(pointer)) {
-            this.updateTargetFromPointer(pointer);
+            this.updateMoveDirectionFromPointer(pointer);
         }
     }
 
     private onPointerUp() {
         this.isPointerDown = false;
+        // 放開時立即停止移動並切換到待機
+        if (!this.isKeyboardMoving) {
+            this.setCharacterState('idle');
+            this.updateCharacterSprite();
+        }
     }
 
     private isPointerInGameArea(pointer: Phaser.Input.Pointer): boolean {
@@ -2632,7 +2677,7 @@ export default class MainScene extends Phaser.Scene {
         );
     }
 
-    private updateTargetFromPointer(pointer: Phaser.Input.Pointer) {
+    private updateMoveDirectionFromPointer(pointer: Phaser.Input.Pointer) {
         // 將螢幕座標轉換為地圖座標
         const localX = pointer.x - this.gameBounds.x;
         const localY = pointer.y - this.gameBounds.y;
@@ -2641,46 +2686,40 @@ export default class MainScene extends Phaser.Scene {
         const mapX = localX + this.cameraOffsetX;
         const mapY = localY + this.cameraOffsetY;
 
-        // 設定目標位置（限制在地圖範圍內）
-        this.targetX = Phaser.Math.Clamp(mapX, this.characterSize, this.mapWidth - this.characterSize);
-        this.targetY = Phaser.Math.Clamp(mapY, this.characterSize, this.mapHeight - this.characterSize);
+        // 計算從角色到點擊位置的方向向量
+        const dx = mapX - this.characterX;
+        const dy = mapY - this.characterY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // 標準化方向向量
+        if (distance > 0) {
+            this.moveDirX = dx / distance;
+            this.moveDirY = dy / distance;
+        } else {
+            this.moveDirX = 0;
+            this.moveDirY = 0;
+        }
     }
 
     private moveCharacter(delta: number) {
-        const dx = this.targetX - this.characterX;
-        const dy = this.targetY - this.characterY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        // 計算移動距離
+        const moveDistance = (this.moveSpeed * delta) / 1000;
 
-        // 更新角色面向
-        this.updateCharacterFacing(this.targetX);
+        // 根據方向移動
+        const newX = this.characterX + this.moveDirX * moveDistance;
+        const newY = this.characterY + this.moveDirY * moveDistance;
 
-        // 到達目標點（容差 5 像素）
-        if (distance < 5) {
-            this.characterX = this.targetX;
-            this.characterY = this.targetY;
-            this.isMoving = false;
-            // 到達後切換到待機
-            this.setCharacterState('idle');
-        } else {
-            // 計算移動距離
-            const moveDistance = (this.moveSpeed * delta) / 1000;
+        // 限制在地圖範圍內
+        this.characterX = Phaser.Math.Clamp(newX, this.characterSize, this.mapWidth - this.characterSize);
+        this.characterY = Phaser.Math.Clamp(newY, this.characterSize, this.mapHeight - this.characterSize);
 
-            if (moveDistance >= distance) {
-                // 一步到位
-                this.characterX = this.targetX;
-                this.characterY = this.targetY;
-                this.isMoving = false;
-                // 到達後切換到待機
-                this.setCharacterState('idle');
-            } else {
-                // 朝目標方向移動
-                const ratio = moveDistance / distance;
-                this.characterX += dx * ratio;
-                this.characterY += dy * ratio;
-                // 移動中切換到跑步動畫
-                this.setCharacterState('run');
-            }
+        // 更新角色面向（根據移動方向）
+        if (this.moveDirX !== 0) {
+            this.updateCharacterFacing(this.characterX + this.moveDirX);
         }
+
+        // 移動中切換到跑步動畫
+        this.setCharacterState('run');
 
         // 更新角色
         this.updateCharacterSprite();
@@ -2868,14 +2907,15 @@ export default class MainScene extends Phaser.Scene {
             barY + cellHeight / 2,
             `${this.currentHp} / ${this.maxHp}`,
             {
-                fontFamily: 'monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
                 stroke: '#000000',
-                strokeThickness: 4 // 黑邊加粗 1px
+                strokeThickness: 4
             }
         );
+        this.hpText.setResolution(2); // 提高解析度使文字更清晰
         this.hpText.setOrigin(0.5, 0.5);
         this.hpText.setDepth(1002);
         this.hpBarContainer.add(this.hpText);
@@ -2888,20 +2928,22 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private drawHpBarFill() {
-        // HP 條使用頂部 2 行網格格子（row 0 和 row 1）
-        const hpRows = [0, 1];
-        const totalCells = this.skillGridCols;
+        // HP 條使用頂部第 2、3 行網格格子（row 1 和 row 2，row 0 保留給邊框）
+        const hpRows = [1, 2];
+        // 可用格子數要扣除左右邊框（col 0 和 col cols-1）
+        const availableCells = this.skillGridCols - 2;
 
         // 計算各種 HP 填充格子數
         const fillRatio = this.currentHp / this.maxHp;
-        const fillCells = Math.floor(totalCells * fillRatio);
+        const fillCells = Math.floor(availableCells * fillRatio);
 
         const displayedRatio = this.displayedHp / this.maxHp;
-        const displayedCells = Math.floor(totalCells * displayedRatio);
+        const displayedCells = Math.floor(availableCells * displayedRatio);
 
-        // 先繪製所有頂部格子為黑底
+        // 先繪製所有頂部格子為黑底（跳過左右邊框）
         for (const row of hpRows) {
-            for (let col = 0; col < this.skillGridCols; col++) {
+            for (let i = 0; i < availableCells; i++) {
+                const col = i + 1; // 從 col 1 開始
                 const index = row * this.skillGridCols + col;
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
@@ -2916,13 +2958,14 @@ export default class MainScene extends Phaser.Scene {
         // 繪製白色損傷區塊（displayedHp 到 currentHp 之間）
         if (displayedCells > fillCells) {
             for (const row of hpRows) {
-                for (let col = fillCells; col < displayedCells; col++) {
+                for (let i = fillCells; i < displayedCells; i++) {
+                    const col = i + 1; // 從 col 1 開始
                     const index = row * this.skillGridCols + col;
                     const cell = this.skillGridCells[index];
                     if (!cell) continue;
 
                     // 白色損傷區塊，上排亮一點
-                    const alpha = row === 0 ? 0.85 : 0.7;
+                    const alpha = row === 1 ? 0.85 : 0.7;
                     cell.setFillStyle(0xffffff, alpha);
                 }
             }
@@ -2932,13 +2975,14 @@ export default class MainScene extends Phaser.Scene {
 
         // 繪製 HP 格子（頂部 2 行，暗紅暗紫漸層流動效果）
         for (const row of hpRows) {
-            for (let col = 0; col < fillCells; col++) {
+            for (let i = 0; i < fillCells; i++) {
+                const col = i + 1; // 從 col 1 開始
                 const index = row * this.skillGridCols + col;
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
 
                 // 計算漸層位置（加入流動偏移）
-                const baseT = col / totalCells;
+                const baseT = i / availableCells;
                 const flowT = this.hpBarFlowOffset;
                 const t = (baseT + flowT) % 1;
 
@@ -2952,24 +2996,27 @@ export default class MainScene extends Phaser.Scene {
                 const color = (r << 16) | (g << 8) | b;
 
                 // 上排稍微亮一點（高光效果）
-                const alpha = row === 0 ? 0.95 : 0.8;
+                const alpha = row === 1 ? 0.95 : 0.8;
 
                 cell.setFillStyle(color, alpha);
             }
         }
 
-        // 護盾覆蓋在上半部（row 0），不額外繪製新格子
+        // 護盾覆蓋在上半部（row 1，跟 HP 一起下移），跳過左右邊框
         if (this.currentShield > 0 && this.maxShield > 0) {
             const shieldRatio = this.currentShield / this.maxShield;
-            const shieldCells = Math.floor(totalCells * shieldRatio);
+            // 可用格子數要扣除左右邊框
+            const availableCells = this.skillGridCols - 2;
+            const shieldCells = Math.floor(availableCells * shieldRatio);
 
-            for (let col = 0; col < shieldCells; col++) {
-                const index = 0 * this.skillGridCols + col; // row 0
+            for (let i = 0; i < shieldCells; i++) {
+                const col = i + 1; // 從 col 1 開始（跳過左邊框）
+                const index = 1 * this.skillGridCols + col; // row 1
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
 
                 // 計算金色漸層位置（加入流動偏移）
-                const baseT = col / totalCells;
+                const baseT = i / availableCells;
                 const flowT = this.shieldBarFlowOffset;
                 const t = (baseT + flowT) % 1;
 
@@ -3030,10 +3077,10 @@ export default class MainScene extends Phaser.Scene {
     private updateHpText() {
         if (this.hpText) {
             if (this.currentShield > 0) {
-                // 有護盾時顯示：HP(+盾) / MaxHP
-                this.hpText.setText(`${this.currentHp}(+${this.currentShield}) / ${this.maxHp}`);
+                // 有護盾時顯示更緊湊的格式：HP+盾/Max
+                this.hpText.setText(`${this.currentHp}+${this.currentShield}/${this.maxHp}`);
             } else {
-                this.hpText.setText(`${this.currentHp} / ${this.maxHp}`);
+                this.hpText.setText(`${this.currentHp}/${this.maxHp}`);
             }
         }
     }
@@ -3415,7 +3462,7 @@ export default class MainScene extends Phaser.Scene {
             // 進入受傷硬直狀態
             this.isHurt = true;
             this.hurtEndTime = this.time.now + MainScene.HURT_DURATION;
-            this.isMoving = false; // 停止移動
+            this.isPointerDown = false; // 停止移動
             this.isKeyboardMoving = false;
 
             // 播放受傷動畫
@@ -3702,6 +3749,13 @@ export default class MainScene extends Phaser.Scene {
     // 清除邊緣格子的紅暈效果
     private clearVignetteCells() {
         for (const index of this.vignetteEdgeCells) {
+            const row = Math.floor(index / this.skillGridCols);
+            const col = index % this.skillGridCols;
+            // 不清除邊框格子
+            if (row === 0 || row === this.skillGridRows - 1 ||
+                col === 0 || col === this.skillGridCols - 1) {
+                continue;
+            }
             const cell = this.skillGridCells[index];
             if (cell) {
                 cell.setFillStyle(0xffffff, 0);
@@ -3752,11 +3806,15 @@ export default class MainScene extends Phaser.Scene {
         const radiusX = this.skillGridCols / 2 * 2;
         const radiusY = this.skillGridRows / 2 * 2;
 
-        // 遍歷所有格子（跳過頂部 2 行 HP 條和底部 2 行經驗條區域）
-        const hpBarEndRow = 2;
-        const expBarStartRow = this.skillGridRows - 2;
-        for (let row = hpBarEndRow; row < expBarStartRow; row++) {
-            for (let col = 0; col < this.skillGridCols; col++) {
+        // 遍歷所有格子（跳過邊框、HP 條和經驗條區域）
+        // 邊框：row 0, row (rows-1), col 0, col (cols-1)
+        // HP 條：row 1, 2
+        // 經驗條：row (rows-3), (rows-2)
+        const startRow = 3; // 跳過 row 0 (邊框) + row 1,2 (HP)
+        const endRow = this.skillGridRows - 3; // 跳過 row (rows-1) (邊框) + row (rows-3, rows-2) (經驗)
+        for (let row = startRow; row < endRow; row++) {
+            // 跳過左右邊框（col 0 和 col (cols-1)）
+            for (let col = 1; col < this.skillGridCols - 1; col++) {
                 const index = row * this.skillGridCols + col;
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
@@ -3802,7 +3860,7 @@ export default class MainScene extends Phaser.Scene {
             barY - 5,
             `Lv.${this.currentLevel}`,
             {
-                fontFamily: 'monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
@@ -3810,6 +3868,7 @@ export default class MainScene extends Phaser.Scene {
                 strokeThickness: 3
             }
         );
+        this.levelText.setResolution(2); // 提高解析度使文字更清晰
         this.levelText.setOrigin(0, 1);
         this.expBarContainer.add(this.levelText);
         // 經驗條現在使用網格格子繪製
@@ -3820,11 +3879,15 @@ export default class MainScene extends Phaser.Scene {
 
     private drawExpBarFill() {
         // 經驗條現在使用底部 2 行網格格子
-        const expRows = [this.skillGridRows - 2, this.skillGridRows - 1];
+        // EXP 條往上移一格（最底行 row 保留給邊框）
+        const expRows = [this.skillGridRows - 3, this.skillGridRows - 2];
+        // 可用格子數要扣除左右邊框
+        const availableCells = this.skillGridCols - 2;
 
-        // 先繪製所有底部格子為黑底（優先渲染）
+        // 先繪製所有底部格子為黑底（跳過左右邊框）
         for (const row of expRows) {
-            for (let col = 0; col < this.skillGridCols; col++) {
+            for (let i = 0; i < availableCells; i++) {
+                const col = i + 1; // 從 col 1 開始
                 const index = row * this.skillGridCols + col;
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
@@ -3839,20 +3902,20 @@ export default class MainScene extends Phaser.Scene {
 
         // 計算填充格子數
         const fillRatio = this.currentExp / this.maxExp;
-        const totalExpCells = this.skillGridCols; // 一行的格子數
-        const fillCells = Math.floor(totalExpCells * fillRatio);
+        const fillCells = Math.floor(availableCells * fillRatio);
 
         if (fillCells <= 0) return;
 
         // 繪製經驗格子（底部 2 行，漸層流動效果）
         for (const row of expRows) {
-            for (let col = 0; col < fillCells; col++) {
+            for (let i = 0; i < fillCells; i++) {
+                const col = i + 1; // 從 col 1 開始
                 const index = row * this.skillGridCols + col;
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
 
                 // 計算漸層位置（加入流動偏移）
-                const baseT = col / totalExpCells;
+                const baseT = i / availableCells;
                 const flowT = this.expBarFlowOffset;
                 const t = (baseT + flowT) % 1;
 
@@ -3885,6 +3948,56 @@ export default class MainScene extends Phaser.Scene {
 
         // 重繪經驗條
         this.drawExpBarFill();
+    }
+
+    // 繪製遊戲區域邊框（使用 UI 網格最外圍一圈）
+    private drawBorderFrame() {
+        const borderColor = 0x333333;
+        const borderAlpha = 0.95;
+
+        // 頂部邊框（row 0）
+        for (let col = 0; col < this.skillGridCols; col++) {
+            const index = 0 * this.skillGridCols + col;
+            const cell = this.skillGridCells[index];
+            if (cell) {
+                cell.setFillStyle(borderColor, borderAlpha);
+                cell.setVisible(true);
+                cell.setDepth(1001); // 比其他 UI 元素更高
+            }
+        }
+
+        // 底部邊框（最後一行）
+        for (let col = 0; col < this.skillGridCols; col++) {
+            const index = (this.skillGridRows - 1) * this.skillGridCols + col;
+            const cell = this.skillGridCells[index];
+            if (cell) {
+                cell.setFillStyle(borderColor, borderAlpha);
+                cell.setVisible(true);
+                cell.setDepth(1001);
+            }
+        }
+
+        // 左側邊框（第一列，排除已繪製的角落）
+        for (let row = 1; row < this.skillGridRows - 1; row++) {
+            const index = row * this.skillGridCols + 0;
+            const cell = this.skillGridCells[index];
+            if (cell) {
+                cell.setFillStyle(borderColor, borderAlpha);
+                cell.setVisible(true);
+                cell.setDepth(1001);
+            }
+        }
+
+        // 右側邊框（最後一列，排除已繪製的角落）
+        for (let row = 1; row < this.skillGridRows - 1; row++) {
+            const index = row * this.skillGridCols + (this.skillGridCols - 1);
+            const cell = this.skillGridCells[index];
+            if (cell) {
+                cell.setFillStyle(borderColor, borderAlpha);
+                cell.setVisible(true);
+                cell.setDepth(1001);
+            }
+        }
     }
 
     private drawFloorGrid() {
@@ -3993,13 +4106,14 @@ export default class MainScene extends Phaser.Scene {
             // 等級文字
             const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
             const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
-                fontFamily: 'monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
                 stroke: '#000000',
                 strokeThickness: 3
             });
+            levelText.setResolution(2); // 提高解析度使文字更清晰
             levelText.setOrigin(0.5, 0.5);
             container.add(levelText);
 
@@ -4037,13 +4151,14 @@ export default class MainScene extends Phaser.Scene {
             // 等級文字
             const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
             const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
-                fontFamily: 'monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
                 stroke: '#000000',
                 strokeThickness: 3
             });
+            levelText.setResolution(2); // 提高解析度使文字更清晰
             levelText.setOrigin(0.5, 0.5);
             container.add(levelText);
 
@@ -4264,12 +4379,14 @@ export default class MainScene extends Phaser.Scene {
         this.skillInfoPanel.add(this.skillInfoBg);
 
         // 技能資訊文字
+        const infoFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, 12);
         this.skillInfoText = this.add.text(padding, padding, '', {
-            fontFamily: 'monospace',
-            fontSize: '12px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+            fontSize: `${infoFontSize}px`,
             color: '#ffffff',
             wordWrap: { width: panelWidth - padding * 2 }
         });
+        this.skillInfoText.setResolution(2); // 提高解析度使文字更清晰
         this.skillInfoPanel.add(this.skillInfoText);
 
         // 初始隱藏
@@ -4591,12 +4708,13 @@ export default class MainScene extends Phaser.Scene {
             titleY,
             '選擇技能',
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(this.gameBounds.height * 0.07))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             }
         );
+        title.setResolution(2);
         title.setOrigin(0.5, 0.5);
         this.skillPanelContainer.add(title);
 
@@ -4607,11 +4725,12 @@ export default class MainScene extends Phaser.Scene {
             subtitleY,
             '提升你的數位能力',
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.025))}px`,
                 color: '#cccccc'
             }
         );
+        subtitle.setResolution(2);
         subtitle.setOrigin(0.5, 0.5);
         this.skillPanelContainer.add(subtitle);
 
@@ -4626,11 +4745,12 @@ export default class MainScene extends Phaser.Scene {
             hintY,
             hintText,
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.022))}px`,
                 color: '#888888'
             }
         );
+        hint.setResolution(2);
         hint.setOrigin(0.5, 0.5);
         this.skillPanelContainer.add(hint);
     }
@@ -4752,12 +4872,13 @@ export default class MainScene extends Phaser.Scene {
             barY - barHeight * 0.18,
             titleText,
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.35))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             }
         );
+        title.setResolution(2);
         title.setOrigin(0.5, 0.5);
         this.skillCutInContainer.add(title);
 
@@ -4771,11 +4892,12 @@ export default class MainScene extends Phaser.Scene {
             barY + barHeight * 0.22,
             descriptionText,
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.22))}px`,
                 color: Phaser.Display.Color.IntegerToColor(skillDef.color).rgba
             }
         );
+        description.setResolution(2);
         description.setOrigin(0.5, 0.5);
         this.skillCutInContainer.add(description);
 
@@ -4852,11 +4974,12 @@ export default class MainScene extends Phaser.Scene {
 
             // 技能類型標籤
             const typeLabel = this.add.text(0, -cardHeight * 0.42, skillDef.type === 'active' ? 'ACTIVE' : 'PASSIVE', {
-                fontFamily: 'monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))}px`,
                 color: skillDef.type === 'active' ? '#ff6666' : '#66ffff',
                 fontStyle: 'bold'
             });
+            typeLabel.setResolution(2);
             typeLabel.setOrigin(0.5, 0.5);
             optionContainer.add(typeLabel);
 
@@ -4870,21 +4993,23 @@ export default class MainScene extends Phaser.Scene {
             // 技能名稱（固定位置）
             const nameY = cardHeight * 0.06;
             const nameText = this.add.text(0, nameY, skillDef.name, {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.08))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             });
+            nameText.setResolution(2);
             nameText.setOrigin(0.5, 0.5);
             optionContainer.add(nameText);
 
             // 副標題（如果有）
             if (skillDef.subtitle) {
                 const subtitleText = this.add.text(0, cardHeight * 0.12, skillDef.subtitle, {
-                    fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                    fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
                     color: '#999999'
                 });
+                subtitleText.setResolution(2);
                 subtitleText.setOrigin(0.5, 0.5);
                 optionContainer.add(subtitleText);
             }
@@ -4899,34 +5024,37 @@ export default class MainScene extends Phaser.Scene {
                 levelDisplay = `Lv.${displayCurrentLevel} → Lv.${nextLevel}`;
             }
             const levelText = this.add.text(0, cardHeight * 0.20, levelDisplay, {
-                fontFamily: 'monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
                 color: nextLevel >= skillDef.maxLevel ? '#ffff00' : '#88ff88',
                 fontStyle: 'bold'
             });
+            levelText.setResolution(2);
             levelText.setOrigin(0.5, 0.5);
             optionContainer.add(levelText);
 
             // 技能描述（固定位置，手機版下移利用更多空間）
             const descY = this.isMobile ? cardHeight * 0.36 : cardHeight * 0.32;
             const descText = this.add.text(0, descY, skillDef.description, {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, sans-serif',
+                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
-                color: '#dddddd', // 提亮顏色以便閱讀
+                color: '#dddddd',
                 wordWrap: { width: cardWidth * 0.85 },
                 align: 'center'
             });
-            descText.setOrigin(0.5, 0.5);
+            descText.setResolution(2);
+            descText.setOrigin(0.5, 0);  // 從頂部開始，避免超出底部
             optionContainer.add(descText);
 
             // 按鍵提示標籤（手機版隱藏）
             if (!this.isMobile) {
                 const keyLabel = this.add.text(0, cardHeight * 0.42, `[ ${keys[i]} ]`, {
-                    fontFamily: 'monospace',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
                     color: '#ffff00',
                     fontStyle: 'bold'
                 });
+                keyLabel.setResolution(2);
                 keyLabel.setOrigin(0.5, 0.5);
                 optionContainer.add(keyLabel);
             }
@@ -4982,7 +5110,7 @@ export default class MainScene extends Phaser.Scene {
         }
 
         this.isPaused = true;
-        this.isMoving = false; // 停止移動
+        this.isPointerDown = false; // 停止移動
         this.skillPanelContainer.setVisible(true);
 
         // 重設選中狀態為第一個
@@ -5120,6 +5248,9 @@ export default class MainScene extends Phaser.Scene {
 
         // 放在 uiContainer 中（加到最前面，讓其他 UI 在上層）
         this.uiContainer.addAt(this.skillGridContainer, 0);
+
+        // 繪製邊框
+        this.drawBorderFrame();
     }
 
     // 重新建立技能範圍格子（用於切換網格倍率）
@@ -5372,12 +5503,19 @@ export default class MainScene extends Phaser.Scene {
                 return;
             }
             const row = Math.floor(index / this.skillGridCols);
-            // 如果是頂部 2 行（HP/護盾條），不清除
-            if (row < 2) {
+            const col = index % this.skillGridCols;
+
+            // 如果是最外圈邊框（row 0、最後一行、第一列、最後一列），不清除
+            if (row === 0 || row === this.skillGridRows - 1 ||
+                col === 0 || col === this.skillGridCols - 1) {
                 return;
             }
-            // 如果是底部 2 行（經驗條），不清除
-            if (row >= this.skillGridRows - 2) {
+            // 如果是頂部 HP/護盾條區域（row 1, 2），不清除
+            if (row <= 2) {
+                return;
+            }
+            // 如果是底部經驗條區域（row rows-3, rows-2），不清除
+            if (row >= this.skillGridRows - 3) {
                 return;
             }
             cell.setVisible(false);
