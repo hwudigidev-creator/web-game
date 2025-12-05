@@ -121,6 +121,9 @@ export default class MainScene extends Phaser.Scene {
     // HP 自動回復計時器（鈦金肝被動技能）
     private hpRegenTimer: number = 0;
 
+    // 不死復活（鈦金肝 MAX 後）
+    private reviveUsed: boolean = false;
+
     // HP 損傷顯示（白色區塊延遲靠攏）
     private displayedHp: number = 200; // 顯示的 HP（延遲跟隨實際 HP）
     private hpDamageDelay: number = 0; // 損傷延遲計時器（毫秒）
@@ -291,17 +294,6 @@ export default class MainScene extends Phaser.Scene {
         this.character.play('char_idle');
         this.characterContainer.add(this.character);
 
-        // 建立怪物管理系統
-        this.monsterManager = new MonsterManager(
-            this,
-            this.gameAreaContainer,
-            this.gameBounds,
-            this.mapWidth,
-            this.mapHeight
-        );
-        // 設定初始網格倍率（與技能特效同步）
-        this.monsterManager.setGridScaleMultiplier(this.gridScaleMultiplier);
-
         // 把世界容器加入遊戲區域容器
         this.gameAreaContainer.add([this.boundsBorder, this.worldContainer]);
 
@@ -317,12 +309,21 @@ export default class MainScene extends Phaser.Scene {
         const geometryMask = clipMask.createGeometryMask();
         this.worldContainer.setMask(geometryMask);
 
-        // 套用遮罩到怪物網格
-        this.monsterManager.setClipMask(geometryMask);
-
         // 建立 UI 容器（固定在螢幕上，不隨鏡頭移動）
         this.uiContainer = this.add.container(0, 0);
-        this.uiContainer.setDepth(10); // 在遊戲區域之上
+        this.uiContainer.setDepth(100); // 在遊戲區域之上，確保絕對在怪物和技能網格之上
+
+        // 建立怪物管理系統
+        this.monsterManager = new MonsterManager(
+            this,
+            this.gameBounds,
+            this.mapWidth,
+            this.mapHeight
+        );
+        // 設定初始網格倍率（與技能特效同步）
+        this.monsterManager.setGridScaleMultiplier(this.gridScaleMultiplier);
+        // 套用遮罩到怪物網格
+        this.monsterManager.setClipMask(geometryMask);
 
         // 建立技能範圍格子覆蓋層（放在 UI 層）
         this.createSkillGrid();
@@ -691,7 +692,7 @@ export default class MainScene extends Phaser.Scene {
         // 傷害：2 單位 + 每級 1 單位（Lv.0=2單位，Lv.5=7單位）
         const damageUnits = 2 + skill.level;
         const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-        const finalDamage = this.skillManager.calculateFinalDamage(baseDamage);
+        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
         // 檢查哪些怪物在扇形範圍內
         const hitMonsters: number[] = [];
@@ -744,8 +745,12 @@ export default class MainScene extends Phaser.Scene {
                 this.addExp(result.totalExp);
             }
 
-            // 命中回饋：白色十字高光
-            this.flashWhiteCrossAtPositions(hitPositions);
+            // 命中回饋：白色十字高光（暴擊時使用橙色）
+            if (isCrit) {
+                this.flashCritCrossAtPositions(hitPositions);
+            } else {
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
 
             // 舊版特效：十字星芒效果
             if (this.showLegacySkillEffects) {
@@ -754,7 +759,8 @@ export default class MainScene extends Phaser.Scene {
 
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
-            console.log(`Soul Render hit ${hitMonsters.length} monsters for ${finalDamage} damage, killed ${result.killCount}, exp +${result.totalExp}`);
+            const critText = isCrit ? ' [CRIT!]' : '';
+            console.log(`Soul Render hit ${hitMonsters.length} monsters for ${finalDamage} damage${critText}, killed ${result.killCount}, exp +${result.totalExp}`);
         }
 
         // MAX 後額外能力：衝擊波（從扇形末端發射持續前進的扇形波）
@@ -1147,7 +1153,7 @@ export default class MainScene extends Phaser.Scene {
         // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
         const damageUnits = 1 + skill.level;
         const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-        const finalDamage = this.skillManager.calculateFinalDamage(baseDamage);
+        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
         // 檢查哪些怪物在範圍內
         const hitMonsters: number[] = [];
@@ -1188,8 +1194,12 @@ export default class MainScene extends Phaser.Scene {
                 this.addExp(result.totalExp);
             }
 
-            // 命中回饋：白色十字高光
-            this.flashWhiteCrossAtPositions(hitPositions);
+            // 命中回饋：白色十字高光（暴擊時使用橙色）
+            if (isCrit) {
+                this.flashCritCrossAtPositions(hitPositions);
+            } else {
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
 
             // 舊版特效：十字星芒效果
             if (this.showLegacySkillEffects) {
@@ -1198,7 +1208,8 @@ export default class MainScene extends Phaser.Scene {
 
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
-            console.log(`Coder hit ${hitMonsters.length} monsters for ${finalDamage} damage, killed ${result.killCount}, exp +${result.totalExp}`);
+            const critText = isCrit ? ' [CRIT!]' : '';
+            console.log(`Coder hit ${hitMonsters.length} monsters for ${finalDamage} damage${critText}, killed ${result.killCount}, exp +${result.totalExp}`);
 
             // MAX 後額外能力：爆發（從擊殺位置再次發動）
             const burstChance = this.skillManager.getCoderBurstChance(this.currentLevel);
@@ -1597,7 +1608,7 @@ export default class MainScene extends Phaser.Scene {
         // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
         const damageUnits = 1 + skill.level;
         const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-        const finalDamage = this.skillManager.calculateFinalDamage(baseDamage);
+        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
         // 收集所有被命中的怪物（使用 Set 避免重複）
         const allHitMonsters = new Set<number>();
@@ -1690,8 +1701,12 @@ export default class MainScene extends Phaser.Scene {
                 this.addExp(result.totalExp);
             }
 
-            // 命中回饋：白色十字高光
-            this.flashWhiteCrossAtPositions(hitPositions);
+            // 命中回饋：白色十字高光（暴擊時使用橙色）
+            if (isCrit) {
+                this.flashCritCrossAtPositions(hitPositions);
+            } else {
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
 
             // 舊版特效：十字星芒效果
             if (this.showLegacySkillEffects) {
@@ -1700,7 +1715,8 @@ export default class MainScene extends Phaser.Scene {
 
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsterIds.length);
-            console.log(`VFX (${beamCount} beams) hit ${hitMonsterIds.length} monsters for ${finalDamage} damage, killed ${result.killCount}, exp +${result.totalExp}`);
+            const critText = isCrit ? ' [CRIT!]' : '';
+            console.log(`VFX (${beamCount} beams) hit ${hitMonsterIds.length} monsters for ${finalDamage} damage${critText}, killed ${result.killCount}, exp +${result.totalExp}`);
 
             // MAX 後額外能力：連鎖（從擊殺位置再發射）
             const chainChance = this.skillManager.getVfxChainChance(this.currentLevel);
@@ -2456,7 +2472,11 @@ export default class MainScene extends Phaser.Scene {
         this.displayedHp = this.maxHp; // 同步顯示 HP
 
         // 更新怪物管理器的玩家等級（影響新生成怪物的血量）
-        this.monsterManager.setPlayerLevel(this.currentLevel);
+        const shouldSpawnBoss = this.monsterManager.setPlayerLevel(this.currentLevel);
+        if (shouldSpawnBoss) {
+            // 每 10 級生成 BOSS
+            this.monsterManager.spawnBoss(this.cameraOffsetX, this.cameraOffsetY);
+        }
 
         // 更新等級顯示
         this.levelText.setText(`Lv.${this.currentLevel}`);
@@ -2897,9 +2917,9 @@ export default class MainScene extends Phaser.Scene {
         this.hpBarContainer = this.add.container(0, 0);
         this.hpBarContainer.setDepth(1001); // 在網格之上
 
-        // HP 文字位置（頂部網格上方）
+        // HP 文字位置（頂部 HP 條 3 排的中間，row 1-3）
         const cellHeight = this.skillGridCellSize;
-        const barY = this.gameBounds.y + cellHeight * 2;
+        const barY = this.gameBounds.y + cellHeight * 2; // row 1-3 的中間位置
         const fontSize = Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(this.gameBounds.height * 0.03));
 
         this.hpText = this.add.text(
@@ -2928,11 +2948,22 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private drawHpBarFill() {
-        // HP 條使用頂部第 2、3 行網格格子（row 1 和 row 2，row 0 保留給邊框）
-        const hpRows = [1, 2];
+        // ============================================================
+        // ⚠️ 重要：不可刪除！HP/護盾條 UI 佈局設定
+        // HP 條使用頂部 3 排（row 1, 2, 3）
+        // 護盾條重疊在 HP 的上面 2 排（row 1, 2）
+        // 修改此設定時，必須同步更新以下位置：
+        // - clearSkillGrid() 中的 row 保護範圍
+        // - clearVignetteCells() 中的 row 保護範圍
+        // - drawGridVignette() 中的 startRow
+        // - createHpBar() 中的 barY 位置
+        // ============================================================
+        const hpRows = [1, 2, 3];
+        const shieldRows = [1, 2];
         // 可用格子數要扣除左右邊框（col 0 和 col cols-1）
         const availableCells = this.skillGridCols - 2;
 
+        // ===== 第一步：先繪製 HP 條（3 排，底層）=====
         // 計算各種 HP 填充格子數
         const fillRatio = this.currentHp / this.maxHp;
         const fillCells = Math.floor(availableCells * fillRatio);
@@ -2940,15 +2971,14 @@ export default class MainScene extends Phaser.Scene {
         const displayedRatio = this.displayedHp / this.maxHp;
         const displayedCells = Math.floor(availableCells * displayedRatio);
 
-        // 先繪製所有頂部格子為黑底（跳過左右邊框）
+        // 繪製 HP 區黑底
         for (const row of hpRows) {
             for (let i = 0; i < availableCells; i++) {
-                const col = i + 1; // 從 col 1 開始
+                const col = i + 1;
                 const index = row * this.skillGridCols + col;
                 const cell = this.skillGridCells[index];
                 if (!cell) continue;
 
-                // 設置黑底並顯示
                 cell.setFillStyle(0x000000, 0.9);
                 cell.setVisible(true);
                 cell.setDepth(1000);
@@ -2959,77 +2989,86 @@ export default class MainScene extends Phaser.Scene {
         if (displayedCells > fillCells) {
             for (const row of hpRows) {
                 for (let i = fillCells; i < displayedCells; i++) {
-                    const col = i + 1; // 從 col 1 開始
+                    const col = i + 1;
                     const index = row * this.skillGridCols + col;
                     const cell = this.skillGridCells[index];
                     if (!cell) continue;
 
                     // 白色損傷區塊，上排亮一點
-                    const alpha = row === 1 ? 0.85 : 0.7;
+                    const rowIndex = hpRows.indexOf(row);
+                    const alpha = rowIndex === 0 ? 0.85 : (rowIndex === 1 ? 0.75 : 0.65);
                     cell.setFillStyle(0xffffff, alpha);
                 }
             }
         }
 
-        if (fillCells <= 0) return;
+        // 繪製 HP 格子（3 行，暗紅暗紫漸層流動效果）
+        if (fillCells > 0) {
+            for (const row of hpRows) {
+                for (let i = 0; i < fillCells; i++) {
+                    const col = i + 1;
+                    const index = row * this.skillGridCols + col;
+                    const cell = this.skillGridCells[index];
+                    if (!cell) continue;
 
-        // 繪製 HP 格子（頂部 2 行，暗紅暗紫漸層流動效果）
-        for (const row of hpRows) {
-            for (let i = 0; i < fillCells; i++) {
-                const col = i + 1; // 從 col 1 開始
-                const index = row * this.skillGridCols + col;
-                const cell = this.skillGridCells[index];
-                if (!cell) continue;
+                    // 計算漸層位置（加入流動偏移）
+                    const baseT = i / availableCells;
+                    const flowT = this.hpBarFlowOffset;
+                    const t = (baseT + flowT) % 1;
 
-                // 計算漸層位置（加入流動偏移）
-                const baseT = i / availableCells;
-                const flowT = this.hpBarFlowOffset;
-                const t = (baseT + flowT) % 1;
+                    // 使用正弦波讓頭尾同色（暗紅→暗紫→暗紅）
+                    const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
 
-                // 使用正弦波讓頭尾同色（暗紅→暗紫→暗紅）
-                const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+                    // 暗紅色 (0x880022) 到 暗紫色 (0x660088) 漸層
+                    const r = Math.floor(0x88 - (0x88 - 0x66) * wave);
+                    const g = 0x00;
+                    const b = Math.floor(0x22 + (0x88 - 0x22) * wave);
+                    const color = (r << 16) | (g << 8) | b;
 
-                // 暗紅色 (0x880022) 到 暗紫色 (0x660088) 漸層
-                const r = Math.floor(0x88 - (0x88 - 0x66) * wave);
-                const g = 0x00;
-                const b = Math.floor(0x22 + (0x88 - 0x22) * wave);
-                const color = (r << 16) | (g << 8) | b;
+                    // 上排亮、下排暗（高光效果）
+                    const rowIndex = hpRows.indexOf(row);
+                    const alpha = rowIndex === 0 ? 0.95 : (rowIndex === 1 ? 0.85 : 0.75);
 
-                // 上排稍微亮一點（高光效果）
-                const alpha = row === 1 ? 0.95 : 0.8;
-
-                cell.setFillStyle(color, alpha);
+                    cell.setFillStyle(color, alpha);
+                }
             }
         }
 
-        // 護盾覆蓋在上半部（row 1，跟 HP 一起下移），跳過左右邊框
+        // ===== 第二步：繪製護盾條（2 排，覆蓋在 HP 上方）=====
+        // 護盾有值時才覆蓋顯示，優先權高於 HP
         if (this.currentShield > 0 && this.maxShield > 0) {
             const shieldRatio = this.currentShield / this.maxShield;
-            // 可用格子數要扣除左右邊框
-            const availableCells = this.skillGridCols - 2;
             const shieldCells = Math.floor(availableCells * shieldRatio);
 
-            for (let i = 0; i < shieldCells; i++) {
-                const col = i + 1; // 從 col 1 開始（跳過左邊框）
-                const index = 1 * this.skillGridCols + col; // row 1
-                const cell = this.skillGridCells[index];
-                if (!cell) continue;
+            for (const row of shieldRows) {
+                for (let i = 0; i < availableCells; i++) {
+                    const col = i + 1;
+                    const index = row * this.skillGridCols + col;
+                    const cell = this.skillGridCells[index];
+                    if (!cell) continue;
 
-                // 計算金色漸層位置（加入流動偏移）
-                const baseT = i / availableCells;
-                const flowT = this.shieldBarFlowOffset;
-                const t = (baseT + flowT) % 1;
+                    if (i < shieldCells) {
+                        // 有護盾的格子：顯示金色
+                        // 計算金色漸層位置（加入流動偏移）
+                        const baseT = i / availableCells;
+                        const flowT = this.shieldBarFlowOffset;
+                        const t = (baseT + flowT) % 1;
 
-                // 使用正弦波（金→白金→金）- 淡的地方更白
-                const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+                        // 使用正弦波（金→白金→金）
+                        const wave = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
 
-                // 金色 (0xffcc00) 到 白金色 (0xffffcc) 漸層
-                const r = 0xff;
-                const g = Math.floor(0xcc + (0xff - 0xcc) * wave);
-                const b = Math.floor(0x00 + (0xcc - 0x00) * wave);
-                const color = (r << 16) | (g << 8) | b;
+                        // 金色 (0xffcc00) 到 白金色 (0xffffcc) 漸層
+                        const r = 0xff;
+                        const g = Math.floor(0xcc + (0xff - 0xcc) * wave);
+                        const b = Math.floor(0x00 + (0xcc - 0x00) * wave);
+                        const color = (r << 16) | (g << 8) | b;
 
-                cell.setFillStyle(color, 0.95);
+                        // 上排稍微亮一點
+                        const alpha = row === shieldRows[0] ? 0.95 : 0.8;
+                        cell.setFillStyle(color, alpha);
+                    }
+                    // 沒護盾的格子保持 HP 的顏色（已經在上面繪製過了）
+                }
             }
         }
     }
@@ -3382,6 +3421,15 @@ export default class MainScene extends Phaser.Scene {
 
     // 玩家受到傷害
     private takeDamage(amount: number, attackingMonsters: Monster[] = []) {
+        // 迅捷：閃避判定（精神同步率強化 MAX 後啟用）
+        const dodgeChance = this.skillManager.getSyncRateDodgeChance(this.currentLevel);
+        if (dodgeChance > 0 && Math.random() < dodgeChance) {
+            console.log(`Dodged! (${(dodgeChance * 100).toFixed(1)}% chance)`);
+            // 顯示閃避特效（角色快速閃爍藍白色）
+            this.flashDodgeEffect();
+            return; // 完全閃避傷害
+        }
+
         // 套用防禦減免
         const actualDamage = this.skillManager.calculateFinalDamageTaken(amount);
 
@@ -3480,10 +3528,30 @@ export default class MainScene extends Phaser.Scene {
             console.log(`Shield absorbed all ${shieldAbsorbed} damage, Shield: ${this.currentShield}`);
         }
 
-        // 如果 HP 歸零，可以在這裡處理遊戲結束
+        // 如果 HP 歸零，檢查是否可以復活
         if (this.currentHp <= 0) {
-            console.log('Player died!');
-            // TODO: 遊戲結束處理
+            // 檢查不死能力（鈦金肝 MAX）
+            if (!this.reviveUsed && this.skillManager.hasTitaniumLiverRevive()) {
+                this.reviveUsed = true;
+                this.currentHp = this.maxHp;
+                this.displayedHp = this.maxHp;
+
+                console.log('【不死】觸發！復活並回滿 HP！');
+
+                // 觸發暗影爆炸
+                this.triggerShadowExplosion();
+
+                // 更新顯示
+                this.drawHpBarFill();
+                this.updateHpText();
+                this.updateLowHpVignette();
+
+                // 角色閃爍紫黑色特效
+                this.flashReviveEffect();
+            } else {
+                console.log('Player died!');
+                // TODO: 遊戲結束處理
+            }
         }
     }
 
@@ -3720,6 +3788,273 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
+    // 閃避特效（藍白色快速閃爍）
+    private flashDodgeEffect() {
+        // 閃亮藍色
+        this.character.setTint(0x66ccff);
+
+        // 50ms 後閃純白
+        this.time.delayedCall(50, () => {
+            this.character.setTint(0xffffff);
+        });
+
+        // 100ms 後再閃藍
+        this.time.delayedCall(100, () => {
+            this.character.setTint(0x66ccff);
+        });
+
+        // 150ms 後恢復正常
+        this.time.delayedCall(150, () => {
+            this.character.clearTint();
+        });
+    }
+
+    // 復活特效（紫黑色多次閃爍）
+    private flashReviveEffect() {
+        const flashSequence = [0x660066, 0x220022, 0x880088, 0x440044, 0xaa00aa];
+        let index = 0;
+
+        const flash = () => {
+            if (index < flashSequence.length) {
+                this.character.setTint(flashSequence[index]);
+                index++;
+                this.time.delayedCall(80, flash);
+            } else {
+                this.character.clearTint();
+            }
+        };
+
+        flash();
+    }
+
+    // 暗影爆炸（秒殺 5 單位距離內所有敵人）
+    private triggerShadowExplosion() {
+        const unitSize = this.gameBounds.height * 0.1; // 1 單位 = 畫面高度 10%
+        const explosionRange = unitSize * 5; // 5 單位距離
+
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsterIds: number[] = [];
+
+        for (const monster of monsters) {
+            const dx = monster.x - this.characterX;
+            const dy = monster.y - this.characterY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 計算怪物碰撞半徑
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+            // 距離扣除怪物半徑，邊緣碰到就算命中
+            if (dist - monsterRadius <= explosionRange) {
+                hitMonsterIds.push(monster.id);
+            }
+        }
+
+        if (hitMonsterIds.length > 0) {
+            // 取得命中怪物的位置
+            const hitPositions = monsters
+                .filter(m => hitMonsterIds.includes(m.id))
+                .map(m => ({ x: m.x, y: m.y }));
+
+            // 秒殺傷害（使用極大值）
+            const instantKillDamage = 999999;
+            const result = this.monsterManager.damageMonsters(hitMonsterIds, instantKillDamage);
+
+            if (result.totalExp > 0) {
+                this.addExp(result.totalExp);
+            }
+
+            // 顯示暗影打擊特效
+            this.flashShadowCrossAtPositions(hitPositions);
+
+            console.log(`【暗影爆炸】秒殺 ${hitMonsterIds.length} 隻怪物，獲得 ${result.totalExp} 經驗`);
+        }
+
+        // 繪製暗影圓形範圍特效
+        this.drawShadowExplosionEffect(explosionRange);
+
+        // 繪製暗影圓形邊緣線
+        this.drawCircleEdge(explosionRange, 0x660066);
+
+        // 繪製暗影打擊區網格特效
+        this.flashSkillAreaCircle(this.characterX, this.characterY, explosionRange, 0x880088);
+
+        // 畫面震動
+        this.cameras.main.shake(200, 0.01);
+    }
+
+    // 暗影爆炸圓形特效
+    private drawShadowExplosionEffect(radius: number) {
+        const graphics = this.add.graphics();
+        this.worldContainer.add(graphics);
+
+        const centerX = this.characterX;
+        const centerY = this.characterY;
+        const shadowColor = 0x440044; // 暗紫色
+        const duration = 800;
+        const startTime = this.time.now;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            graphics.clear();
+
+            // 從中心向外擴散的暗影效果
+            const currentRadius = radius * progress;
+            const alpha = 0.6 * (1 - progress);
+
+            if (alpha > 0.01) {
+                graphics.fillStyle(shadowColor, alpha);
+                graphics.fillCircle(centerX, centerY, currentRadius);
+
+                // 外圈光暈
+                graphics.lineStyle(4, 0x880088, alpha * 0.8);
+                graphics.strokeCircle(centerX, centerY, currentRadius);
+            }
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            timerEvent.remove();
+            if (graphics.active) graphics.destroy();
+        });
+    }
+
+    // 批量顯示暗影十字高光（紫色）
+    private flashShadowCrossAtPositions(positions: { x: number, y: number }[]) {
+        positions.forEach(pos => {
+            this.flashShadowCrossAt(pos.x, pos.y);
+        });
+    }
+
+    // 在擊中位置顯示暗影十字高光（紫色）
+    private flashShadowCrossAt(worldX: number, worldY: number) {
+        const screen = this.worldToScreen(worldX, worldY);
+        const gap = MainScene.SKILL_GRID_GAP;
+        const cellTotal = this.skillGridCellSize + gap;
+
+        const centerCol = Math.floor(screen.x / cellTotal);
+        const centerRow = Math.floor(screen.y / cellTotal);
+        const centerX = centerCol * cellTotal + this.skillGridCellSize / 2;
+        const centerY = centerRow * cellTotal + this.skillGridCellSize / 2;
+
+        const crossLength = 5; // 十字臂長度（更大）
+        const duration = 500; // 總時長
+        const startTime = this.time.now;
+
+        // 隨機旋轉方向和角度
+        const rotateDirection = Math.random() < 0.5 ? 1 : -1;
+        const rotateAngle = (Math.PI / 4 + Math.random() * Math.PI / 4) * rotateDirection; // 45~90度
+
+        const crossCells: { offsetX: number, offsetY: number, dist: number }[] = [];
+        crossCells.push({ offsetX: 0, offsetY: 0, dist: 0 });
+
+        const directions = [
+            { dc: 1, dr: 0 },
+            { dc: -1, dr: 0 },
+            { dc: 0, dr: 1 },
+            { dc: 0, dr: -1 }
+        ];
+
+        for (const { dc, dr } of directions) {
+            for (let i = 1; i <= crossLength; i++) {
+                crossCells.push({
+                    offsetX: dc * i * cellTotal,
+                    offsetY: dr * i * cellTotal,
+                    dist: i
+                });
+            }
+        }
+
+        if (crossCells.length === 0) return;
+
+        const shadowColor = 0x880088; // 暗紫色
+
+        const flashCells: Phaser.GameObjects.Rectangle[] = [];
+        for (let i = 0; i < crossCells.length; i++) {
+            const cell = this.add.rectangle(centerX, centerY, this.skillGridCellSize, this.skillGridCellSize, shadowColor, 0);
+            cell.setVisible(false);
+            this.skillGridContainer.add(cell);
+            flashCells.push(cell);
+        }
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            const currentAngle = rotateAngle * progress;
+            const cos = Math.cos(currentAngle);
+            const sin = Math.sin(currentAngle);
+
+            const fadeDistance = crossLength * progress;
+
+            for (let i = 0; i < crossCells.length; i++) {
+                const { offsetX, offsetY, dist } = crossCells[i];
+                const cell = flashCells[i];
+                if (!cell) continue;
+
+                const rotatedX = centerX + offsetX * cos - offsetY * sin;
+                const rotatedY = centerY + offsetX * sin + offsetY * cos;
+                cell.setPosition(rotatedX, rotatedY);
+
+                if (dist >= fadeDistance) {
+                    const distRatio = dist / crossLength;
+                    const baseAlpha = 1 - distRatio * 0.2;
+
+                    let edgeFade = 1;
+                    if (fadeDistance > 0 && dist < fadeDistance + 1) {
+                        edgeFade = (dist - fadeDistance);
+                    }
+
+                    const currentAlpha = baseAlpha * Math.max(0, edgeFade);
+
+                    if (currentAlpha > 0.01) {
+                        cell.setFillStyle(shadowColor, currentAlpha);
+                        cell.setVisible(true);
+                    } else {
+                        cell.setVisible(false);
+                    }
+                } else {
+                    cell.setVisible(false);
+                }
+            }
+
+            if (progress >= 1) {
+                for (const cell of flashCells) {
+                    cell.destroy();
+                }
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            timerEvent.remove();
+            for (const cell of flashCells) {
+                if (cell.active) cell.destroy();
+            }
+        });
+    }
+
     // 畫面震動效果（一次擊中多隻怪物時觸發）
     private shakeScreen(hitCount: number) {
         // 至少擊中 10 隻才觸發震動
@@ -3754,6 +4089,13 @@ export default class MainScene extends Phaser.Scene {
             // 不清除邊框格子
             if (row === 0 || row === this.skillGridRows - 1 ||
                 col === 0 || col === this.skillGridCols - 1) {
+                continue;
+            }
+            // ============================================================
+            // ⚠️ 重要：不可刪除！HP/護盾條區域保護（row 1-3）
+            // 這段代碼防止 vignette 清除時影響 HP/護盾條的顯示
+            // ============================================================
+            if (row >= 1 && row <= 3) {
                 continue;
             }
             const cell = this.skillGridCells[index];
@@ -3808,9 +4150,9 @@ export default class MainScene extends Phaser.Scene {
 
         // 遍歷所有格子（跳過邊框、HP 條和經驗條區域）
         // 邊框：row 0, row (rows-1), col 0, col (cols-1)
-        // HP 條：row 1, 2
+        // HP 條：row 1, 2, 3（護盾重疊在 row 1, 2）
         // 經驗條：row (rows-3), (rows-2)
-        const startRow = 3; // 跳過 row 0 (邊框) + row 1,2 (HP)
+        const startRow = 4; // 跳過 row 0 (邊框) + row 1,2,3 (HP)
         const endRow = this.skillGridRows - 3; // 跳過 row (rows-1) (邊框) + row (rows-3, rows-2) (經驗)
         for (let row = startRow; row < endRow; row++) {
             // 跳過左右邊框（col 0 和 col (cols-1)）
@@ -4363,11 +4705,12 @@ export default class MainScene extends Phaser.Scene {
         const bounds = this.gameBounds;
         const panelWidth = 200;
         const panelHeight = 80;
-        const padding = 10;
+        // 距離邊緣 5%
+        const edgeMargin = bounds.width * 0.05;
 
-        // 窗格位置：左下角
-        const x = bounds.x + padding;
-        const y = bounds.y + bounds.height - panelHeight - padding - 60; // 在技能欄上方
+        // 窗格位置：左下角，距離邊緣 5%
+        const x = bounds.x + edgeMargin;
+        const y = bounds.y + bounds.height - panelHeight - edgeMargin - 60; // 在技能欄上方
 
         this.skillInfoPanel = this.add.container(x, y);
         this.skillInfoPanel.setDepth(1003); // 在網格和技能欄之上
@@ -4379,12 +4722,13 @@ export default class MainScene extends Phaser.Scene {
         this.skillInfoPanel.add(this.skillInfoBg);
 
         // 技能資訊文字
+        const textPadding = 10;
         const infoFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, 12);
-        this.skillInfoText = this.add.text(padding, padding, '', {
+        this.skillInfoText = this.add.text(textPadding, textPadding, '', {
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
             fontSize: `${infoFontSize}px`,
             color: '#ffffff',
-            wordWrap: { width: panelWidth - padding * 2 }
+            wordWrap: { width: panelWidth - textPadding * 2 }
         });
         this.skillInfoText.setResolution(2); // 提高解析度使文字更清晰
         this.skillInfoPanel.add(this.skillInfoText);
@@ -4540,11 +4884,14 @@ export default class MainScene extends Phaser.Scene {
             case 'passive_titanium_liver': {
                 const bonus = this.skillManager.getTitaniumLiverHpBonus();
                 const regenInterval = this.skillManager.getTitaniumLiverRegenInterval() / 1000;
-                const extraRegen = this.skillManager.getTitaniumLiverExtraRegen(this.currentLevel);
-                const totalRegenPercent = 1 + Math.round(extraRegen * 100);
                 lines.push(`HP 加成: +${Math.round(bonus * 100)}%`);
                 lines.push(`最大 HP: ${this.maxHp}`);
-                lines.push(`回復: 每 ${regenInterval} 秒 +${totalRegenPercent}% HP`);
+                lines.push(`回復: 每 ${regenInterval} 秒 +1% HP`);
+                // MAX 後顯示不死能力狀態
+                if (this.skillManager.hasTitaniumLiverRevive()) {
+                    const status = this.reviveUsed ? '(已使用)' : '(待命)';
+                    lines.push(`【不死】抵銷一次死亡 ${status}`);
+                }
                 break;
             }
             case 'passive_sync_rate': {
@@ -5229,9 +5576,10 @@ export default class MainScene extends Phaser.Scene {
         this.skillGridCols = Math.ceil((this.gameBounds.width + gap) / (this.skillGridCellSize + gap));
         this.skillGridRows = Math.ceil((this.gameBounds.height + gap) / (this.skillGridCellSize + gap));
 
-        // 建立格子容器（固定在螢幕上）
+        // 建立格子容器（直接加到場景，不加入 uiContainer，避免蓋住 UI）
         this.skillGridContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
-        this.skillGridContainer.setDepth(50);
+        // 深度 3：在 gameAreaContainer(0) 之上，怪物網格(5) 之下，uiContainer(100) 之下
+        this.skillGridContainer.setDepth(3);
 
         // 建立所有格子（初始隱藏）
         for (let row = 0; row < this.skillGridRows; row++) {
@@ -5245,9 +5593,6 @@ export default class MainScene extends Phaser.Scene {
                 this.skillGridContainer.add(cell);
             }
         }
-
-        // 放在 uiContainer 中（加到最前面，讓其他 UI 在上層）
-        this.uiContainer.addAt(this.skillGridContainer, 0);
 
         // 繪製邊框
         this.drawBorderFrame();
@@ -5510,8 +5855,11 @@ export default class MainScene extends Phaser.Scene {
                 col === 0 || col === this.skillGridCols - 1) {
                 return;
             }
-            // 如果是頂部 HP/護盾條區域（row 1, 2），不清除
-            if (row <= 2) {
+            // ============================================================
+            // ⚠️ 重要：不可刪除！HP/護盾條區域保護（row 1-3）
+            // HP 條 3 排 + 護盾重疊在上面 2 排，共用 row 1, 2, 3
+            // ============================================================
+            if (row >= 1 && row <= 3) {
                 return;
             }
             // 如果是底部經驗條區域（row rows-3, rows-2），不清除
@@ -5772,10 +6120,145 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
+    // 在擊中位置顯示暴擊十字高光（橙色，更大更亮）
+    flashCritCrossAt(worldX: number, worldY: number) {
+        const screen = this.worldToScreen(worldX, worldY);
+        const gap = MainScene.SKILL_GRID_GAP;
+        const cellTotal = this.skillGridCellSize + gap;
+
+        const centerCol = Math.floor(screen.x / cellTotal);
+        const centerRow = Math.floor(screen.y / cellTotal);
+        const centerX = centerCol * cellTotal + this.skillGridCellSize / 2;
+        const centerY = centerRow * cellTotal + this.skillGridCellSize / 2;
+
+        const crossLength = 4; // 十字臂長度（比普通攻擊長）
+        const duration = 400; // 總時長 400ms（比普通攻擊長）
+        const startTime = this.time.now;
+
+        // 隨機旋轉方向和角度（30~60度）
+        const rotateDirection = Math.random() < 0.5 ? 1 : -1;
+        const rotateAngle = (Math.PI / 6 + Math.random() * Math.PI / 6) * rotateDirection; // 30~60度
+
+        // 收集十字形狀的格子（中心 + 四個方向），記錄相對中心的偏移
+        const crossCells: { offsetX: number, offsetY: number, dist: number }[] = [];
+
+        // 中心格子
+        crossCells.push({ offsetX: 0, offsetY: 0, dist: 0 });
+
+        // 四個方向
+        const directions = [
+            { dc: 1, dr: 0 },  // 右
+            { dc: -1, dr: 0 }, // 左
+            { dc: 0, dr: 1 },  // 下
+            { dc: 0, dr: -1 }  // 上
+        ];
+
+        for (const { dc, dr } of directions) {
+            for (let i = 1; i <= crossLength; i++) {
+                crossCells.push({
+                    offsetX: dc * i * cellTotal,
+                    offsetY: dr * i * cellTotal,
+                    dist: i
+                });
+            }
+        }
+
+        if (crossCells.length === 0) return;
+
+        // 暴擊顏色（橙色）
+        const critColor = 0xff8800;
+
+        // 建立十字格子
+        const flashCells: Phaser.GameObjects.Rectangle[] = [];
+        for (let i = 0; i < crossCells.length; i++) {
+            const cell = this.add.rectangle(centerX, centerY, this.skillGridCellSize, this.skillGridCellSize, critColor, 0);
+            cell.setVisible(false);
+            this.skillGridContainer.add(cell);
+            flashCells.push(cell);
+        }
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 當前旋轉角度
+            const currentAngle = rotateAngle * progress;
+            const cos = Math.cos(currentAngle);
+            const sin = Math.sin(currentAngle);
+
+            // 從中心往外淡出
+            const fadeDistance = crossLength * progress;
+
+            for (let i = 0; i < crossCells.length; i++) {
+                const { offsetX, offsetY, dist } = crossCells[i];
+                const cell = flashCells[i];
+                if (!cell) continue;
+
+                // 旋轉後的位置
+                const rotatedX = centerX + offsetX * cos - offsetY * sin;
+                const rotatedY = centerY + offsetX * sin + offsetY * cos;
+                cell.setPosition(rotatedX, rotatedY);
+
+                if (dist >= fadeDistance) {
+                    // 距離越遠透明度越低
+                    const distRatio = dist / crossLength;
+                    const baseAlpha = 1 - distRatio * 0.3; // 中心 100%，邊緣 70%（比普通更亮）
+
+                    // 接近淡出邊緣時漸變透明
+                    let edgeFade = 1;
+                    if (fadeDistance > 0 && dist < fadeDistance + 1) {
+                        edgeFade = (dist - fadeDistance);
+                    }
+
+                    const currentAlpha = baseAlpha * Math.max(0, edgeFade);
+
+                    if (currentAlpha > 0.01) {
+                        cell.setFillStyle(critColor, currentAlpha);
+                        cell.setVisible(true);
+                    } else {
+                        cell.setVisible(false);
+                    }
+                } else {
+                    cell.setVisible(false);
+                }
+            }
+
+            // 動畫結束時清理
+            if (progress >= 1) {
+                for (const cell of flashCells) {
+                    cell.destroy();
+                }
+            }
+        };
+
+        updateEffect();
+
+        const timerEvent = this.time.addEvent({
+            delay: 16,
+            callback: updateEffect,
+            callbackScope: this,
+            repeat: Math.ceil(duration / 16)
+        });
+
+        this.time.delayedCall(duration + 50, () => {
+            timerEvent.remove();
+            for (const cell of flashCells) {
+                if (cell.active) cell.destroy();
+            }
+        });
+    }
+
     // 批量顯示白色十字高光
     flashWhiteCrossAtPositions(positions: { x: number, y: number }[]) {
         positions.forEach(pos => {
             this.flashWhiteCrossAt(pos.x, pos.y);
+        });
+    }
+
+    // 批量顯示暴擊十字高光（橙色）
+    flashCritCrossAtPositions(positions: { x: number, y: number }[]) {
+        positions.forEach(pos => {
+            this.flashCritCrossAt(pos.x, pos.y);
         });
     }
 
@@ -5901,10 +6384,11 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 顯示技能打擊區持續特效（扇形）- 帶展開和淡出動畫
+    // 特效固定在世界位置，不跟隨玩家移動
     flashSkillAreaSector(centerX: number, centerY: number, radius: number, angle: number, halfAngle: number, color: number) {
-        const screen = this.worldToScreen(centerX, centerY);
-        const screenCenterX = screen.x;
-        const screenCenterY = screen.y;
+        // 使用世界座標為基準（不轉換成螢幕座標）
+        const worldCenterX = centerX;
+        const worldCenterY = centerY;
 
         const gap = MainScene.SKILL_GRID_GAP;
         const cellTotal = this.skillGridCellSize + gap;
@@ -5914,21 +6398,24 @@ export default class MainScene extends Phaser.Scene {
         const holdTime = 150; // 中間 150ms 高亮停留
         const startTime = this.time.now;
 
-        // 收集所有在扇形範圍內的格子及其距離
-        const cellsInArea: { col: number, row: number, dist: number, angleDist: number }[] = [];
+        // 收集所有在扇形範圍內的格子及其距離（使用世界座標計算）
+        const cellsInArea: { worldX: number, worldY: number, dist: number, angleDist: number }[] = [];
 
-        const minCol = Math.max(0, Math.floor((screenCenterX - radius) / cellTotal));
-        const maxCol = Math.min(this.skillGridCols - 1, Math.ceil((screenCenterX + radius) / cellTotal));
-        const minRow = Math.max(0, Math.floor((screenCenterY - radius) / cellTotal));
-        const maxRow = Math.min(this.skillGridRows - 1, Math.ceil((screenCenterY + radius) / cellTotal));
+        // 計算覆蓋範圍（世界座標）
+        const minWorldX = worldCenterX - radius;
+        const maxWorldX = worldCenterX + radius;
+        const minWorldY = worldCenterY - radius;
+        const maxWorldY = worldCenterY + radius;
 
-        for (let row = minRow; row <= maxRow; row++) {
-            for (let col = minCol; col <= maxCol; col++) {
-                const cellCenterX = col * cellTotal + this.skillGridCellSize / 2;
-                const cellCenterY = row * cellTotal + this.skillGridCellSize / 2;
+        // 遍歷網格
+        for (let worldY = minWorldY; worldY <= maxWorldY; worldY += cellTotal) {
+            for (let worldX = minWorldX; worldX <= maxWorldX; worldX += cellTotal) {
+                // 對齊到網格
+                const snappedX = Math.round(worldX / cellTotal) * cellTotal;
+                const snappedY = Math.round(worldY / cellTotal) * cellTotal;
 
-                const dx = cellCenterX - screenCenterX;
-                const dy = cellCenterY - screenCenterY;
+                const dx = snappedX - worldCenterX;
+                const dy = snappedY - worldCenterY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist <= radius && dist > 0) {
@@ -5937,7 +6424,7 @@ export default class MainScene extends Phaser.Scene {
                     if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
 
                     if (angleDiff <= halfAngle) {
-                        cellsInArea.push({ col, row, dist, angleDist: angleDiff });
+                        cellsInArea.push({ worldX: snappedX, worldY: snappedY, dist, angleDist: angleDiff });
                     }
                 }
             }
@@ -5945,14 +6432,13 @@ export default class MainScene extends Phaser.Scene {
 
         if (cellsInArea.length === 0) return;
 
-        // 使用獨立的 Rectangle 物件來避免與預覽衝突
+        // 使用獨立的 Rectangle 物件，加到 worldContainer（會隨鏡頭移動，固定在世界位置）
         const flashCells: Phaser.GameObjects.Rectangle[] = [];
-        for (const { col, row } of cellsInArea) {
-            const x = col * cellTotal + this.skillGridCellSize / 2;
-            const y = row * cellTotal + this.skillGridCellSize / 2;
-            const cell = this.add.rectangle(x, y, this.skillGridCellSize, this.skillGridCellSize, color, 0);
+        for (const { worldX, worldY } of cellsInArea) {
+            const cell = this.add.rectangle(worldX, worldY, this.skillGridCellSize, this.skillGridCellSize, color, 0);
             cell.setVisible(false);
-            this.skillGridContainer.add(cell);
+            cell.setDepth(50); // 在地板之上
+            this.worldContainer.add(cell);
             flashCells.push(cell);
         }
 
@@ -6067,10 +6553,11 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 顯示技能打擊區持續特效（圓形）- 帶展開和淡出動畫
+    // 特效固定在世界位置，不跟隨玩家移動
     flashSkillAreaCircle(centerX: number, centerY: number, radius: number, color: number) {
-        const screen = this.worldToScreen(centerX, centerY);
-        const screenCenterX = screen.x;
-        const screenCenterY = screen.y;
+        // 使用世界座標為基準
+        const worldCenterX = centerX;
+        const worldCenterY = centerY;
 
         const gap = MainScene.SKILL_GRID_GAP;
         const cellTotal = this.skillGridCellSize + gap;
@@ -6080,37 +6567,40 @@ export default class MainScene extends Phaser.Scene {
         const holdTime = 150;
         const startTime = this.time.now;
 
-        const cellsInArea: { col: number, row: number, dist: number }[] = [];
+        const cellsInArea: { worldX: number, worldY: number, dist: number }[] = [];
 
-        const minCol = Math.max(0, Math.floor((screenCenterX - radius) / cellTotal));
-        const maxCol = Math.min(this.skillGridCols - 1, Math.ceil((screenCenterX + radius) / cellTotal));
-        const minRow = Math.max(0, Math.floor((screenCenterY - radius) / cellTotal));
-        const maxRow = Math.min(this.skillGridRows - 1, Math.ceil((screenCenterY + radius) / cellTotal));
+        // 計算覆蓋範圍（世界座標）
+        const minWorldX = worldCenterX - radius;
+        const maxWorldX = worldCenterX + radius;
+        const minWorldY = worldCenterY - radius;
+        const maxWorldY = worldCenterY + radius;
 
-        for (let row = minRow; row <= maxRow; row++) {
-            for (let col = minCol; col <= maxCol; col++) {
-                const cellCenterX = col * cellTotal + this.skillGridCellSize / 2;
-                const cellCenterY = row * cellTotal + this.skillGridCellSize / 2;
+        // 遍歷網格
+        for (let worldY = minWorldY; worldY <= maxWorldY; worldY += cellTotal) {
+            for (let worldX = minWorldX; worldX <= maxWorldX; worldX += cellTotal) {
+                // 對齊到網格
+                const snappedX = Math.round(worldX / cellTotal) * cellTotal;
+                const snappedY = Math.round(worldY / cellTotal) * cellTotal;
 
-                const dx = cellCenterX - screenCenterX;
-                const dy = cellCenterY - screenCenterY;
+                const dx = snappedX - worldCenterX;
+                const dy = snappedY - worldCenterY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist <= radius) {
-                    cellsInArea.push({ col, row, dist });
+                    cellsInArea.push({ worldX: snappedX, worldY: snappedY, dist });
                 }
             }
         }
 
         if (cellsInArea.length === 0) return;
 
+        // 使用獨立的 Rectangle 物件，加到 worldContainer（固定在世界位置）
         const flashCells: Phaser.GameObjects.Rectangle[] = [];
-        for (const { col, row } of cellsInArea) {
-            const x = col * cellTotal + this.skillGridCellSize / 2;
-            const y = row * cellTotal + this.skillGridCellSize / 2;
-            const cell = this.add.rectangle(x, y, this.skillGridCellSize, this.skillGridCellSize, color, 0);
+        for (const { worldX, worldY } of cellsInArea) {
+            const cell = this.add.rectangle(worldX, worldY, this.skillGridCellSize, this.skillGridCellSize, color, 0);
             cell.setVisible(false);
-            this.skillGridContainer.add(cell);
+            cell.setDepth(50);
+            this.worldContainer.add(cell);
             flashCells.push(cell);
         }
 
@@ -6213,15 +6703,19 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 顯示技能打擊區持續特效（光束/線性）- 帶展開、延遲、變細和淡出動畫
+    // 特效固定在世界位置，不跟隨玩家移動
     flashSkillAreaLine(startX: number, startY: number, endX: number, endY: number, width: number, color: number) {
-        const screenStart = this.worldToScreen(startX, startY);
-        const screenEnd = this.worldToScreen(endX, endY);
+        // 使用世界座標為基準
+        const worldStartX = startX;
+        const worldStartY = startY;
+        const worldEndX = endX;
+        const worldEndY = endY;
 
         const gap = MainScene.SKILL_GRID_GAP;
         const cellTotal = this.skillGridCellSize + gap;
 
-        const dx = screenEnd.x - screenStart.x;
-        const dy = screenEnd.y - screenStart.y;
+        const dx = worldEndX - worldStartX;
+        const dy = worldEndY - worldStartY;
         const length = Math.sqrt(dx * dx + dy * dy);
         if (length === 0) return;
 
@@ -6238,13 +6732,13 @@ export default class MainScene extends Phaser.Scene {
         const fadeTime = duration - expandTime - holdTime; // 淡出時間
         const startTime = this.time.now;
 
-        const cellsInArea: { col: number, row: number, distAlong: number, distToLine: number }[] = [];
+        const cellsInArea: { worldX: number, worldY: number, distAlong: number, distToLine: number }[] = [];
 
         const corners = [
-            { x: screenStart.x + normX * halfWidth, y: screenStart.y + normY * halfWidth },
-            { x: screenStart.x - normX * halfWidth, y: screenStart.y - normY * halfWidth },
-            { x: screenEnd.x + normX * halfWidth, y: screenEnd.y + normY * halfWidth },
-            { x: screenEnd.x - normX * halfWidth, y: screenEnd.y - normY * halfWidth }
+            { x: worldStartX + normX * halfWidth, y: worldStartY + normY * halfWidth },
+            { x: worldStartX - normX * halfWidth, y: worldStartY - normY * halfWidth },
+            { x: worldEndX + normX * halfWidth, y: worldEndY + normY * halfWidth },
+            { x: worldEndX - normX * halfWidth, y: worldEndY - normY * halfWidth }
         ];
 
         const minX = Math.min(...corners.map(c => c.x));
@@ -6252,42 +6746,39 @@ export default class MainScene extends Phaser.Scene {
         const minY = Math.min(...corners.map(c => c.y));
         const maxY = Math.max(...corners.map(c => c.y));
 
-        const minCol = Math.max(0, Math.floor(minX / cellTotal));
-        const maxCol = Math.min(this.skillGridCols - 1, Math.ceil(maxX / cellTotal));
-        const minRow = Math.max(0, Math.floor(minY / cellTotal));
-        const maxRow = Math.min(this.skillGridRows - 1, Math.ceil(maxY / cellTotal));
+        // 遍歷網格（世界座標）
+        for (let worldY = minY; worldY <= maxY; worldY += cellTotal) {
+            for (let worldX = minX; worldX <= maxX; worldX += cellTotal) {
+                // 對齊到網格
+                const snappedX = Math.round(worldX / cellTotal) * cellTotal;
+                const snappedY = Math.round(worldY / cellTotal) * cellTotal;
 
-        for (let row = minRow; row <= maxRow; row++) {
-            for (let col = minCol; col <= maxCol; col++) {
-                const cellCenterX = col * cellTotal + this.skillGridCellSize / 2;
-                const cellCenterY = row * cellTotal + this.skillGridCellSize / 2;
-
-                const toCellX = cellCenterX - screenStart.x;
-                const toCellY = cellCenterY - screenStart.y;
+                const toCellX = snappedX - worldStartX;
+                const toCellY = snappedY - worldStartY;
 
                 const projLength = toCellX * dirX + toCellY * dirY;
                 if (projLength < 0 || projLength > length) continue;
 
-                const projX = screenStart.x + dirX * projLength;
-                const projY = screenStart.y + dirY * projLength;
+                const projX = worldStartX + dirX * projLength;
+                const projY = worldStartY + dirY * projLength;
 
-                const distToLine = Math.sqrt((cellCenterX - projX) ** 2 + (cellCenterY - projY) ** 2);
+                const distToLine = Math.sqrt((snappedX - projX) ** 2 + (snappedY - projY) ** 2);
 
                 if (distToLine <= halfWidth) {
-                    cellsInArea.push({ col, row, distAlong: projLength, distToLine });
+                    cellsInArea.push({ worldX: snappedX, worldY: snappedY, distAlong: projLength, distToLine });
                 }
             }
         }
 
         if (cellsInArea.length === 0) return;
 
+        // 使用獨立的 Rectangle 物件，加到 worldContainer（固定在世界位置）
         const flashCells: Phaser.GameObjects.Rectangle[] = [];
-        for (const { col, row } of cellsInArea) {
-            const x = col * cellTotal + this.skillGridCellSize / 2;
-            const y = row * cellTotal + this.skillGridCellSize / 2;
-            const cell = this.add.rectangle(x, y, this.skillGridCellSize, this.skillGridCellSize, color, 0);
+        for (const { worldX, worldY } of cellsInArea) {
+            const cell = this.add.rectangle(worldX, worldY, this.skillGridCellSize, this.skillGridCellSize, color, 0);
             cell.setVisible(false);
-            this.skillGridContainer.add(cell);
+            cell.setDepth(50);
+            this.worldContainer.add(cell);
             flashCells.push(cell);
         }
 

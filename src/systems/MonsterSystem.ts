@@ -24,6 +24,13 @@ export interface Monster {
     squashStretch: number; // 當前壓扁/拉伸比例
     // 受傷閃爍狀態
     flashStartTime: number; // 閃爍開始時間，0 表示不閃爍
+    // 蝙蝠專用：固定移動方向（直線衝過畫面）
+    isBat?: boolean;
+    directionX?: number; // 移動方向 X（單位向量）
+    directionY?: number; // 移動方向 Y（單位向量）
+    // BOSS 專用
+    isBoss?: boolean;
+    bossHpMultiplier?: number; // BOSS HP 倍率（等於生成時的玩家等級）
 }
 
 // 怪物網格格子資料（畫面固定位置）
@@ -41,9 +48,29 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         color: 0x66ff66,
         speed: 1, // 每秒 1 單位
         damage: 1,
-        size: 0.08, // 畫面高度的 8%
+        size: 0.05, // 畫面高度的 5%（縮小）
         hp: 30,
         exp: 20
+    },
+    {
+        id: 'boss_slime',
+        name: 'BOSS 史萊姆',
+        color: 0x4a1a6b, // 暗紫色
+        speed: 0.6, // 較慢
+        damage: 3, // 3 倍傷害
+        size: 0.15, // 3 倍大（5% * 3）
+        hp: 30, // 基礎 HP（會根據等級倍數計算）
+        exp: 200 // 高經驗
+    },
+    {
+        id: 'bat',
+        name: '蝙蝠',
+        color: 0x8844aa, // 紫色
+        speed: 8, // 每秒 8 單位（非常快）
+        damage: 0.5, // 低傷害
+        size: 0.025, // 很小體型
+        hp: 10, // 固定 1 單位 HP（會被覆蓋為固定值）
+        exp: 5 // 固定經驗
     }
 ];
 
@@ -55,13 +82,22 @@ export class MonsterManager {
     private scene: Phaser.Scene;
     private monsters: Monster[] = [];
     private nextMonsterId: number = 0;
-    private gameAreaContainer: Phaser.GameObjects.Container;
     private clipMask: Phaser.Display.Masks.GeometryMask | null = null;
 
     // 生成設定
     private spawnInterval: number = 2000; // 每 2 秒生成一隻
     private lastSpawnTime: number = 0;
     private isSpawning: boolean = false;
+
+    // 蝙蝠群生成設定
+    private batSwarmInterval: number = 30000; // 每 30 秒生成一批
+    private lastBatSwarmTime: number = 0;
+    private batSwarmCount: number = 8; // 每批蝙蝠數量
+    private static readonly BAT_FIXED_HP = 10; // 固定 1 單位 HP
+    private static readonly BAT_FIXED_EXP = 5; // 固定經驗
+
+    // BOSS 生成追蹤（記錄已生成 BOSS 的等級）
+    private bossSpawnedAtLevels: Set<number> = new Set();
 
     // 遊戲區域
     private gameBounds: { x: number; y: number; width: number; height: number };
@@ -89,13 +125,11 @@ export class MonsterManager {
 
     constructor(
         scene: Phaser.Scene,
-        gameAreaContainer: Phaser.GameObjects.Container, // 遊戲區域容器，用於正確層級
         gameBounds: { x: number; y: number; width: number; height: number },
         mapWidth: number,
         mapHeight: number
     ) {
         this.scene = scene;
-        this.gameAreaContainer = gameAreaContainer;
         this.gameBounds = gameBounds;
         this.mapWidth = mapWidth;
         this.mapHeight = mapHeight;
@@ -104,8 +138,74 @@ export class MonsterManager {
     }
 
     // 設定玩家等級（用於怪物血量成長）
-    setPlayerLevel(level: number) {
+    // 返回是否需要生成 BOSS
+    setPlayerLevel(level: number): boolean {
         this.playerLevel = level;
+
+        // 檢查是否達到 BOSS 生成等級（每 10 級：10, 20, 30...）
+        if (level >= 10 && level % 10 === 0 && !this.bossSpawnedAtLevels.has(level)) {
+            // 標記已生成，避免重複
+            this.bossSpawnedAtLevels.add(level);
+            return true;
+        }
+        return false;
+    }
+
+    // 生成 BOSS（由外部呼叫，傳入生成位置）
+    spawnBoss(cameraOffsetX: number, cameraOffsetY: number) {
+        const bossLevel = this.playerLevel;
+        const bossDef = MONSTER_TYPES.find(m => m.id === 'boss_slime');
+        if (!bossDef) return;
+
+        // 隨機選擇生成點（畫面外的 3 個方向：上、左、右）
+        const spawnPoints: SpawnPoint[] = ['top', 'left', 'right'];
+        const spawnPoint = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+
+        let spawnX: number;
+        let spawnY: number;
+        const margin = 150; // BOSS 較大，需要更大的間距
+
+        const viewLeft = cameraOffsetX;
+        const viewRight = cameraOffsetX + this.gameBounds.width;
+        const viewTop = cameraOffsetY;
+
+        switch (spawnPoint) {
+            case 'top':
+                spawnX = viewLeft + Math.random() * this.gameBounds.width;
+                spawnY = viewTop - margin;
+                break;
+            case 'left':
+                spawnX = viewLeft - margin;
+                spawnY = viewTop + Math.random() * this.gameBounds.height;
+                break;
+            case 'right':
+                spawnX = viewRight + margin;
+                spawnY = viewTop + Math.random() * this.gameBounds.height;
+                break;
+        }
+
+        // BOSS HP = 基礎 HP * 等級成長 * 等級倍率
+        // 例如：10 級 BOSS HP = 基礎 * 成長^10 * 10
+        const baseHp = this.calculateMonsterHp(bossDef.hp);
+        const bossHp = baseHp * bossLevel;
+
+        const monster: Monster = {
+            id: this.nextMonsterId++,
+            definition: bossDef,
+            x: spawnX,
+            y: spawnY,
+            hp: bossHp,
+            lastDamageTime: 0,
+            bouncePhase: Math.random() * Math.PI * 2,
+            bounceSpeed: 1.5 + Math.random() * 0.5, // BOSS 彈跳較慢但更穩重
+            squashStretch: 1,
+            flashStartTime: 0,
+            isBoss: true,
+            bossHpMultiplier: bossLevel
+        };
+
+        this.monsters.push(monster);
+        console.log(`BOSS Slime spawned at level ${bossLevel}! HP: ${bossHp}`);
     }
 
     // 設定網格倍率（與技能特效同步）
@@ -136,10 +236,10 @@ export class MonsterManager {
 
     // 建立怪物網格層（畫面固定網格，緊密排列無間隙）
     private createMonsterGrid() {
-        // 加到 gameAreaContainer，位置固定在遊戲區域，層級在 UI 之下
+        // 直接加到場景（不是 uiContainer），用場景級別深度控制
         this.monsterGridContainer = this.scene.add.container(this.gameBounds.x, this.gameBounds.y);
-        this.monsterGridContainer.setDepth(58); // 在技能網格(50)、邊線(55)之上，角色(60)之下
-        this.gameAreaContainer.add(this.monsterGridContainer);
+        // 深度 5：在 gameAreaContainer(0) 之上，技能網格(3) 之上，uiContainer(100) 之下
+        this.monsterGridContainer.setDepth(5);
 
         // 套用遮罩（如果已設定）
         if (this.clipMask) {
@@ -191,10 +291,12 @@ export class MonsterManager {
         return Math.floor(baseHp * Math.pow(MonsterManager.HP_GROWTH_RATE, this.playerLevel));
     }
 
-    // 計算怪物傷害（玩家等級單位，最低 1 單位）
-    private calculateMonsterDamage(): number {
+    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率）
+    private calculateMonsterDamage(monster: Monster): number {
         const damageUnits = Math.max(1, this.playerLevel);
-        return MonsterManager.DAMAGE_UNIT * damageUnits;
+        const baseDamage = MonsterManager.DAMAGE_UNIT * damageUnits;
+        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）
+        return baseDamage * monster.definition.damage;
     }
 
     // 計算怪物經驗值（每 5 級翻倍）
@@ -207,6 +309,7 @@ export class MonsterManager {
     startSpawning() {
         this.isSpawning = true;
         this.lastSpawnTime = this.scene.time.now;
+        this.lastBatSwarmTime = this.scene.time.now; // 蝙蝠群也從現在開始計時
     }
 
     // 停止生成怪物
@@ -236,34 +339,69 @@ export class MonsterManager {
             this.lastSpawnTime = now;
         }
 
-        // 怪物大小（畫面高度的 10%）
-        const monsterSize = this.gameBounds.height * 0.10;
+        // 檢查是否需要生成蝙蝠群
+        if (this.isSpawning && now - this.lastBatSwarmTime >= this.batSwarmInterval) {
+            this.spawnBatSwarm(cameraOffsetX, cameraOffsetY);
+            this.lastBatSwarmTime = now;
+        }
+
         // 玩家碰撞範圍（1 個單位 = 畫面高度 10%）
         const collisionRange = this.gameBounds.height * 0.10;
 
         // 更新每隻怪物的位置和動畫狀態
-        this.monsters.forEach(monster => {
-            // 計算方向向量
-            const dx = playerX - monster.x;
-            const dy = playerY - monster.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+        const monstersToRemove: number[] = [];
 
-            // 如果距離玩家超過碰撞範圍，繼續移動
-            if (distance > collisionRange) {
-                // 正規化方向並移動
-                // 速度單位轉換：單位/秒 → 像素/秒（1 單位 = 畫面高度 10%）
+        this.monsters.forEach(monster => {
+            // 蝙蝠：沿固定方向直線移動，穿過畫面後消滅
+            if (monster.isBat && monster.directionX !== undefined && monster.directionY !== undefined) {
+                // 速度單位轉換：單位/秒 → 像素/秒
                 const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
                 const moveDistance = (speedInPixels * delta) / 1000;
-                const ratio = moveDistance / distance;
-                monster.x += dx * ratio;
-                monster.y += dy * ratio;
-            } else {
-                // 在碰撞範圍內，每 3 秒造成傷害
-                if (now - monster.lastDamageTime >= 3000) {
-                    // 傷害 = 玩家等級 / 10 單位（最低 1 單位）
-                    totalDamage += this.calculateMonsterDamage();
+
+                // 沿固定方向移動（始終保持同一方向）
+                monster.x += monster.directionX * moveDistance;
+                monster.y += monster.directionY * moveDistance;
+
+                // 檢查是否離開畫面（加上緩衝區）
+                const buffer = this.gameBounds.height * 0.3;
+                const screenLeft = cameraOffsetX - buffer;
+                const screenRight = cameraOffsetX + this.gameBounds.width + buffer;
+                const screenTop = cameraOffsetY - buffer;
+                const screenBottom = cameraOffsetY + this.gameBounds.height + buffer;
+
+                if (monster.x < screenLeft || monster.x > screenRight ||
+                    monster.y < screenTop || monster.y > screenBottom) {
+                    monstersToRemove.push(monster.id);
+                }
+
+                // 蝙蝠碰到玩家也造成傷害
+                const batDx = playerX - monster.x;
+                const batDy = playerY - monster.y;
+                const batDist = Math.sqrt(batDx * batDx + batDy * batDy);
+                if (batDist <= collisionRange && now - monster.lastDamageTime >= 3000) {
+                    totalDamage += this.calculateMonsterDamage(monster);
                     monster.lastDamageTime = now;
                     hitMonsters.push(monster);
+                }
+            } else {
+                // 普通怪物：朝玩家移動
+                const dx = playerX - monster.x;
+                const dy = playerY - monster.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > collisionRange) {
+                    const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
+                    const moveDistance = (speedInPixels * delta) / 1000;
+                    const ratio = moveDistance / distance;
+                    monster.x += dx * ratio;
+                    monster.y += dy * ratio;
+                } else {
+                    // 在碰撞範圍內，每 3 秒造成傷害
+                    if (now - monster.lastDamageTime >= 3000) {
+                        totalDamage += this.calculateMonsterDamage(monster);
+                        monster.lastDamageTime = now;
+                        hitMonsters.push(monster);
+                    }
                 }
             }
 
@@ -277,8 +415,13 @@ export class MonsterManager {
             monster.squashStretch = 1 + Math.sin(monster.bouncePhase) * squashAmount;
         });
 
+        // 移除離開畫面的蝙蝠
+        monstersToRemove.forEach(id => {
+            this.monsters = this.monsters.filter(m => m.id !== id);
+        });
+
         // 使用共用網格渲染所有怪物
-        this.renderMonstersToGrid(monsterSize, cameraOffsetX, cameraOffsetY);
+        this.renderMonstersToGrid(cameraOffsetX, cameraOffsetY);
 
         return { damage: totalDamage, hitMonsters };
     }
@@ -349,9 +492,123 @@ export class MonsterManager {
         this.monsters.push(monster);
     }
 
+    // 生成蝙蝠群（從斜對角衝向對角，穿過整個畫面）
+    private spawnBatSwarm(cameraOffsetX: number, cameraOffsetY: number) {
+        // 隨機選擇生成角落（四個角落之一）
+        const corners = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
+        const corner = corners[Math.floor(Math.random() * corners.length)];
+
+        // 畫面邊界
+        const viewLeft = cameraOffsetX;
+        const viewRight = cameraOffsetX + this.gameBounds.width;
+        const viewTop = cameraOffsetY;
+        const viewBottom = cameraOffsetY + this.gameBounds.height;
+
+        // 分散半徑（1.5 個單位 = 畫面高度 15%）
+        const spreadRadius = this.gameBounds.height * 0.15;
+
+        // 角落基準點（畫面外）
+        let baseX: number;
+        let baseY: number;
+        let targetX: number;
+        let targetY: number;
+
+        switch (corner) {
+            case 'topLeft':
+                baseX = viewLeft - spreadRadius;
+                baseY = viewTop - spreadRadius;
+                targetX = viewRight + spreadRadius * 2;
+                targetY = viewBottom + spreadRadius * 2;
+                break;
+            case 'topRight':
+                baseX = viewRight + spreadRadius;
+                baseY = viewTop - spreadRadius;
+                targetX = viewLeft - spreadRadius * 2;
+                targetY = viewBottom + spreadRadius * 2;
+                break;
+            case 'bottomLeft':
+                baseX = viewLeft - spreadRadius;
+                baseY = viewBottom + spreadRadius;
+                targetX = viewRight + spreadRadius * 2;
+                targetY = viewTop - spreadRadius * 2;
+                break;
+            case 'bottomRight':
+            default:
+                baseX = viewRight + spreadRadius;
+                baseY = viewBottom + spreadRadius;
+                targetX = viewLeft - spreadRadius * 2;
+                targetY = viewTop - spreadRadius * 2;
+                break;
+        }
+
+        // 取得蝙蝠定義
+        const batDef = MONSTER_TYPES.find(m => m.id === 'bat') || MONSTER_TYPES[0];
+
+        // 生成 8 隻蝙蝠，在圓形範圍內隨機分散（不重疊）
+        const spawnedPositions: { x: number; y: number }[] = [];
+        const minDistance = this.gameBounds.height * 0.04; // 最小間距，避免重疊
+
+        for (let i = 0; i < this.batSwarmCount; i++) {
+            let spawnX: number;
+            let spawnY: number;
+            let attempts = 0;
+            const maxAttempts = 50;
+
+            // 嘗試找到不重疊的位置
+            do {
+                // 在圓形範圍內隨機生成（極座標轉換）
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.random() * spreadRadius;
+                spawnX = baseX + Math.cos(angle) * radius;
+                spawnY = baseY + Math.sin(angle) * radius;
+                attempts++;
+
+                // 檢查是否與已生成的蝙蝠重疊
+                const tooClose = spawnedPositions.some(pos => {
+                    const dx = pos.x - spawnX;
+                    const dy = pos.y - spawnY;
+                    return Math.sqrt(dx * dx + dy * dy) < minDistance;
+                });
+
+                if (!tooClose || attempts >= maxAttempts) {
+                    break;
+                }
+            } while (true);
+
+            spawnedPositions.push({ x: spawnX, y: spawnY });
+
+            // 計算方向向量（單位向量）- 都朝向對角
+            const dx = targetX - spawnX;
+            const dy = targetY - spawnY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const dirX = dx / distance;
+            const dirY = dy / distance;
+
+            const monster: Monster = {
+                id: this.nextMonsterId++,
+                definition: batDef,
+                x: spawnX,
+                y: spawnY,
+                hp: MonsterManager.BAT_FIXED_HP, // 固定 HP
+                lastDamageTime: 0,
+                bouncePhase: Math.random() * Math.PI * 2,
+                bounceSpeed: 5 + Math.random() * 3, // 蝙蝠彈跳更快
+                squashStretch: 1,
+                flashStartTime: 0,
+                // 蝙蝠專用屬性（使用方向向量）
+                isBat: true,
+                directionX: dirX,
+                directionY: dirY
+            };
+
+            this.monsters.push(monster);
+        }
+
+        console.log(`Bat swarm spawned from ${corner}! Count: ${this.batSwarmCount}`);
+    }
+
     // 使用畫面固定網格渲染所有怪物（馬賽克拼貼風格）
     private renderMonstersToGrid(
-        monsterSize: number,
         cameraOffsetX: number,
         cameraOffsetY: number
     ) {
@@ -364,6 +621,9 @@ export class MonsterManager {
 
         // 為每隻怪物計算要渲染到哪些畫面格子
         this.monsters.forEach(monster => {
+            // 每個怪物使用自己的 size
+            const monsterSize = this.gameBounds.height * monster.definition.size;
+
             // Q彈效果：用 squashStretch 調整形狀範圍
             const stretchY = monster.squashStretch;
             const stretchX = 1 / monster.squashStretch;
@@ -412,58 +672,170 @@ export class MonsterManager {
                 }
             }
 
-            // 繪製半橢圓形身體（選擇畫面上的哪些格子要顯示）
-            for (let row = -gridRadiusY; row <= 0; row++) {
-                for (let col = -gridRadiusX; col <= gridRadiusX; col++) {
-                    // 正規化座標（根據當前的 stretch 範圍）
-                    const normalizedX = col / gridRadiusX;
-                    const normalizedY = row / gridRadiusY;
-                    const distSq = normalizedX * normalizedX + normalizedY * normalizedY;
+            // 蝙蝠使用特殊造型（翅膀形狀）
+            if (monster.isBat) {
+                // 蝙蝠翅膀拍打效果（更明顯的拍動）
+                const wingFlap = Math.sin(monster.bouncePhase * 3) * 0.5 + 0.5; // 0~1，更快拍動
+                const wingAngle = wingFlap * 0.8 - 0.2; // -0.2 ~ 0.6 的角度變化
 
-                    if (distSq <= 1.1) {
-                        const edgeFade = 1 - Math.pow(Math.min(1, distSq), 0.5);
-                        const alpha = (0.5 + edgeFade * 0.5) * (distSq <= 1 ? 1 : (1.1 - distSq) / 0.1);
+                // 蝙蝠尺寸參數
+                const bodyWidth = Math.max(2, Math.ceil(gridRadiusX * 0.6));
+                const bodyHeight = Math.max(2, Math.ceil(gridRadiusY * 0.8));
+                const wingSpan = Math.max(3, Math.ceil(gridRadiusX * 3)); // 翅膀展開很寬
+                const wingMaxHeight = Math.max(2, Math.ceil(gridRadiusY * 1.5));
 
-                        const lightFactor = isFlashing ? 1 : 1 + (1 - normalizedY) * 0.4;
-                        const cellR = Math.min(255, Math.floor(r * lightFactor));
-                        const cellG = Math.min(255, Math.floor(g * lightFactor));
-                        const cellB = Math.min(255, Math.floor(b * lightFactor));
-                        const cellColor = (cellR << 16) | (cellG << 8) | cellB;
+                // 輔助函數：設定格子
+                const setCell = (col: number, row: number, color: number, alpha: number) => {
+                    if (col >= 0 && col < this.screenGridCols &&
+                        row >= 0 && row < this.screenGridRows) {
+                        const key = `${col},${row}`;
+                        const existing = gridData.get(key);
+                        if (!existing || alpha > existing.alpha) {
+                            gridData.set(key, { color, alpha });
+                        }
+                    }
+                };
 
-                        // 畫面網格座標
-                        const targetCol = centerCol + col;
-                        const targetRow = bottomRow + row;
+                const bodyColor = (r << 16) | (g << 8) | b;
+                const wingColor = (Math.floor(r * 0.7) << 16) | (Math.floor(g * 0.7) << 8) | Math.floor(b * 0.7);
+                const darkWingColor = (Math.floor(r * 0.5) << 16) | (Math.floor(g * 0.5) << 8) | Math.floor(b * 0.5);
 
-                        // 只處理在畫面範圍內的格子
-                        if (targetCol >= 0 && targetCol < this.screenGridCols &&
-                            targetRow >= 0 && targetRow < this.screenGridRows) {
-                            const key = `${targetCol},${targetRow}`;
-                            const existing = gridData.get(key);
-                            if (!existing || alpha > existing.alpha) {
-                                gridData.set(key, { color: cellColor, alpha });
+                // 繪製蝙蝠身體（小橢圓）
+                for (let row = -bodyHeight; row <= bodyHeight; row++) {
+                    for (let col = -bodyWidth; col <= bodyWidth; col++) {
+                        const normalizedX = col / bodyWidth;
+                        const normalizedY = row / bodyHeight;
+                        const distSq = normalizedX * normalizedX + normalizedY * normalizedY;
+                        if (distSq <= 1) {
+                            setCell(centerCol + col, bottomRow + row, bodyColor, 0.95);
+                        }
+                    }
+                }
+
+                // 繪製小耳朵（身體上方兩個三角形）
+                const earOffset = Math.max(1, Math.floor(bodyWidth * 0.6));
+                const earHeight = Math.max(1, Math.floor(bodyHeight * 0.6));
+                // 左耳
+                for (let i = 0; i <= earHeight; i++) {
+                    const earWidth = Math.max(1, earHeight - i);
+                    for (let j = 0; j < earWidth; j++) {
+                        setCell(centerCol - earOffset + j, bottomRow - bodyHeight - i - 1, bodyColor, 0.9);
+                    }
+                }
+                // 右耳
+                for (let i = 0; i <= earHeight; i++) {
+                    const earWidth = Math.max(1, earHeight - i);
+                    for (let j = 0; j < earWidth; j++) {
+                        setCell(centerCol + earOffset - j, bottomRow - bodyHeight - i - 1, bodyColor, 0.9);
+                    }
+                }
+
+                // 繪製翅膀（三角形 + 波浪邊緣，隨拍動改變形狀）
+                // 左翅膀
+                for (let i = 1; i <= wingSpan; i++) {
+                    const progress = i / wingSpan; // 0~1
+                    // 翅膀高度（三角形 + 拍動角度）
+                    const baseHeight = Math.floor(wingMaxHeight * progress * (1 - progress * 0.3));
+                    const flapOffset = Math.floor(wingAngle * progress * wingMaxHeight);
+                    const wingTopY = -baseHeight + flapOffset;
+                    const wingBottomY = Math.floor(baseHeight * 0.3) + flapOffset;
+
+                    // 填充翅膀（從上到下）
+                    for (let y = wingTopY; y <= wingBottomY; y++) {
+                        // 波浪邊緣效果
+                        const waveOffset = Math.floor(Math.sin(progress * Math.PI * 2 + monster.bouncePhase) * 0.5);
+                        const alpha = 0.85 - progress * 0.3;
+                        const color = y < (wingTopY + wingBottomY) / 2 ? wingColor : darkWingColor;
+                        setCell(centerCol - bodyWidth - i, bottomRow + y + waveOffset, color, alpha);
+                    }
+
+                    // 翅膀骨架線（較亮的線條）
+                    if (i % 2 === 0 && i < wingSpan - 1) {
+                        const boneY = Math.floor((wingTopY + wingBottomY) / 2 + flapOffset);
+                        setCell(centerCol - bodyWidth - i, bottomRow + boneY, bodyColor, 0.9);
+                    }
+                }
+
+                // 右翅膀（鏡像）
+                for (let i = 1; i <= wingSpan; i++) {
+                    const progress = i / wingSpan;
+                    const baseHeight = Math.floor(wingMaxHeight * progress * (1 - progress * 0.3));
+                    const flapOffset = Math.floor(wingAngle * progress * wingMaxHeight);
+                    const wingTopY = -baseHeight + flapOffset;
+                    const wingBottomY = Math.floor(baseHeight * 0.3) + flapOffset;
+
+                    for (let y = wingTopY; y <= wingBottomY; y++) {
+                        const waveOffset = Math.floor(Math.sin(progress * Math.PI * 2 + monster.bouncePhase) * 0.5);
+                        const alpha = 0.85 - progress * 0.3;
+                        const color = y < (wingTopY + wingBottomY) / 2 ? wingColor : darkWingColor;
+                        setCell(centerCol + bodyWidth + i, bottomRow + y + waveOffset, color, alpha);
+                    }
+
+                    if (i % 2 === 0 && i < wingSpan - 1) {
+                        const boneY = Math.floor((wingTopY + wingBottomY) / 2 + flapOffset);
+                        setCell(centerCol + bodyWidth + i, bottomRow + boneY, bodyColor, 0.9);
+                    }
+                }
+
+                // 蝙蝠的小眼睛（紅色）
+                const eyeY = bottomRow - Math.floor(bodyHeight * 0.3);
+                const eyeOffset = Math.max(1, Math.floor(bodyWidth * 0.4));
+                setCell(centerCol - eyeOffset, eyeY, 0xff0000, 1);
+                setCell(centerCol + eyeOffset, eyeY, 0xff0000, 1);
+
+                // 跳過通用眼睛/高光渲染（return 相當於 forEach 中的 continue）
+                return;
+            } else {
+                // 普通怪物：繪製半橢圓形身體
+                for (let row = -gridRadiusY; row <= 0; row++) {
+                    for (let col = -gridRadiusX; col <= gridRadiusX; col++) {
+                        const normalizedX = col / gridRadiusX;
+                        const normalizedY = row / gridRadiusY;
+                        const distSq = normalizedX * normalizedX + normalizedY * normalizedY;
+
+                        if (distSq <= 1.1) {
+                            const edgeFade = 1 - Math.pow(Math.min(1, distSq), 0.5);
+                            const alpha = (0.5 + edgeFade * 0.5) * (distSq <= 1 ? 1 : (1.1 - distSq) / 0.1);
+
+                            const lightFactor = isFlashing ? 1 : 1 + (1 - normalizedY) * 0.4;
+                            const cellR = Math.min(255, Math.floor(r * lightFactor));
+                            const cellG = Math.min(255, Math.floor(g * lightFactor));
+                            const cellB = Math.min(255, Math.floor(b * lightFactor));
+                            const cellColor = (cellR << 16) | (cellG << 8) | cellB;
+
+                            const targetCol = centerCol + col;
+                            const targetRow = bottomRow + row;
+
+                            if (targetCol >= 0 && targetCol < this.screenGridCols &&
+                                targetRow >= 0 && targetRow < this.screenGridRows) {
+                                const key = `${targetCol},${targetRow}`;
+                                const existing = gridData.get(key);
+                                if (!existing || alpha > existing.alpha) {
+                                    gridData.set(key, { color: cellColor, alpha });
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // 底部平坦部分
-            for (let col = -gridRadiusX; col <= gridRadiusX; col++) {
-                const normalizedX = col / gridRadiusX;
-                if (Math.abs(normalizedX) <= 1) {
-                    const darkFactor = isFlashing ? 1 : 0.7;
-                    const cellR = Math.floor(r * darkFactor);
-                    const cellG = Math.floor(g * darkFactor);
-                    const cellB = Math.floor(b * darkFactor);
-                    const cellColor = (cellR << 16) | (cellG << 8) | cellB;
+                // 底部平坦部分
+                for (let col = -gridRadiusX; col <= gridRadiusX; col++) {
+                    const normalizedX = col / gridRadiusX;
+                    if (Math.abs(normalizedX) <= 1) {
+                        const darkFactor = isFlashing ? 1 : 0.7;
+                        const cellR = Math.floor(r * darkFactor);
+                        const cellG = Math.floor(g * darkFactor);
+                        const cellB = Math.floor(b * darkFactor);
+                        const cellColor = (cellR << 16) | (cellG << 8) | cellB;
 
-                    const targetCol = centerCol + col;
-                    const targetRow = bottomRow;
+                        const targetCol = centerCol + col;
+                        const targetRow = bottomRow;
 
-                    if (targetCol >= 0 && targetCol < this.screenGridCols &&
-                        targetRow >= 0 && targetRow < this.screenGridRows) {
-                        const key = `${targetCol},${targetRow}`;
-                        gridData.set(key, { color: cellColor, alpha: 0.9 });
+                        if (targetCol >= 0 && targetCol < this.screenGridCols &&
+                            targetRow >= 0 && targetRow < this.screenGridRows) {
+                            const key = `${targetCol},${targetRow}`;
+                            gridData.set(key, { color: cellColor, alpha: 0.9 });
+                        }
                     }
                 }
             }
@@ -546,7 +918,10 @@ export class MonsterManager {
         this.flashMonster(monster);
 
         if (monster.hp <= 0) {
-            const exp = this.calculateMonsterExp(monster.definition.exp);
+            // 蝙蝠使用固定經驗，其他怪物根據等級計算
+            const exp = monster.isBat
+                ? MonsterManager.BAT_FIXED_EXP
+                : this.calculateMonsterExp(monster.definition.exp);
             // 播放死亡煙霧效果
             this.playDeathSmoke(monster.x, monster.y);
             this.removeMonster(monsterId);

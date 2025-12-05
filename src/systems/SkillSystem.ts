@@ -160,12 +160,12 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+60% HP、每 10 秒回血，已達最大等級！'
         ],
         maxExtraAbility: {
-            name: '再生',
-            description: '回復量 +{value}',
-            baseValue: 0,
-            perLevel: 0.001, // 每級 +0.1%
-            unit: '%',
-            isPercentage: true
+            name: '不死',
+            description: '抵銷一次死亡，觸發暗影爆炸',
+            baseValue: 1, // 固定值：1次復活機會
+            perLevel: 0,
+            unit: '次',
+            isPercentage: false
         }
     },
     {
@@ -187,7 +187,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             name: '迅捷',
             description: '閃避機率 +{value}',
             baseValue: 0,
-            perLevel: 0.001, // 每級 +0.1%
+            perLevel: 0.002, // 每級 +0.2%
             unit: '%',
             isPercentage: true
         }
@@ -211,7 +211,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             name: '洞察',
             description: '暴擊率 +{value}',
             baseValue: 0,
-            perLevel: 0.001, // 每級 +0.1%
+            perLevel: 0.005, // 每級 +0.5%
             unit: '%',
             isPercentage: true
         }
@@ -235,7 +235,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             name: '超載',
             description: '暴擊傷害 +{value}',
             baseValue: 0,
-            perLevel: 0.002, // 每級 +0.2%
+            perLevel: 0.005, // 每級 +0.5%
             unit: '%',
             isPercentage: true
         }
@@ -527,6 +527,29 @@ export class SkillManager {
         return Math.floor(baseDamage * (1 + damageBonus));
     }
 
+    // 計算最終攻擊傷害（含暴擊判定）
+    // playerLevel: 玩家當前等級，用於計算暴擊率和暴擊傷害
+    calculateFinalDamageWithCrit(baseDamage: number, playerLevel: number): { damage: number; isCrit: boolean } {
+        const damageBonus = this.getAiEnhancementDamageBonus();
+        let finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+
+        // 洞察：暴擊率判定（視網膜增強模組 MAX 後啟用）
+        const critChance = this.getRetinaModuleCritChance(playerLevel);
+        let isCrit = false;
+
+        if (critChance > 0 && Math.random() < critChance) {
+            isCrit = true;
+            // 超載：暴擊傷害加成（AI賦能強化 MAX 後啟用）
+            // 基礎暴擊傷害 = 1.5x，超載額外加成
+            const baseCritMultiplier = 1.5;
+            const extraCritDamage = this.getAiEnhancementCritDamage(playerLevel);
+            const totalCritMultiplier = baseCritMultiplier + extraCritDamage;
+            finalDamage = Math.floor(finalDamage * totalCritMultiplier);
+        }
+
+        return { damage: finalDamage, isCrit };
+    }
+
     // 計算最終受到傷害（套用防禦減免）
     calculateFinalDamageTaken(incomingDamage: number): number {
         const defenseBonus = this.getAiEnhancementDefenseBonus();
@@ -608,9 +631,11 @@ export class SkillManager {
         return this.getMaxExtraAbilityValue('active_architect', playerLevel);
     }
 
-    // 鈦金肝：再生（額外回復百分比）
-    getTitaniumLiverExtraRegen(playerLevel: number): number {
-        return this.getMaxExtraAbilityValue('passive_titanium_liver', playerLevel);
+    // 鈦金肝：不死（是否可觸發復活）
+    hasTitaniumLiverRevive(): boolean {
+        const skill = this.playerSkills.get('passive_titanium_liver');
+        if (!skill) return false;
+        return skill.level >= skill.definition.maxLevel;
     }
 
     // 精神同步率強化：迅捷（閃避機率）
