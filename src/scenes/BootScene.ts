@@ -6,7 +6,15 @@ export default class BootScene extends Phaser.Scene {
     }
 
     preload() {
-        // 預留給未來資源載入
+        // 載入技能特效紋理
+        this.load.image('effect_circle', 'effects/circle.png');
+        this.load.image('effect_line', 'effects/line.png');
+
+        // 載入各角度扇形紋理
+        const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+        for (const angle of sectorAngles) {
+            this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
+        }
     }
 
     create() {

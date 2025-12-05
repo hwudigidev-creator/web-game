@@ -82,9 +82,9 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         ],
         maxExtraAbility: {
             name: '爆發',
-            description: '擊殺時 {value} 機率再發動',
+            description: '擊殺時 {value} 機率再發動（可連鎖）',
             baseValue: 0,
-            perLevel: 0.002, // 每級 +0.2%
+            perLevel: 0.005, // 每級 +0.5%
             unit: '%',
             isPercentage: true
         }
@@ -109,9 +109,9 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         ],
         maxExtraAbility: {
             name: '連鎖',
-            description: '擊殺時 {value} 機率再發射',
+            description: '擊中時 {value} 機率再發射',
             baseValue: 0,
-            perLevel: 0.002, // 每級 +0.2%
+            perLevel: 0.001, // 每級 +0.1%
             unit: '%',
             isPercentage: true
         }
@@ -146,7 +146,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     // 被動型技能 (4個，但玩家最多持有3個)
     {
         id: 'passive_titanium_liver',
-        name: '鈦金肝',
+        name: '鈦金屬賽博肝臟',
         description: '提升 10% HP 總量並每 15 秒回復 1% 最大 HP，每級再 +10% HP、回復間隔 -1 秒',
         type: 'passive',
         color: 0xaabbcc, // 銀灰色

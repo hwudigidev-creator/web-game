@@ -59,6 +59,14 @@ export default class GridScene extends Phaser.Scene {
         this.load.audio('bgm_game_01', 'audio/BGM01.mp3');
         this.load.audio('bgm_game_02', 'audio/BGM02.mp3');
 
+        // 預載入技能特效紋理
+        this.load.image('effect_circle', 'effects/circle.png');
+        this.load.image('effect_line', 'effects/line.png');
+        const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+        for (const angle of sectorAngles) {
+            this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
+        }
+
         // 監聽載入進度
         this.load.on('progress', (value: number) => {
             this.updateLoadingProgress(Math.floor(value * 100));
