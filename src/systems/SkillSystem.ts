@@ -9,6 +9,7 @@ export interface MaxExtraAbility {
     perLevel: number;       // 每級增加的數值
     unit: string;           // 單位（如 %、點、秒）
     isPercentage?: boolean; // 是否為百分比（顯示時 *100）
+    triggerQuote?: string;  // 觸發時的 CUT IN 訊息
 }
 
 // 技能定義（技能庫中的基礎資料）
@@ -66,23 +67,24 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         ],
         maxExtraAbility: {
             name: '穿透',
-            description: '攻擊後 {value} 機率發射扇形波',
+            description: '攻擊後 {value} 機率發射扇形波（每 0.3 秒傷害一次）',
             baseValue: 0,
-            perLevel: 0.004, // 每級 +0.4%
+            perLevel: 0.007, // 每級 +0.7%
             unit: '%',
             isPercentage: true
         }
     },
     {
         id: 'active_coder',
-        name: '遊戲先知',
-        subtitle: '編碼者',
+        name: '咒言幻象',
+        subtitle: '遊戲先知',
         description: '對周圍 2 單位敵人造成傷害，每級增加 0.5 單位範圍',
         type: 'active',
         color: 0xaa66ff, // 紫色
         flashColor: 0xcc88ff, // 閃紫光
         cooldown: 1500, // 1.5 秒
         maxLevel: 5,
+        iconPrefix: 'C', // C00.png ~ C05.png
         levelUpMessages: [
             '2 單位範圍、1 傷害',
             '2.5 單位範圍、2 傷害',
@@ -91,11 +93,19 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '4 單位範圍、5 傷害',
             '4.5 單位範圍、6 傷害，已達最大等級！'
         ],
+        levelUpQuotes: [
+            '你參透了互動設計的原理，同時了解遊戲企劃架構', // LV0
+            '你習得動作捕捉的技術，將應用到虛擬實境製作', // LV1
+            '你增進了程式設計能力和遊戲引擎的創作能力', // LV2
+            '你整合了虛擬網紅製作技術，讓自媒體營銷具爆發力', // LV3
+            '你導入了人工智慧協作能力，產能提升了數倍', // LV4
+            '你成為了遊戲先知，即將解鎖驚人的能力', // LV5/MAX
+        ],
         maxExtraAbility: {
             name: '爆發',
             description: '擊殺時 {value} 機率再發動（可連鎖）',
             baseValue: 0,
-            perLevel: 0.005, // 每級 +0.5%
+            perLevel: 0.01, // 每級 +1%
             unit: '%',
             isPercentage: true
         }
@@ -119,11 +129,19 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '5 道光束、5 傷害',
             '6 道光束、6 傷害，已達最大等級！'
         ],
+        levelUpQuotes: [
+            '你研究了影像美學，劇本編導的能力提升了', // LV0
+            '你習得了動靜態攝影的能力，獲得了畫面控制的技術', // LV1
+            '你增進了影片剪輯和動態影像的設計能力', // LV2
+            '你苦練了數位成音技術影像獲得更多回饋', // LV3
+            '你學會應用特效合成後製提升了影像各種可能性', // LV4
+            '你成為了超級導演，即將解鎖驚人的能力', // LV5/MAX
+        ],
         maxExtraAbility: {
             name: '連鎖',
-            description: '擊中時 {value} 機率再發射',
+            description: '擊中時 {value} 機率產生 X 型射線',
             baseValue: 0,
-            perLevel: 0.001, // 每級 +0.1%
+            perLevel: 0.0005, // 每級 +0.05%
             unit: '%',
             isPercentage: true
         }
@@ -163,6 +181,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         type: 'passive',
         color: 0xaabbcc, // 銀灰色
         maxLevel: 5,
+        iconPrefix: 'P01', // 固定圖示，不隨等級變換
         levelUpMessages: [
             '+10% HP、每 15 秒回血',
             '+20% HP、每 14 秒回血',
@@ -171,9 +190,18 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+50% HP、每 11 秒回血',
             '+60% HP、每 10 秒回血，已達最大等級！'
         ],
+        levelUpQuotes: [
+            '', // LV0
+            '', // LV1
+            '', // LV2
+            '', // LV3
+            '', // LV4
+            '千錘百鍊的鈦金肝再也不怕熬夜', // LV5/MAX
+        ],
         maxExtraAbility: {
             name: '不死',
             description: '抵銷一次死亡，觸發暗影爆炸',
+            triggerQuote: '不知何處湧上的力量將你推回現實...', // 不死觸發時的 CUT IN 訊息
             baseValue: 1, // 固定值：1次復活機會
             perLevel: 0,
             unit: '次',
@@ -187,6 +215,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         type: 'passive',
         color: 0xdd8844, // 暗橘色
         maxLevel: 5,
+        iconPrefix: 'P02', // 固定圖示，不隨等級變換
         levelUpMessages: [
             '+10% 移速、-8% 冷卻',
             '+20% 移速、-16% 冷卻',
@@ -194,6 +223,14 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+40% 移速、-32% 冷卻',
             '+50% 移速、-40% 冷卻',
             '+60% 移速、-48% 冷卻，已達最大等級！'
+        ],
+        levelUpQuotes: [
+            '', // LV0
+            '', // LV1
+            '', // LV2
+            '', // LV3
+            '', // LV4
+            '你已進入無限心流狀態，感覺身手異常敏捷迅速', // LV5/MAX
         ],
         maxExtraAbility: {
             name: '迅捷',
@@ -211,6 +248,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         type: 'passive',
         color: 0x992233, // 暗紅色
         maxLevel: 5,
+        iconPrefix: 'P03', // 固定圖示，不隨等級變換
         levelUpMessages: [
             '+30% 經驗',
             '+60% 經驗',
@@ -218,6 +256,14 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+120% 經驗',
             '+150% 經驗',
             '+180% 經驗，已達最大等級！'
+        ],
+        levelUpQuotes: [
+            '', // LV0
+            '', // LV1
+            '', // LV2
+            '', // LV3
+            '', // LV4
+            '千錘百鍊的敏銳觀察，再沒什麼看不穿、看不清', // LV5/MAX
         ],
         maxExtraAbility: {
             name: '洞察',
@@ -235,6 +281,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         type: 'passive',
         color: 0x6688aa, // 灰藍色
         maxLevel: 5,
+        iconPrefix: 'P04', // 固定圖示，不隨等級變換
         levelUpMessages: [
             '+25% 攻擊、+15% 防禦',
             '+50% 攻擊、+30% 防禦',
@@ -242,6 +289,14 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+100% 攻擊、+60% 防禦',
             '+125% 攻擊、+75% 防禦',
             '+150% 攻擊、+90% 防禦，已達最大等級！'
+        ],
+        levelUpQuotes: [
+            '', // LV0
+            '', // LV1
+            '', // LV2
+            '', // LV3
+            '', // LV4
+            '熟練的AI操作，讓你無論做任何事情效率提高數十倍', // LV5/MAX
         ],
         maxExtraAbility: {
             name: '超載',

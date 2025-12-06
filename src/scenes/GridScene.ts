@@ -68,12 +68,16 @@ export default class GridScene extends Phaser.Scene {
         }
 
         // 預載入技能圖示
-        // A 系列（動畫大師）、B 系列（超級導演）
-        const skillIconPrefixes = ['A', 'B'];
+        // A 系列（動畫大師）、B 系列（超級導演）、C 系列（遊戲先知）
+        const skillIconPrefixes = ['A', 'B', 'C'];
         for (const prefix of skillIconPrefixes) {
             for (let i = 0; i <= 5; i++) {
                 this.load.image(`skill_icon_${prefix}${i.toString().padStart(2, '0')}`, `icons/skills/${prefix}${i.toString().padStart(2, '0')}.png`);
             }
+        }
+        // P 系列（被動技能，不隨等級變換）
+        for (let i = 1; i <= 4; i++) {
+            this.load.image(`skill_icon_P${i.toString().padStart(2, '0')}`, `icons/skills/P${i.toString().padStart(2, '0')}.png`);
         }
 
         // 監聽載入進度

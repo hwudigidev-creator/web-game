@@ -1018,7 +1018,7 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 靈魂渲染穿透效果：整片扇形往外推移 5 單位
+    // 靈魂渲染穿透效果：整片扇形往外推移 5 單位，速度減半，每 0.5 秒造成一次經過區域傷害
     private triggerSoulRenderWave(
         angle: number,
         startRange: number,
@@ -1035,25 +1035,20 @@ export default class MainScene extends Phaser.Scene {
         const originX = this.characterX;
         const originY = this.characterY;
 
-        // 已經傷害過的怪物 ID（避免重複傷害）
-        const damagedMonsters = new Set<number>();
-
         // 繪製移動中的扇形特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
+        // 速度減半：duration 從 500ms 改為 1000ms
         if (this.showGridSkillEffects) {
             this.flashSkillAreaSectorMoving(originX, originY, startRange, angle, halfAngle, flashColor, travelDistance);
         } else {
             this.flashSkillEffectSectorMoving(originX, originY, startRange, angle, halfAngle, flashColor, travelDistance);
         }
 
-        // 傷害檢測動畫
-        const duration = 500;
-        const startTime = this.time.now;
-        const hitThickness = unitSize * 0.5;
+        // 傷害檢測：每 0.3 秒造成一次經過區域傷害（共 3-4 次）
+        const duration = 1000; // 總持續時間 1 秒
+        const damageInterval = 300; // 每 0.3 秒傷害一次
+        const hitThickness = unitSize * 1.0; // 檢測範圍
 
-        const updateDamage = () => {
-            const elapsed = this.time.now - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
+        const dealDamageAtProgress = (progress: number) => {
             // 當前弧線的半徑位置
             const currentRadius = startRange + travelDistance * progress;
             // 保持弧長不變，計算新的半角
@@ -1064,8 +1059,6 @@ export default class MainScene extends Phaser.Scene {
             const hitMonsters: number[] = [];
 
             for (const monster of monsters) {
-                if (damagedMonsters.has(monster.id)) continue;
-
                 const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
                 const dx = monster.x - originX;
                 const dy = monster.y - originY;
@@ -1083,7 +1076,6 @@ export default class MainScene extends Phaser.Scene {
                 const angleOffset = dist > 0 ? Math.atan2(monsterRadius, dist) : Math.PI;
                 if (Math.abs(angleDiff) <= currentHalfAngle + angleOffset) {
                     hitMonsters.push(monster.id);
-                    damagedMonsters.add(monster.id);
                 }
             }
 
@@ -1100,13 +1092,15 @@ export default class MainScene extends Phaser.Scene {
 
                 this.flashWhiteCrossAtPositions(hitPositions);
             }
-
-            if (progress < 1) {
-                this.time.delayedCall(16, updateDamage);
-            }
         };
 
-        updateDamage();
+        // 每 0.3 秒傷害一次（0.3s, 0.6s, 0.9s, 1.0s）
+        for (let t = damageInterval; t <= duration; t += damageInterval) {
+            const progress = t / duration;
+            this.time.delayedCall(t, () => {
+                dealDamageAtProgress(progress);
+            });
+        }
     }
 
     // 繪製移動中的扇形網格特效（整片扇形往外推）
@@ -1122,7 +1116,7 @@ export default class MainScene extends Phaser.Scene {
         const gap = MainScene.SKILL_GRID_GAP;
         const cellTotal = this.skillGridCellSize + gap;
 
-        const duration = 500;
+        const duration = 1000; // 速度減半
         const startTime = this.time.now;
 
         // 扇形的虛擬圓心會沿著 angle 方向移動
@@ -1434,7 +1428,7 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 超級導演連鎖效果：從擊中位置朝隨機目標再發射
+    // 超級導演連鎖效果：從擊中位置產生 X 型射線（4 條，長度為原本一半）
     private triggerVfxChain(
         hitPositions: { x: number; y: number }[],
         damage: number,
@@ -1444,74 +1438,75 @@ export default class MainScene extends Phaser.Scene {
         const monsters = this.monsterManager.getMonsters();
         if (monsters.length === 0) return;
 
-        const range = this.gameBounds.height * 1.0;
+        const range = this.gameBounds.height * 0.5; // 長度減半
         const beamWidth = this.gameBounds.height * 0.05;
+        const chainFlashColor = skill.definition.flashColor || skill.definition.color;
+
+        // X 型的 4 個角度（45°、135°、225°、315°）
+        const xAngles = [
+            Math.PI / 4,        // 45° 右上
+            Math.PI * 3 / 4,    // 135° 左上
+            Math.PI * 5 / 4,    // 225° 左下
+            Math.PI * 7 / 4     // 315° 右下
+        ];
 
         for (const pos of hitPositions) {
             // 每個擊中位置獨立判定機率
             if (Math.random() >= chainChance) continue;
 
-            // 從擊中位置找一個隨機目標
-            const validTargets = monsters.filter(m => {
-                const dx = m.x - pos.x;
-                const dy = m.y - pos.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                return dist > 10; // 排除太近的（可能是自己）
-            });
+            // 收集所有 X 型射線命中的怪物
+            const chainHitMonsters: Set<number> = new Set();
 
-            if (validTargets.length === 0) continue;
+            for (const angle of xAngles) {
+                // 檢測這條射線命中的怪物
+                for (const monster of monsters) {
+                    const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+                    const dx = monster.x - pos.x;
+                    const dy = monster.y - pos.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
 
-            const target = validTargets[Math.floor(Math.random() * validTargets.length)];
-            const targetAngle = Math.atan2(target.y - pos.y, target.x - pos.x);
+                    if (dist - monsterRadius > range) continue;
 
-            // 收集這道連鎖光束命中的怪物
-            const chainHitMonsters: number[] = [];
-            for (const monster of monsters) {
-                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-                const dx = monster.x - pos.x;
-                const dy = monster.y - pos.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+                    const dirX = Math.cos(angle);
+                    const dirY = Math.sin(angle);
+                    const projLength = dx * dirX + dy * dirY;
 
-                if (dist - monsterRadius > range) continue;
+                    // 只檢測射線方向（不檢測反方向）
+                    if (projLength < -monsterRadius || projLength > range + monsterRadius) continue;
 
-                const dirX = Math.cos(targetAngle);
-                const dirY = Math.sin(targetAngle);
-                const projLength = dx * dirX + dy * dirY;
+                    const perpDist = Math.abs(dx * dirY - dy * dirX);
+                    if (perpDist <= beamWidth / 2 + monsterRadius) {
+                        chainHitMonsters.add(monster.id);
+                    }
+                }
 
-                if (projLength < -monsterRadius) continue;
+                // 繪製連鎖光束邊緣線
+                this.drawBeamEdge(angle, range, beamWidth, skill.definition.color, pos.x, pos.y);
 
-                const perpDist = Math.abs(dx * dirY - dy * dirX);
-                if (perpDist <= beamWidth / 2 + monsterRadius) {
-                    chainHitMonsters.push(monster.id);
+                // 繪製連鎖光束特效
+                const endX = pos.x + Math.cos(angle) * range;
+                const endY = pos.y + Math.sin(angle) * range;
+                if (this.showGridSkillEffects) {
+                    this.flashSkillAreaLine(pos.x, pos.y, endX, endY, beamWidth, chainFlashColor);
+                } else {
+                    this.flashSkillEffectLine(pos.x, pos.y, endX, endY, beamWidth, chainFlashColor);
                 }
             }
 
-            // 繪製連鎖光束邊緣線
-            this.drawBeamEdge(targetAngle, range, beamWidth, skill.definition.color, pos.x, pos.y);
-
-            // 繪製連鎖光束特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
-            const endX = pos.x + Math.cos(targetAngle) * range;
-            const endY = pos.y + Math.sin(targetAngle) * range;
-            const chainFlashColor = skill.definition.flashColor || skill.definition.color;
-            if (this.showGridSkillEffects) {
-                this.flashSkillAreaLine(pos.x, pos.y, endX, endY, beamWidth, chainFlashColor);
-            } else {
-                this.flashSkillEffectLine(pos.x, pos.y, endX, endY, beamWidth, chainFlashColor);
-            }
-
             // 對連鎖命中的怪物造成傷害
-            if (chainHitMonsters.length > 0) {
+            const hitMonsterIds = Array.from(chainHitMonsters);
+            if (hitMonsterIds.length > 0) {
                 const chainHitPositions = monsters
-                    .filter(m => chainHitMonsters.includes(m.id))
+                    .filter(m => chainHitMonsters.has(m.id))
                     .map(m => ({ x: m.x, y: m.y }));
 
-                const chainResult = this.monsterManager.damageMonsters(chainHitMonsters, damage);
+                const chainResult = this.monsterManager.damageMonsters(hitMonsterIds, damage);
                 if (chainResult.totalExp > 0) {
                     this.addExp(chainResult.totalExp);
                 }
 
                 this.flashWhiteCrossAtPositions(chainHitPositions);
-                console.log(`VFX Chain hit ${chainHitMonsters.length} monsters for ${damage} damage`);
+                console.log(`VFX X-Chain hit ${hitMonsterIds.length} monsters for ${damage} damage`);
             }
         }
     }
@@ -2238,28 +2233,59 @@ export default class MainScene extends Phaser.Scene {
     private handleSkillPanelInput() {
         if (!this.cursors) return;
 
-        // A 鍵選擇左邊（索引 0），重複按確認
-        if (Phaser.Input.Keyboard.JustDown(this.cursors.A)) {
-            if (this.selectedSkillIndex === 0) {
-                this.confirmSkillSelection();
-            } else {
-                this.setSelectedSkill(0);
+        const numChoices = this.currentSkillChoices.length;
+
+        // 根據選項數量決定按鍵對應
+        // 3 個選項：A=0, S=1, D=2
+        // 2 個選項：A=0, D=1
+        // 1 個選項：S=0
+        if (numChoices === 1) {
+            // 只有一個選項，用 S 鍵
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.S)) {
+                if (this.selectedSkillIndex === 0) {
+                    this.confirmSkillSelection();
+                } else {
+                    this.setSelectedSkill(0);
+                }
             }
-        }
-        // S 鍵選擇中間（索引 1），重複按確認
-        if (Phaser.Input.Keyboard.JustDown(this.cursors.S)) {
-            if (this.selectedSkillIndex === 1) {
-                this.confirmSkillSelection();
-            } else {
-                this.setSelectedSkill(1);
+        } else if (numChoices === 2) {
+            // 兩個選項，用 A 和 D 鍵
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.A)) {
+                if (this.selectedSkillIndex === 0) {
+                    this.confirmSkillSelection();
+                } else {
+                    this.setSelectedSkill(0);
+                }
             }
-        }
-        // D 鍵選擇右邊（索引 2），重複按確認
-        if (Phaser.Input.Keyboard.JustDown(this.cursors.D)) {
-            if (this.selectedSkillIndex === 2) {
-                this.confirmSkillSelection();
-            } else {
-                this.setSelectedSkill(2);
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.D)) {
+                if (this.selectedSkillIndex === 1) {
+                    this.confirmSkillSelection();
+                } else {
+                    this.setSelectedSkill(1);
+                }
+            }
+        } else {
+            // 三個選項，用 A, S, D 鍵
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.A)) {
+                if (this.selectedSkillIndex === 0) {
+                    this.confirmSkillSelection();
+                } else {
+                    this.setSelectedSkill(0);
+                }
+            }
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.S)) {
+                if (this.selectedSkillIndex === 1) {
+                    this.confirmSkillSelection();
+                } else {
+                    this.setSelectedSkill(1);
+                }
+            }
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.D)) {
+                if (this.selectedSkillIndex === 2) {
+                    this.confirmSkillSelection();
+                } else {
+                    this.setSelectedSkill(2);
+                }
             }
         }
     }
@@ -2644,7 +2670,7 @@ export default class MainScene extends Phaser.Scene {
             barY + cellHeight / 2,
             `${this.currentHp} / ${this.maxHp}`,
             {
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
@@ -3263,6 +3289,16 @@ export default class MainScene extends Phaser.Scene {
 
                 // 角色閃爍紫黑色特效
                 this.flashReviveEffect();
+
+                // 顯示不死觸發的 CUT IN
+                const titaniumLiver = this.skillManager.getPlayerSkill('passive_titanium_liver');
+                if (titaniumLiver?.definition.maxExtraAbility?.triggerQuote) {
+                    this.showTriggerCutIn(
+                        titaniumLiver.definition,
+                        '【不死】觸發',
+                        titaniumLiver.definition.maxExtraAbility.triggerQuote
+                    );
+                }
             } else {
                 console.log('Player died!');
                 // TODO: 遊戲結束處理
@@ -3918,7 +3954,7 @@ export default class MainScene extends Phaser.Scene {
             barY - 5,
             `Lv.${this.currentLevel}`,
             {
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
@@ -4167,7 +4203,7 @@ export default class MainScene extends Phaser.Scene {
             // 等級文字
             const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
             const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
@@ -4215,7 +4251,7 @@ export default class MainScene extends Phaser.Scene {
             // 等級文字
             const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
             const levelText = this.add.text(0, iconPixelSize * 0.3, '', {
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${fontSize}px`,
                 color: '#ffffff',
                 fontStyle: 'bold',
@@ -4447,7 +4483,7 @@ export default class MainScene extends Phaser.Scene {
         const textPadding = 10;
         const infoFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, 12);
         this.skillInfoText = this.add.text(textPadding, textPadding, '', {
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+            fontFamily: '"Noto Sans TC", sans-serif',
             fontSize: `${infoFontSize}px`,
             color: '#ffffff',
             wordWrap: { width: panelWidth - textPadding * 2 }
@@ -4671,7 +4707,11 @@ export default class MainScene extends Phaser.Scene {
 
                 // 如果有 iconPrefix，顯示對應等級的圖示
                 if (skill.definition.iconPrefix) {
-                    const iconKey = `skill_icon_${skill.definition.iconPrefix}${skill.level.toString().padStart(2, '0')}`;
+                    // P 系列（被動技能）使用固定圖示，不隨等級變換
+                    const isPassiveIcon = skill.definition.iconPrefix.startsWith('P');
+                    const iconKey = isPassiveIcon
+                        ? `skill_icon_${skill.definition.iconPrefix}`
+                        : `skill_icon_${skill.definition.iconPrefix}${skill.level.toString().padStart(2, '0')}`;
 
                     // 檢查紋理是否存在
                     if (this.textures.exists(iconKey)) {
@@ -4829,7 +4869,7 @@ export default class MainScene extends Phaser.Scene {
             titleY,
             '選擇技能',
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(this.gameBounds.height * 0.07))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
@@ -4846,7 +4886,7 @@ export default class MainScene extends Phaser.Scene {
             subtitleY,
             '提升你的數位能力',
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.025))}px`,
                 color: '#cccccc'
             }
@@ -4866,7 +4906,7 @@ export default class MainScene extends Phaser.Scene {
             hintY,
             hintText,
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.022))}px`,
                 color: '#888888'
             }
@@ -4993,7 +5033,7 @@ export default class MainScene extends Phaser.Scene {
             barY - barHeight * 0.30,
             titleText,
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.32))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
@@ -5014,7 +5054,7 @@ export default class MainScene extends Phaser.Scene {
                 barY + barHeight * 0.05,
                 quoteText,
                 {
-                    fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                    fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.28))}px`,
                     color: '#ffffff'
                 }
@@ -5031,17 +5071,194 @@ export default class MainScene extends Phaser.Scene {
         }
         const description = this.add.text(
             this.gameBounds.x + this.gameBounds.width / 2,
-            barY + barHeight * 0.32,
+            barY + barHeight * 0.25,
             descriptionText,
             {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.20))}px`,
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.18))}px`,
                 color: Phaser.Display.Color.IntegerToColor(skillDef.color).rgba
             }
         );
         description.setResolution(2);
         description.setOrigin(0.5, 0.5);
         this.skillCutInContainer.add(description);
+
+        // MAX 能力效果說明（只有達到 MAX 等級時顯示）
+        if (newLevel >= skillDef.maxLevel && skillDef.maxExtraAbility) {
+            const extra = skillDef.maxExtraAbility;
+            // 計算每級提供的數值
+            const perLevelDisplay = extra.isPercentage
+                ? (extra.perLevel * 100).toFixed(2)
+                : extra.perLevel.toFixed(2);
+            // 組合能力說明文字，包含每級成長率
+            let abilityText = `【${extra.name}】${extra.description.replace('{value}', `角色每級 +${perLevelDisplay}${extra.unit}`)}`;
+
+            const maxAbility = this.add.text(
+                this.gameBounds.x + this.gameBounds.width / 2,
+                barY + barHeight * 0.42,
+                abilityText,
+                {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.16))}px`,
+                    color: '#ffcc00' // 金色顯示 MAX 能力
+                }
+            );
+            maxAbility.setResolution(2);
+            maxAbility.setOrigin(0.5, 0.5);
+            this.skillCutInContainer.add(maxAbility);
+        }
+
+        // 從左邊滑入動畫
+        this.skillCutInContainer.setX(-this.gameBounds.width);
+        this.skillCutInContainer.setVisible(true);
+        this.skillCutInContainer.setAlpha(1);
+
+        this.tweens.add({
+            targets: this.skillCutInContainer,
+            x: 0,
+            duration: 250,
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                // 停留 2 秒後滑出
+                this.time.delayedCall(2000, () => {
+                    this.tweens.add({
+                        targets: this.skillCutInContainer,
+                        x: this.gameBounds.width,
+                        duration: 250,
+                        ease: 'Power2.easeIn',
+                        onComplete: () => {
+                            this.skillCutInContainer.setVisible(false);
+                            this.skillCutInContainer.setX(0);
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    // 顯示技能觸發 CUT IN（如不死觸發）
+    private showTriggerCutIn(skillDef: SkillDefinition, title: string, quote: string) {
+        // 清除之前的內容
+        this.skillCutInContainer.removeAll(true);
+
+        // CUT IN 條的高度和位置
+        const barHeight = this.gameBounds.height * 0.15;
+        const barY = this.gameBounds.y + this.gameBounds.height * 0.25;
+        const fadeWidth = this.gameBounds.width * 0.15;
+        const solidWidth = this.gameBounds.width - fadeWidth * 2;
+
+        // 中間實心黑色背景
+        const bgCenter = this.add.rectangle(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY,
+            solidWidth,
+            barHeight,
+            0x000000,
+            0.85
+        );
+        this.skillCutInContainer.add(bgCenter);
+
+        // 左側漸層
+        const leftFade = this.add.graphics();
+        const leftStartX = this.gameBounds.x;
+        const fadeSteps = 20;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.85;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            leftFade.fillStyle(0x000000, alpha);
+            leftFade.fillRect(x, barY - barHeight / 2, w, barHeight);
+        }
+        this.skillCutInContainer.add(leftFade);
+
+        // 右側漸層
+        const rightFade = this.add.graphics();
+        const rightStartX = this.gameBounds.x + this.gameBounds.width - fadeWidth;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.85;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            rightFade.fillStyle(0x000000, alpha);
+            rightFade.fillRect(x, barY - barHeight / 2, w, barHeight);
+        }
+        this.skillCutInContainer.add(rightFade);
+
+        // 技能顏色的邊線
+        const lineThickness = 3;
+        const leftEndX = this.gameBounds.x + fadeWidth;
+
+        // 上邊線
+        const topLineGraphics = this.add.graphics();
+        const lineY = barY - barHeight / 2 - lineThickness / 2;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.8;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            topLineGraphics.fillStyle(skillDef.color, alpha);
+            topLineGraphics.fillRect(x, lineY, w, lineThickness);
+        }
+        topLineGraphics.fillStyle(skillDef.color, 0.8);
+        topLineGraphics.fillRect(leftEndX, lineY, solidWidth, lineThickness);
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.8;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            topLineGraphics.fillStyle(skillDef.color, alpha);
+            topLineGraphics.fillRect(x, lineY, w, lineThickness);
+        }
+        this.skillCutInContainer.add(topLineGraphics);
+
+        // 下邊線
+        const bottomLineGraphics = this.add.graphics();
+        const bottomLineY = barY + barHeight / 2 - lineThickness / 2;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.8;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            bottomLineGraphics.fillStyle(skillDef.color, alpha);
+            bottomLineGraphics.fillRect(x, bottomLineY, w, lineThickness);
+        }
+        bottomLineGraphics.fillStyle(skillDef.color, 0.8);
+        bottomLineGraphics.fillRect(leftEndX, bottomLineY, solidWidth, lineThickness);
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.8;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            bottomLineGraphics.fillStyle(skillDef.color, alpha);
+            bottomLineGraphics.fillRect(x, bottomLineY, w, lineThickness);
+        }
+        this.skillCutInContainer.add(bottomLineGraphics);
+
+        // 主標題
+        const titleTextObj = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY - barHeight * 0.25,
+            title,
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.35))}px`,
+                color: Phaser.Display.Color.IntegerToColor(skillDef.color).rgba,
+                fontStyle: 'bold'
+            }
+        );
+        titleTextObj.setResolution(2);
+        titleTextObj.setOrigin(0.5, 0.5);
+        this.skillCutInContainer.add(titleTextObj);
+
+        // 角色對話（大字）
+        const quoteTextObj = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY + barHeight * 0.15,
+            quote,
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.25))}px`,
+                color: '#ffffff'
+            }
+        );
+        quoteTextObj.setResolution(2);
+        quoteTextObj.setOrigin(0.5, 0.5);
+        this.skillCutInContainer.add(quoteTextObj);
 
         // 從左邊滑入動畫
         this.skillCutInContainer.setX(-this.gameBounds.width);
@@ -5094,7 +5311,18 @@ export default class MainScene extends Phaser.Scene {
         const startX = this.gameBounds.x + (this.gameBounds.width - totalWidth) / 2 + cardWidth / 2;
         const centerY = this.gameBounds.y + this.gameBounds.height * 0.55;
 
-        const keys = ['A', 'S', 'D'];
+        // 根據選項數量決定按鍵對應
+        // 3 個選項：A, S, D
+        // 2 個選項：A, D
+        // 1 個選項：S
+        let keys: string[];
+        if (numCards === 1) {
+            keys = ['S'];
+        } else if (numCards === 2) {
+            keys = ['A', 'D'];
+        } else {
+            keys = ['A', 'S', 'D'];
+        }
 
         for (let i = 0; i < this.currentSkillChoices.length; i++) {
             const skillDef = this.currentSkillChoices[i];
@@ -5116,7 +5344,7 @@ export default class MainScene extends Phaser.Scene {
 
             // 技能類型標籤
             const typeLabel = this.add.text(0, -cardHeight * 0.42, skillDef.type === 'active' ? 'ACTIVE' : 'PASSIVE', {
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))}px`,
                 color: skillDef.type === 'active' ? '#ff6666' : '#66ffff',
                 fontStyle: 'bold'
@@ -5134,7 +5362,11 @@ export default class MainScene extends Phaser.Scene {
 
             // 如果有技能圖示，顯示對應等級的圖示
             if (skillDef.iconPrefix) {
-                const iconKey = `skill_icon_${skillDef.iconPrefix}${nextLevel.toString().padStart(2, '0')}`;
+                // P 系列（被動技能）使用固定圖示，不隨等級變換
+                const isPassiveIcon = skillDef.iconPrefix.startsWith('P');
+                const iconKey = isPassiveIcon
+                    ? `skill_icon_${skillDef.iconPrefix}`
+                    : `skill_icon_${skillDef.iconPrefix}${nextLevel.toString().padStart(2, '0')}`;
                 if (this.textures.exists(iconKey)) {
                     const iconSprite = this.add.sprite(0, iconY, iconKey);
                     iconSprite.setOrigin(0.5, 0.5);
@@ -5151,7 +5383,7 @@ export default class MainScene extends Phaser.Scene {
             // 技能名稱（固定位置）
             const nameY = cardHeight * 0.06;
             const nameText = this.add.text(0, nameY, skillDef.name, {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.08))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
@@ -5163,7 +5395,7 @@ export default class MainScene extends Phaser.Scene {
             // 副標題（如果有）
             if (skillDef.subtitle) {
                 const subtitleText = this.add.text(0, cardHeight * 0.12, skillDef.subtitle, {
-                    fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
+                    fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
                     color: '#999999'
                 });
@@ -5182,7 +5414,7 @@ export default class MainScene extends Phaser.Scene {
                 levelDisplay = `Lv.${displayCurrentLevel} → Lv.${nextLevel}`;
             }
             const levelText = this.add.text(0, cardHeight * 0.20, levelDisplay, {
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
                 color: nextLevel >= skillDef.maxLevel ? '#ffff00' : '#88ff88',
                 fontStyle: 'bold'
@@ -5191,23 +5423,41 @@ export default class MainScene extends Phaser.Scene {
             levelText.setOrigin(0.5, 0.5);
             optionContainer.add(levelText);
 
-            // 技能描述（固定位置，手機版下移利用更多空間）
-            const descY = this.isMobile ? cardHeight * 0.36 : cardHeight * 0.32;
+            // 按鍵提示標籤位置（手機版隱藏，但需要預留空間）
+            const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
+            const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03; // 距離底部留 padding
+
+            // 技能描述（固定位置，限制最大高度避免超出）
+            const descY = cardHeight * 0.26;
+            const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02; // 描述區最大高度
+            const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
             const descText = this.add.text(0, descY, skillDef.description, {
-                fontFamily: 'Microsoft JhengHei, PingFang TC, -apple-system, BlinkMacSystemFont, sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${descFontSize}px`,
                 color: '#dddddd',
                 wordWrap: { width: cardWidth * 0.85 },
                 align: 'center'
             });
             descText.setResolution(2);
-            descText.setOrigin(0.5, 0);  // 從頂部開始，避免超出底部
+            descText.setOrigin(0.5, 0);  // 從頂部開始
+
+            // 如果文字超出可用空間，縮小字體重新渲染
+            if (descText.height > descMaxHeight) {
+                const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
+                descText.setStyle({
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${smallerFontSize}px`,
+                    color: '#dddddd',
+                    wordWrap: { width: cardWidth * 0.85 },
+                    align: 'center'
+                });
+            }
             optionContainer.add(descText);
 
             // 按鍵提示標籤（手機版隱藏）
             if (!this.isMobile) {
-                const keyLabel = this.add.text(0, cardHeight * 0.42, `[ ${keys[i]} ]`, {
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+                const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
                     color: '#ffff00',
                     fontStyle: 'bold'
@@ -5750,7 +6000,7 @@ export default class MainScene extends Phaser.Scene {
         sprite.setTint(color);
         sprite.setAlpha(0.4);
 
-        const duration = 500;
+        const duration = 1000; // 速度減半
         const startTime = this.time.now;
 
         // 使用 tweens timeline 控制移動
