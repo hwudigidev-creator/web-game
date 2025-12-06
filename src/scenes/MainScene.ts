@@ -77,6 +77,10 @@ export default class MainScene extends Phaser.Scene {
     private isPaused: boolean = false;
     private skillOptions: Phaser.GameObjects.Container[] = [];
     private skillCardBgs: Phaser.GameObjects.Rectangle[] = [];
+
+    // 遊戲計時器
+    private gameTimer: number = 0; // 遊戲進行時間（毫秒）
+    private timerText!: Phaser.GameObjects.Text;
     private selectedSkillIndex: number = 0; // 當前選中的技能索引
     private currentSkillChoices: SkillDefinition[] = []; // 當前可選的技能
 
@@ -442,6 +446,10 @@ export default class MainScene extends Phaser.Scene {
             this.handleSkillPanelInput();
             return;
         }
+
+        // 更新遊戲計時器（只在非暫停時累加）
+        this.gameTimer += delta;
+        this.updateTimerDisplay();
 
         // 處理測試用 +/- 按鍵
         this.handleExpTestInput();
@@ -3965,6 +3973,25 @@ export default class MainScene extends Phaser.Scene {
         this.levelText.setResolution(2); // 提高解析度使文字更清晰
         this.levelText.setOrigin(0, 1);
         this.expBarContainer.add(this.levelText);
+
+        // 遊戲計時器（右下角，對應左側 LV 位置）
+        this.timerText = this.add.text(
+            this.gameBounds.x + this.gameBounds.width - 10,
+            barY - 5,
+            '00:00',
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${fontSize}px`,
+                color: '#ffffff',
+                fontStyle: 'bold',
+                stroke: '#000000',
+                strokeThickness: 3
+            }
+        );
+        this.timerText.setResolution(2);
+        this.timerText.setOrigin(1, 1); // 右對齊
+        this.expBarContainer.add(this.timerText);
+
         // 經驗條現在使用網格格子繪製
 
         // 加入 UI 容器
@@ -4456,6 +4483,15 @@ export default class MainScene extends Phaser.Scene {
 
             this.redrawSkillIconGrid(activeCount + i, progress);
         }
+    }
+
+    // 更新遊戲計時器顯示
+    private updateTimerDisplay() {
+        const totalSeconds = Math.floor(this.gameTimer / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        this.timerText.setText(timeString);
     }
 
     // 建立技能資訊窗格
