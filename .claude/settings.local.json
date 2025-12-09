@@ -14,7 +14,8 @@
       "Bash(npm install:*)",
       "Bash(node scripts/generate-effects.js:*)",
       "Bash(dir /b \"B:\\〔WEB〕\\WEB_GAME_DDT\\public\")",
-      "Bash(dir /b \"B:\\〔WEB〕\\WEB_GAME_DDT\\public\\icons\\skills\")"
+      "Bash(dir /b \"B:\\〔WEB〕\\WEB_GAME_DDT\\public\\icons\\skills\")",
+      "Bash(npm run deploy:*)"
     ],
     "deny": [],
     "ask": []

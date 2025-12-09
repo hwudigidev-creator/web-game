@@ -16,7 +16,7 @@ function generateServiceWorker() {
 }
 
 export default defineConfig({
-  base: '/www/', // Base URL for GitHub Pages (repo name)
+  base: '/web-game/', // Base URL for GitHub Pages (repo name)
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version)
   },

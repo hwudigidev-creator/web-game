@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "deploy": "npm run build && gh-pages -d dist"
   },
   "devDependencies": {
     "canvas": "^3.2.0",
+    "gh-pages": "^6.3.0",
     "sharp": "^0.34.5",
     "typescript": "^5.2.2",
     "vite": "^5.0.0"
