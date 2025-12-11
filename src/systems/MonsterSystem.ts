@@ -31,6 +31,8 @@ export interface Monster {
     // BOSS 專用
     isBoss?: boolean;
     bossHpMultiplier?: number; // BOSS HP 倍率（等於生成時的玩家等級）
+    // 暈眩/癱瘓狀態
+    stunEndTime?: number; // 暈眩結束時間，0 或 undefined 表示未暈眩
 }
 
 // 怪物網格格子資料（畫面固定位置）
@@ -352,15 +354,21 @@ export class MonsterManager {
         const monstersToRemove: number[] = [];
 
         this.monsters.forEach(monster => {
+            // 檢查暈眩狀態（暈眩中不移動、不攻擊）
+            const isStunned = this.isMonsterStunned(monster);
+
             // 蝙蝠：沿固定方向直線移動，穿過畫面後消滅
             if (monster.isBat && monster.directionX !== undefined && monster.directionY !== undefined) {
-                // 速度單位轉換：單位/秒 → 像素/秒
-                const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
-                const moveDistance = (speedInPixels * delta) / 1000;
+                // 暈眩中不移動
+                if (!isStunned) {
+                    // 速度單位轉換：單位/秒 → 像素/秒
+                    const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
+                    const moveDistance = (speedInPixels * delta) / 1000;
 
-                // 沿固定方向移動（始終保持同一方向）
-                monster.x += monster.directionX * moveDistance;
-                monster.y += monster.directionY * moveDistance;
+                    // 沿固定方向移動（始終保持同一方向）
+                    monster.x += monster.directionX * moveDistance;
+                    monster.y += monster.directionY * moveDistance;
+                }
 
                 // 檢查是否離開畫面（加上緩衝區）
                 const buffer = this.gameBounds.height * 0.3;
@@ -374,33 +382,37 @@ export class MonsterManager {
                     monstersToRemove.push(monster.id);
                 }
 
-                // 蝙蝠碰到玩家也造成傷害
-                const batDx = playerX - monster.x;
-                const batDy = playerY - monster.y;
-                const batDist = Math.sqrt(batDx * batDx + batDy * batDy);
-                if (batDist <= collisionRange && now - monster.lastDamageTime >= 3000) {
-                    totalDamage += this.calculateMonsterDamage(monster);
-                    monster.lastDamageTime = now;
-                    hitMonsters.push(monster);
-                }
-            } else {
-                // 普通怪物：朝玩家移動
-                const dx = playerX - monster.x;
-                const dy = playerY - monster.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance > collisionRange) {
-                    const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
-                    const moveDistance = (speedInPixels * delta) / 1000;
-                    const ratio = moveDistance / distance;
-                    monster.x += dx * ratio;
-                    monster.y += dy * ratio;
-                } else {
-                    // 在碰撞範圍內，每 3 秒造成傷害
-                    if (now - monster.lastDamageTime >= 3000) {
+                // 蝙蝠碰到玩家也造成傷害（暈眩中不攻擊）
+                if (!isStunned) {
+                    const batDx = playerX - monster.x;
+                    const batDy = playerY - monster.y;
+                    const batDist = Math.sqrt(batDx * batDx + batDy * batDy);
+                    if (batDist <= collisionRange && now - monster.lastDamageTime >= 3000) {
                         totalDamage += this.calculateMonsterDamage(monster);
                         monster.lastDamageTime = now;
                         hitMonsters.push(monster);
+                    }
+                }
+            } else {
+                // 普通怪物：朝玩家移動（暈眩中不移動）
+                if (!isStunned) {
+                    const dx = playerX - monster.x;
+                    const dy = playerY - monster.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance > collisionRange) {
+                        const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
+                        const moveDistance = (speedInPixels * delta) / 1000;
+                        const ratio = moveDistance / distance;
+                        monster.x += dx * ratio;
+                        monster.y += dy * ratio;
+                    } else {
+                        // 在碰撞範圍內，每 3 秒造成傷害
+                        if (now - monster.lastDamageTime >= 3000) {
+                            totalDamage += this.calculateMonsterDamage(monster);
+                            monster.lastDamageTime = now;
+                            hitMonsters.push(monster);
+                        }
                     }
                 }
             }
@@ -965,5 +977,25 @@ export class MonsterManager {
         }
 
         return { totalExp, killCount, killedPositions };
+    }
+
+    // 使怪物暈眩（停止活動）
+    stunMonsters(monsterIds: number[], duration: number) {
+        const now = this.scene.time.now;
+        const stunEndTime = now + duration;
+
+        for (const id of monsterIds) {
+            const monster = this.monsters.find(m => m.id === id);
+            if (monster) {
+                // 設定暈眩結束時間（如果已經暈眩中，取較長的結束時間）
+                monster.stunEndTime = Math.max(monster.stunEndTime || 0, stunEndTime);
+            }
+        }
+    }
+
+    // 檢查怪物是否暈眩中
+    isMonsterStunned(monster: Monster): boolean {
+        if (!monster.stunEndTime) return false;
+        return this.scene.time.now < monster.stunEndTime;
     }
 }

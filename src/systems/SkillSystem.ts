@@ -1,5 +1,5 @@
 // 技能類型
-export type SkillType = 'active' | 'passive';
+export type SkillType = 'active' | 'passive' | 'advanced';
 
 // MAX 後額外能力定義
 export interface MaxExtraAbility {
@@ -34,6 +34,62 @@ export interface PlayerSkill {
     definition: SkillDefinition;
     level: number; // 0-5，5 為 MAX
 }
+
+// 進階技能定義
+export interface AdvancedSkillDefinition {
+    id: string;
+    name: string;
+    subtitle?: string;
+    description: string;
+    color: number;
+    flashColor?: number;
+    cooldown: number;
+    maxLevel: number;
+    iconPrefix: string;  // 如 'X01' 對應 X0100~X0105
+    requiredSkills: string[];  // 需要持有的基礎技能 ID 組合
+    levelUpMessages?: string[];
+    levelUpQuotes?: string[];
+}
+
+// 進階技能庫（根據技能組合解鎖）
+export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
+    {
+        id: 'advanced_burning_celluloid',
+        name: '燃燒的賽璐珞',
+        subtitle: '傳統手繪動畫師、逐幀動畫師',
+        description: '發動時消耗 10 HP，以角色為中心旋轉一圈 30° 扇形攻擊，造成（角色等級＋技能等級）傷害單位',
+        color: 0xff6600,  // 橘紅色（燃燒感）
+        flashColor: 0xff9933,
+        cooldown: 2000,  // 2 秒
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X01',
+        requiredSkills: ['active_soul_render', 'passive_titanium_liver'],  // 靈魂渲染（動畫大師）+ 鈦金肝
+        levelUpMessages: [
+            '你選擇成為傳統手繪動畫師、逐幀動畫師'
+        ],
+        levelUpQuotes: [
+            '你選擇成為傳統手繪動畫師、逐幀動畫師'
+        ]
+    },
+    {
+        id: 'advanced_tech_artist',
+        name: '技術美術大神',
+        subtitle: '一人成軍的遊戲開發者',
+        description: '每秒在角色周圍 5 單位隨機地點射下光線，產生 3 單位爆炸範圍，命中敵人癱瘓 0.5 秒',
+        color: 0x00ffcc,  // 青色（科技感）
+        flashColor: 0x66ffdd,
+        cooldown: 1000,  // 1 秒
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X02',
+        requiredSkills: ['active_coder', 'passive_ai_enhancement'],  // 咒言幻象（遊戲先知）+ AI 賦能強化
+        levelUpMessages: [
+            '左手寫 Code，右手畫圖，一人成軍的遊戲開發者'
+        ],
+        levelUpQuotes: [
+            '左手寫 Code，右手畫圖，一人成軍的遊戲開發者'
+        ]
+    }
+];
 
 // 技能庫：4 個攻擊技能 + 4 個被動技能
 export const SKILL_LIBRARY: SkillDefinition[] = [
@@ -309,6 +365,12 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     }
 ];
 
+// 進階技能實例
+export interface PlayerAdvancedSkill {
+    definition: AdvancedSkillDefinition;
+    level: number;  // 0-5，5 為 MAX
+}
+
 // 技能管理系統
 export class SkillManager {
     // 玩家擁有的技能（id -> PlayerSkill）
@@ -316,6 +378,10 @@ export class SkillManager {
 
     // 被動技能欄位上限
     private static readonly MAX_PASSIVE_SLOTS = 3;
+
+    // 進階技能系統
+    private advancedSkillLevels: Map<string, number> = new Map();  // 所有進階技能的等級記錄（切換後保留）
+    private equippedAdvancedSkillId: string | null = null;  // 當前裝備的進階技能 ID
 
     // 取得所有攻擊型技能定義
     getActiveSkillDefinitions(): SkillDefinition[] {
@@ -482,6 +548,52 @@ export class SkillManager {
         }
 
         return options;
+    }
+
+    // 取得混合技能選項（一般技能 + 進階技能）
+    getMixedSkillOptions(): { normal: SkillDefinition[], advanced: AdvancedSkillDefinition[] } {
+        const upgradeableActive = this.getUpgradeableActiveSkills();
+        const upgradeablePassive = this.getUpgradeablePassiveSkills();
+        const upgradeableAdvanced = this.getUpgradeableAdvancedSkills();
+
+        const normalOptions: SkillDefinition[] = [];
+        const advancedOptions: AdvancedSkillDefinition[] = [];
+
+        // 第一次選擇：固定顯示前 3 個攻擊技能（不隨機），不顯示進階技能
+        if (!this.hasAnyActiveSkill()) {
+            for (let i = 0; i < Math.min(3, upgradeableActive.length); i++) {
+                normalOptions.push(upgradeableActive[i]);
+            }
+            return { normal: normalOptions, advanced: [] };
+        }
+
+        // 目標：2 主動 + 1 被動 = 3 個一般技能
+        // 如果一般技能不足 3 個，用進階技能填充
+
+        // 隨機選主動技能（最多 2 個）
+        const shuffledActive = this.shuffleArray([...upgradeableActive]);
+        for (let i = 0; i < Math.min(2, shuffledActive.length); i++) {
+            normalOptions.push(shuffledActive[i]);
+        }
+
+        // 隨機選被動技能（最多 1 個）
+        const shuffledPassive = this.shuffleArray([...upgradeablePassive]);
+        if (shuffledPassive.length > 0) {
+            normalOptions.push(shuffledPassive[0]);
+        }
+
+        // 計算還需要多少個選項來填滿 3 個
+        const slotsNeeded = 3 - normalOptions.length;
+
+        // 用進階技能填充不足的部分
+        if (slotsNeeded > 0 && upgradeableAdvanced.length > 0) {
+            const shuffledAdvanced = this.shuffleArray([...upgradeableAdvanced]);
+            for (let i = 0; i < Math.min(slotsNeeded, shuffledAdvanced.length); i++) {
+                advancedOptions.push(shuffledAdvanced[i]);
+            }
+        }
+
+        return { normal: normalOptions, advanced: advancedOptions };
     }
 
     // 檢查是否還有可升級的技能
@@ -717,5 +829,135 @@ export class SkillManager {
     // AI賦能強化：超載（暴擊傷害加成）
     getAiEnhancementCritDamage(playerLevel: number): number {
         return this.getMaxExtraAbilityValue('passive_ai_enhancement', playerLevel);
+    }
+
+    // ===== 進階技能系統 =====
+
+    // 檢查所有基礎技能是否滿等（4 主動 + 3 被動 = 7 個）
+    areAllBasicSkillsMaxed(): boolean {
+        // 檢查是否持有所有 4 個主動技能且都滿等
+        const activeSkills = this.getActiveSkillDefinitions();
+        const allActivesMaxed = activeSkills.every(def => {
+            const skill = this.playerSkills.get(def.id);
+            return skill && skill.level >= def.maxLevel;
+        });
+
+        // 檢查是否持有 3 個被動技能且都滿等
+        const passiveCount = this.getOwnedPassiveCount();
+        if (passiveCount < SkillManager.MAX_PASSIVE_SLOTS) return false;
+
+        const passiveSkills = this.getPassiveSkillDefinitions();
+        let maxedPassiveCount = 0;
+        passiveSkills.forEach(def => {
+            const skill = this.playerSkills.get(def.id);
+            if (skill && skill.level >= def.maxLevel) {
+                maxedPassiveCount++;
+            }
+        });
+
+        return allActivesMaxed && maxedPassiveCount >= SkillManager.MAX_PASSIVE_SLOTS;
+    }
+
+    // 取得可選的進階技能（根據持有的基礎技能）
+    getAvailableAdvancedSkills(): AdvancedSkillDefinition[] {
+        return ADVANCED_SKILL_LIBRARY.filter(adv => {
+            return adv.requiredSkills.every(reqId => this.playerSkills.has(reqId));
+        });
+    }
+
+    // 取得可升級的進階技能（未滿級或無上限）
+    getUpgradeableAdvancedSkills(): AdvancedSkillDefinition[] {
+        return this.getAvailableAdvancedSkills().filter(adv => {
+            // maxLevel < 0 表示無上限，永遠可升級
+            if (adv.maxLevel < 0) return true;
+
+            const level = this.advancedSkillLevels.get(adv.id) ?? 0;
+            return level < adv.maxLevel;
+        });
+    }
+
+    // 隨機選取進階技能選項（3選1）
+    getRandomAdvancedSkillOptions(): AdvancedSkillDefinition[] {
+        const available = this.getUpgradeableAdvancedSkills();
+        const shuffled = this.shuffleArray([...available]);
+        return shuffled.slice(0, 3);
+    }
+
+    // 取得當前裝備的進階技能
+    getEquippedAdvancedSkill(): PlayerAdvancedSkill | null {
+        if (!this.equippedAdvancedSkillId) return null;
+
+        const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === this.equippedAdvancedSkillId);
+        if (!def) return null;
+
+        const level = this.advancedSkillLevels.get(this.equippedAdvancedSkillId) ?? 0;
+        return { definition: def, level };
+    }
+
+    // 取得當前裝備的進階技能 ID
+    getEquippedAdvancedSkillId(): string | null {
+        return this.equippedAdvancedSkillId;
+    }
+
+    // 設定裝備的進階技能（切換）
+    setEquippedAdvancedSkill(skillId: string): boolean {
+        const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
+        if (!def) return false;
+
+        // 檢查是否符合組合條件
+        const canEquip = def.requiredSkills.every(reqId => this.playerSkills.has(reqId));
+        if (!canEquip) return false;
+
+        this.equippedAdvancedSkillId = skillId;
+        return true;
+    }
+
+    // 取得進階技能等級（-1 表示從未學習過）
+    getAdvancedSkillLevel(skillId: string): number {
+        return this.advancedSkillLevels.get(skillId) ?? -1;
+    }
+
+    // 升級進階技能（學習或升級）
+    upgradeAdvancedSkill(skillId: string): boolean {
+        const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
+        if (!def) return false;
+
+        const currentLevel = this.advancedSkillLevels.get(skillId) ?? 0;
+
+        // maxLevel < 0 表示無上限
+        if (def.maxLevel >= 0 && currentLevel >= def.maxLevel) {
+            return false;  // 已滿級
+        }
+
+        // 升級
+        this.advancedSkillLevels.set(skillId, currentLevel + 1);
+        return true;
+    }
+
+    // 檢查進階技能是否已滿級
+    isAdvancedSkillMaxLevel(skillId: string): boolean {
+        const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
+        if (!def) return false;
+
+        // maxLevel < 0 表示無上限，永遠不會滿級
+        if (def.maxLevel < 0) return false;
+
+        const level = this.advancedSkillLevels.get(skillId) ?? 0;
+        return level >= def.maxLevel;
+    }
+
+    // 檢查是否有任何進階技能（用於判斷是否顯示進階技能欄位）
+    hasAnyAdvancedSkill(): boolean {
+        return this.equippedAdvancedSkillId !== null;
+    }
+
+    // 取得進階技能定義
+    getAdvancedSkillDefinition(skillId: string): AdvancedSkillDefinition | undefined {
+        return ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
+    }
+
+    // 計算進階技能的最終冷卻時間（套用被動減速）
+    calculateAdvancedSkillCooldown(baseCooldown: number): number {
+        return this.calculateFinalCooldown(baseCooldown);
     }
 }

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SkillManager, SkillDefinition, PlayerSkill, SKILL_LIBRARY } from '../systems/SkillSystem';
+import { SkillManager, SkillDefinition, PlayerSkill, SKILL_LIBRARY, AdvancedSkillDefinition, PlayerAdvancedSkill } from '../systems/SkillSystem';
 import { MonsterManager, Monster } from '../systems/MonsterSystem';
 
 interface GameBounds {
@@ -92,6 +92,21 @@ export default class MainScene extends Phaser.Scene {
     private skillIconContainers: Phaser.GameObjects.Container[] = []; // 技能欄圖示容器
     private skillLevelTexts: Phaser.GameObjects.Text[] = []; // 技能等級文字
     private skillIconSprites: (Phaser.GameObjects.Sprite | null)[] = []; // 技能圖示 Sprite
+
+    // 進階技能系統
+    private advancedSkillContainer!: Phaser.GameObjects.Container; // 進階技能欄位容器
+    private advancedSkillSlotVisible: boolean = false; // 進階技能欄位是否可見
+    private advancedSkillIconSprite: Phaser.GameObjects.Sprite | null = null; // 進階技能圖示
+    private advancedSkillLevelText!: Phaser.GameObjects.Text; // 進階技能等級文字
+    private advancedSkillGridGraphics!: Phaser.GameObjects.Graphics; // 進階技能邊框圖形
+    private advancedSkillGridData!: { startX: number; startY: number; gridSize: number }; // 進階技能網格資料
+    private advancedSkillHue: number = 0; // 彩虹邊框色相
+    private advancedSkillCooldownTime: number = 0; // 進階技能上次發動時間
+    private isSelectingAdvancedSkill: boolean = false; // 是否正在選擇進階技能
+    private currentAdvancedSkillChoices: AdvancedSkillDefinition[] = []; // 當前可選的進階技能
+    private mixedSkillTypes: ('normal' | 'advanced')[] = []; // 混合選項中每個卡片的類型
+    private mixedNormalIndices: number[] = []; // 混合選項中一般技能在 currentSkillChoices 的索引
+    private mixedAdvancedIndices: number[] = []; // 混合選項中進階技能在 currentAdvancedSkillChoices 的索引
 
     // 技能資訊窗格
     private skillInfoPanel!: Phaser.GameObjects.Container;
@@ -440,6 +455,7 @@ export default class MainScene extends Phaser.Scene {
         this.updateHpRegen(delta);
         this.updateLowHpVignetteBreathing(delta);
         this.updateSkillCooldownDisplay();
+        this.updateAdvancedSkillCooldown(delta);
 
         // 如果遊戲暫停，處理技能選擇面板的按鍵
         if (this.isPaused) {
@@ -2241,7 +2257,15 @@ export default class MainScene extends Phaser.Scene {
     private handleSkillPanelInput() {
         if (!this.cursors) return;
 
-        const numChoices = this.currentSkillChoices.length;
+        // 計算選項數量（混合模式、進階模式、一般模式）
+        let numChoices: number;
+        if (this.mixedSkillTypes.length > 0) {
+            numChoices = this.mixedSkillTypes.length;
+        } else if (this.isSelectingAdvancedSkill) {
+            numChoices = this.currentAdvancedSkillChoices.length;
+        } else {
+            numChoices = this.currentSkillChoices.length;
+        }
 
         // 根據選項數量決定按鍵對應
         // 3 個選項：A=0, S=1, D=2
@@ -2335,6 +2359,23 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private confirmSkillSelection() {
+        // 處理混合技能選擇模式
+        if (this.mixedSkillTypes.length > 0) {
+            this.confirmMixedSkillSelection();
+            return;
+        }
+
+        // 處理進階技能選擇
+        if (this.isSelectingAdvancedSkill) {
+            if (this.currentAdvancedSkillChoices.length === 0) return;
+            if (this.selectedSkillIndex >= this.currentAdvancedSkillChoices.length) return;
+
+            const selectedAdvSkill = this.currentAdvancedSkillChoices[this.selectedSkillIndex];
+            this.selectAdvancedSkill(this.selectedSkillIndex, selectedAdvSkill.id);
+            return;
+        }
+
+        // 處理一般技能選擇
         if (this.currentSkillChoices.length === 0) return;
         if (this.selectedSkillIndex >= this.currentSkillChoices.length) return;
 
@@ -4198,7 +4239,8 @@ export default class MainScene extends Phaser.Scene {
         const activeCount = MainScene.ACTIVE_SKILLS;
         const passiveCount = MainScene.PASSIVE_SKILLS;
 
-        // 計算總寬度（格子數）
+        // 計算總寬度（格子數）- 包含進階技能欄位的空間
+        const advancedSlotCells = iconGridSize + groupGapCells; // 進階技能 + 間隔
         const activeGroupCells = activeCount * iconGridSize + (activeCount - 1) * iconGapCells;
         const passiveGroupCells = passiveCount * iconGridSize + (passiveCount - 1) * iconGapCells;
         const totalCells = activeGroupCells + groupGapCells + passiveGroupCells;
@@ -4210,6 +4252,9 @@ export default class MainScene extends Phaser.Scene {
         const expBarHeight = 2 * (cellSize + gap);
         const bottomMargin = cellSize + gap; // 1 格間距
         const y = this.gameBounds.y + this.gameBounds.height - expBarHeight - iconPixelSize - bottomMargin;
+
+        // 建立進階技能欄位（預設隱藏，在主動技能左側）
+        this.createAdvancedSkillSlot(startX, y, iconGridSize, iconPixelSize, advancedSlotCells, cellSize, gap);
 
         // 主動技能（4個）
         let currentX = startX;
@@ -4310,6 +4355,192 @@ export default class MainScene extends Phaser.Scene {
 
         // 為技能圖示添加點擊事件
         this.setupSkillIconInteractions();
+    }
+
+    // 建立進階技能欄位（預設隱藏）
+    private createAdvancedSkillSlot(
+        activeStartX: number,
+        y: number,
+        iconGridSize: number,
+        iconPixelSize: number,
+        advancedSlotCells: number,
+        cellSize: number,
+        gap: number
+    ) {
+        // 進階技能欄位位於主動技能左側，間隔 2 格
+        const slotX = activeStartX - advancedSlotCells * (cellSize + gap);
+        const iconCenterX = slotX + iconPixelSize / 2;
+        const iconCenterY = y + iconPixelSize / 2;
+
+        // 建立容器
+        this.advancedSkillContainer = this.add.container(iconCenterX, iconCenterY);
+        this.advancedSkillContainer.setDepth(1002);
+        this.advancedSkillContainer.setVisible(false); // 預設隱藏
+        this.advancedSkillContainer.setAlpha(0);
+        this.uiContainer.add(this.advancedSkillContainer);
+
+        // 技能框背景（使用透明填充）
+        const icon = this.add.rectangle(0, 0, iconPixelSize, iconPixelSize);
+        icon.setStrokeStyle(0, 0xffffff, 0);
+        icon.setFillStyle(0x000000, 0);
+        this.advancedSkillContainer.add(icon);
+
+        // 技能顏色指示背景
+        const colorBg = this.add.rectangle(0, 0, iconPixelSize - 4, iconPixelSize - 4, 0x333333, 0);
+        this.advancedSkillContainer.add(colorBg);
+
+        // 等級文字
+        const fontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(iconPixelSize * 0.2));
+        this.advancedSkillLevelText = this.add.text(0, iconPixelSize * 0.3, '', {
+            fontFamily: '"Noto Sans TC", sans-serif',
+            fontSize: `${fontSize}px`,
+            color: '#ffffff',
+            fontStyle: 'bold',
+            stroke: '#000000',
+            strokeThickness: 3
+        });
+        this.advancedSkillLevelText.setResolution(2);
+        this.advancedSkillLevelText.setOrigin(0.5, 0.5);
+        this.advancedSkillContainer.add(this.advancedSkillLevelText);
+
+        // 建立網格邊框 Graphics
+        this.advancedSkillGridGraphics = this.add.graphics();
+        this.advancedSkillGridGraphics.setDepth(1001);
+        this.advancedSkillGridGraphics.setVisible(false);
+        this.uiContainer.add(this.advancedSkillGridGraphics);
+
+        // 儲存位置資料
+        this.advancedSkillGridData = { startX: slotX, startY: y, gridSize: iconGridSize };
+
+        // 設定點擊事件（顯示技能資訊）
+        icon.setInteractive({ useHandCursor: true });
+        icon.on('pointerdown', () => {
+            const equipped = this.skillManager.getEquippedAdvancedSkill();
+            if (equipped) {
+                this.showAdvancedSkillInfo(equipped);
+            }
+        });
+    }
+
+    // 顯示進階技能欄位（第一次選擇時呼叫）
+    private showAdvancedSkillSlot() {
+        if (this.advancedSkillSlotVisible) return;
+
+        this.advancedSkillSlotVisible = true;
+        this.advancedSkillContainer.setVisible(true);
+        this.advancedSkillGridGraphics.setVisible(true);
+
+        // 動畫：從左側滑入
+        const targetX = this.advancedSkillContainer.x;
+        this.advancedSkillContainer.x = targetX - 50;
+        this.tweens.add({
+            targets: this.advancedSkillContainer,
+            x: targetX,
+            alpha: 1,
+            duration: 300,
+            ease: 'Power2'
+        });
+    }
+
+    // 更新進階技能欄位顯示
+    private updateAdvancedSkillDisplay() {
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        if (!equipped) return;
+
+        const def = equipped.definition;
+
+        // 更新等級文字（無上限技能永遠顯示等級）
+        if (def.maxLevel >= 0 && equipped.level >= def.maxLevel) {
+            this.advancedSkillLevelText.setText('MAX');
+            this.advancedSkillLevelText.setColor('#FFD700');
+        } else {
+            this.advancedSkillLevelText.setText(`Lv.${equipped.level}`);
+            this.advancedSkillLevelText.setColor('#ffffff');
+        }
+
+        // 更新圖示
+        const iconKey = `skill_${def.iconPrefix}0${equipped.level}`;
+        if (this.textures.exists(iconKey)) {
+            if (this.advancedSkillIconSprite) {
+                this.advancedSkillIconSprite.setTexture(iconKey);
+            } else {
+                const cellSize = this.skillGridCellSize;
+                const gap = MainScene.SKILL_GRID_GAP;
+                const iconPixelSize = 8 * (cellSize + gap) - gap;
+                const spriteSize = iconPixelSize - 4;
+
+                this.advancedSkillIconSprite = this.add.sprite(0, 0, iconKey);
+                this.advancedSkillIconSprite.setDisplaySize(spriteSize, spriteSize);
+                this.advancedSkillContainer.add(this.advancedSkillIconSprite);
+                this.advancedSkillContainer.sendToBack(this.advancedSkillIconSprite);
+            }
+        }
+    }
+
+    // 繪製進階技能彩虹邊框（在 update 中呼叫）
+    private redrawAdvancedSkillRainbowBorder(cdProgress: number, delta: number) {
+        if (!this.advancedSkillSlotVisible || !this.advancedSkillGridGraphics) return;
+
+        // 更新彩虹相位
+        this.advancedSkillHue = (this.advancedSkillHue + delta * 0.1) % 360;
+
+        const graphics = this.advancedSkillGridGraphics;
+        const data = this.advancedSkillGridData;
+        if (!data) return;
+
+        graphics.clear();
+
+        const cellSize = this.skillGridCellSize;
+        const gap = MainScene.SKILL_GRID_GAP;
+        const { startX, startY, gridSize } = data;
+
+        // 計算邊框格子順序（從 12 點鐘方向順時針）
+        const edgeCells: { row: number; col: number }[] = [];
+
+        // 頂邊（從中間開始往右）
+        const midCol = Math.floor(gridSize / 2);
+        for (let col = midCol; col < gridSize; col++) {
+            edgeCells.push({ row: 0, col });
+        }
+        // 右邊（上到下，跳過右上角）
+        for (let row = 1; row < gridSize; row++) {
+            edgeCells.push({ row, col: gridSize - 1 });
+        }
+        // 底邊（右到左，跳過右下角）
+        for (let col = gridSize - 2; col >= 0; col--) {
+            edgeCells.push({ row: gridSize - 1, col });
+        }
+        // 左邊（下到上，跳過左下角和左上角）
+        for (let row = gridSize - 2; row >= 1; row--) {
+            edgeCells.push({ row, col: 0 });
+        }
+        // 左上角
+        edgeCells.push({ row: 0, col: 0 });
+        // 頂邊左半部（col 1 到中間前）
+        for (let col = 1; col < midCol; col++) {
+            edgeCells.push({ row: 0, col });
+        }
+
+        const totalCells = edgeCells.length;
+        const cdCellCount = Math.floor(totalCells * cdProgress);
+
+        // 繪製彩虹邊框格子
+        for (let i = 0; i < totalCells; i++) {
+            const { row, col } = edgeCells[i];
+            const x = startX + col * (cellSize + gap);
+            const y = startY + row * (cellSize + gap);
+
+            if (i < cdCellCount) {
+                // CD 中：彩虹漸變色
+                const hue = (this.advancedSkillHue + i * 12) % 360;
+                const color = Phaser.Display.Color.HSLToColor(hue / 360, 1, 0.5).color;
+                graphics.fillStyle(color, 0.8);
+            } else {
+                // CD 完成：半透明黑
+                graphics.fillStyle(0x000000, 0.5);
+            }
+            graphics.fillRect(x, y, cellSize, cellSize);
+        }
     }
 
     // 繪製技能框的網格邊框
@@ -4489,6 +4720,349 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
+    // 更新進階技能冷卻與彩虹邊框
+    private updateAdvancedSkillCooldown(delta: number) {
+        if (!this.advancedSkillSlotVisible) return;
+
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        if (!equipped) return;
+
+        const now = this.time.now;
+        const cooldown = this.skillManager.calculateFinalCooldown(equipped.definition.cooldown);
+        const elapsed = now - this.advancedSkillCooldownTime;
+
+        // 計算進度（1 = 冷卻完成）
+        const progress = Math.min(1, elapsed / cooldown);
+
+        // 繪製彩虹邊框
+        this.redrawAdvancedSkillRainbowBorder(progress, delta);
+
+        // 冷卻完成且不是暫停中，發動進階技能
+        if (progress >= 1 && !this.isPaused && !this.isHurt) {
+            this.activateAdvancedSkill(equipped);
+            this.advancedSkillCooldownTime = now;
+        }
+    }
+
+    // 發動進階技能
+    private activateAdvancedSkill(equipped: PlayerAdvancedSkill) {
+        const def = equipped.definition;
+        console.log(`Advanced skill activated: ${def.name} (Lv.${equipped.level})`);
+
+        // 根據進階技能類型執行不同效果
+        switch (def.id) {
+            case 'advanced_burning_celluloid':
+                this.executeBurningCelluloid(equipped.level);
+                break;
+            case 'advanced_tech_artist':
+                this.executeTechArtist(equipped.level);
+                break;
+        }
+    }
+
+    // 燃燒的賽璐珞：消耗 10 HP，7 單位距離 30° 扇形旋轉一圈攻擊
+    private executeBurningCelluloid(skillLevel: number) {
+        // 消耗 10 HP
+        const hpCost = 10;
+        if (this.currentHp > hpCost) {
+            this.currentHp -= hpCost;
+            this.drawHpBarFill();
+            this.updateHpText();
+            // 顯示 HP 消耗效果（角色閃紅）
+            this.character.setTint(0xff6600);
+            this.time.delayedCall(100, () => {
+                this.character.clearTint();
+            });
+        } else {
+            // HP 不足，不發動技能
+            return;
+        }
+
+        // 傷害單位 = 角色等級 + 技能等級
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+        const range = this.gameBounds.height * 0.7; // 7 單位距離
+        const sectorAngle = 30; // 30 度扇形
+        const halfAngle = (sectorAngle / 2) * (Math.PI / 180);
+
+        // 旋轉一圈 = 12 次 30° 扇形攻擊
+        const rotationSteps = 12;
+        const rotationDuration = 600; // 總旋轉時間 0.6 秒
+        const stepDelay = rotationDuration / rotationSteps;
+
+        // 記錄已經被擊中的怪物（每次發動只能被打一次）
+        const hitMonsterSet = new Set<number>();
+
+        for (let i = 0; i < rotationSteps; i++) {
+            this.time.delayedCall(i * stepDelay, () => {
+                // 計算當前扇形角度（從 0 開始逆時針旋轉）
+                const currentAngle = (i / rotationSteps) * Math.PI * 2;
+
+                // 計算傷害（含暴擊）
+                const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+
+                const monsters = this.monsterManager.getMonsters();
+                const hitMonsters: number[] = [];
+                const hitPositions: { x: number; y: number }[] = [];
+
+                for (const monster of monsters) {
+                    // 跳過已經被擊中的怪物
+                    if (hitMonsterSet.has(monster.id)) continue;
+
+                    const dx = monster.x - this.characterX;
+                    const dy = monster.y - this.characterY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+                    if (dist - monsterRadius > range) continue;
+
+                    const monsterAngle = Math.atan2(dy, dx);
+                    let angleDiff = monsterAngle - currentAngle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+                    const angleOffset = dist > 0 ? Math.atan2(monsterRadius, dist) : Math.PI;
+                    if (Math.abs(angleDiff) <= halfAngle + angleOffset) {
+                        hitMonsters.push(monster.id);
+                        hitPositions.push({ x: monster.x, y: monster.y });
+                        hitMonsterSet.add(monster.id);
+                    }
+                }
+
+                if (hitMonsters.length > 0) {
+                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                    if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                    // 命中回饋
+                    if (isCrit) {
+                        this.flashCritCrossAtPositions(hitPositions);
+                    } else {
+                        this.flashWhiteCrossAtPositions(hitPositions);
+                    }
+                }
+
+                // 顯示旋轉扇形特效
+                this.showRotatingSectorEffect(currentAngle, range, halfAngle, 0xff6600);
+            });
+        }
+
+        // 震動效果（旋轉結束時）
+        this.time.delayedCall(rotationDuration, () => {
+            this.shakeScreen(hitMonsterSet.size);
+        });
+    }
+
+    // 顯示旋轉扇形特效（燃燒的賽璐珞用）
+    private showRotatingSectorEffect(angle: number, radius: number, halfAngle: number, color: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(55);
+
+        const duration = 150;
+        const startTime = this.time.now;
+
+        // 記錄世界座標
+        const worldX = this.characterX;
+        const worldY = this.characterY;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const alpha = 0.8 * (1 - progress);
+
+            // 每幀重新計算螢幕座標
+            const screen = this.worldToScreen(worldX, worldY);
+
+            graphics.clear();
+
+            // 填充扇形
+            graphics.fillStyle(color, alpha * 0.5);
+            graphics.beginPath();
+            graphics.moveTo(screen.x, screen.y);
+            graphics.arc(screen.x, screen.y, radius, angle - halfAngle, angle + halfAngle, false);
+            graphics.lineTo(screen.x, screen.y);
+            graphics.closePath();
+            graphics.fillPath();
+
+            // 扇形邊線
+            graphics.lineStyle(2, 0xffffff, alpha);
+            graphics.beginPath();
+            graphics.moveTo(screen.x, screen.y);
+            graphics.lineTo(
+                screen.x + Math.cos(angle - halfAngle) * radius,
+                screen.y + Math.sin(angle - halfAngle) * radius
+            );
+            graphics.strokePath();
+            graphics.beginPath();
+            graphics.moveTo(screen.x, screen.y);
+            graphics.lineTo(
+                screen.x + Math.cos(angle + halfAngle) * radius,
+                screen.y + Math.sin(angle + halfAngle) * radius
+            );
+            graphics.strokePath();
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16 });
+    }
+
+    // 技術美術大神：在角色周圍 5 單位隨機地點射下光線，3 單位爆炸範圍，命中敵人癱瘓 0.5 秒
+    private executeTechArtist(skillLevel: number) {
+        // 傷害單位 = 角色等級 + 技能等級
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 範圍參數
+        const spawnRadius = this.gameBounds.height * 0.5; // 5 單位距離
+        const explosionRadius = this.gameBounds.height * 0.3; // 3 單位爆炸範圍
+        const stunDuration = 500; // 0.5 秒癱瘓
+
+        // 隨機選擇落點（角色周圍 5 單位內）
+        const randomAngle = Math.random() * Math.PI * 2;
+        const randomDist = Math.random() * spawnRadius;
+        const targetX = this.characterX + Math.cos(randomAngle) * randomDist;
+        const targetY = this.characterY + Math.sin(randomAngle) * randomDist;
+
+        // 顯示光線落下特效
+        this.showLightBeamEffect(targetX, targetY, explosionRadius, 0x00ffcc);
+
+        // 延遲 200ms 後造成傷害（光線落地）
+        this.time.delayedCall(200, () => {
+            // 計算傷害（含暴擊）
+            const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+
+            const monsters = this.monsterManager.getMonsters();
+            const hitMonsters: number[] = [];
+            const hitPositions: { x: number; y: number }[] = [];
+
+            for (const monster of monsters) {
+                const dx = monster.x - targetX;
+                const dy = monster.y - targetY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+                // 在爆炸範圍內
+                if (dist - monsterRadius <= explosionRadius) {
+                    hitMonsters.push(monster.id);
+                    hitPositions.push({ x: monster.x, y: monster.y });
+                }
+            }
+
+            if (hitMonsters.length > 0) {
+                // 造成傷害
+                const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                // 癱瘓效果（暈眩/停止活動）
+                this.monsterManager.stunMonsters(hitMonsters, stunDuration);
+
+                // 命中回饋
+                if (isCrit) {
+                    this.flashCritCrossAtPositions(hitPositions);
+                } else {
+                    this.flashWhiteCrossAtPositions(hitPositions);
+                }
+
+                // 震動效果
+                this.shakeScreen(hitMonsters.length);
+            }
+
+            // 顯示爆炸特效
+            this.showExplosionEffect(targetX, targetY, explosionRadius, 0x00ffcc);
+        });
+    }
+
+    // 顯示光線落下特效（技術美術大神用）
+    private showLightBeamEffect(worldX: number, worldY: number, radius: number, color: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(55);
+
+        const duration = 200; // 光線落下時間
+        const startTime = this.time.now;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 每幀重新計算螢幕座標
+            const screen = this.worldToScreen(worldX, worldY);
+
+            graphics.clear();
+
+            // 光線從上方落下
+            const beamWidth = 20 * (1 - progress * 0.5);
+            const beamHeight = this.gameBounds.height * 0.5 * (1 - progress);
+            const alpha = 0.8;
+
+            // 垂直光束
+            graphics.fillStyle(color, alpha);
+            graphics.fillRect(
+                screen.x - beamWidth / 2,
+                screen.y - beamHeight - radius * progress,
+                beamWidth,
+                beamHeight
+            );
+
+            // 光束底部發光
+            graphics.fillStyle(0xffffff, alpha * 0.8);
+            graphics.fillCircle(screen.x, screen.y, 10 * (1 + progress));
+
+            // 預告圓圈（逐漸擴大）
+            graphics.lineStyle(2, color, alpha * 0.5);
+            graphics.strokeCircle(screen.x, screen.y, radius * progress);
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16 });
+    }
+
+    // 顯示爆炸特效（技術美術大神用）
+    private showExplosionEffect(worldX: number, worldY: number, radius: number, color: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(55);
+
+        const duration = 300; // 爆炸持續時間
+        const startTime = this.time.now;
+
+        const updateEffect = () => {
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const alpha = 0.8 * (1 - progress);
+
+            // 每幀重新計算螢幕座標
+            const screen = this.worldToScreen(worldX, worldY);
+
+            graphics.clear();
+
+            // 爆炸圓形（從中心擴散）
+            const currentRadius = radius * (0.5 + progress * 0.5);
+            graphics.fillStyle(color, alpha * 0.4);
+            graphics.fillCircle(screen.x, screen.y, currentRadius);
+
+            // 爆炸邊緣
+            graphics.lineStyle(3, 0xffffff, alpha);
+            graphics.strokeCircle(screen.x, screen.y, currentRadius);
+
+            // 內圈閃光
+            graphics.fillStyle(0xffffff, alpha * 0.6);
+            graphics.fillCircle(screen.x, screen.y, currentRadius * 0.3 * (1 - progress));
+
+            if (progress >= 1) {
+                graphics.destroy();
+            }
+        };
+
+        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16 });
+    }
+
     // 更新遊戲計時器顯示
     private updateTimerDisplay() {
         const totalSeconds = Math.floor(this.gameTimer / 1000);
@@ -4579,6 +5153,58 @@ export default class MainScene extends Phaser.Scene {
         } else {
             // 被動技能：顯示累積效果
             this.appendPassiveSkillInfo(infoLines, skill);
+        }
+
+        this.skillInfoText.setText(infoLines.join('\n'));
+
+        // 調整背景大小
+        const textBounds = this.skillInfoText.getBounds();
+        const padding = 10;
+        this.skillInfoBg.setSize(
+            Math.max(180, textBounds.width + padding * 2),
+            textBounds.height + padding * 2
+        );
+
+        // 顯示窗格
+        this.skillInfoPanel.setVisible(true);
+
+        // 清除之前的計時器
+        if (this.skillInfoHideTimer) {
+            this.skillInfoHideTimer.destroy();
+        }
+
+        // 3 秒後自動隱藏
+        this.skillInfoHideTimer = this.time.delayedCall(3000, () => {
+            this.skillInfoPanel.setVisible(false);
+        });
+    }
+
+    // 顯示進階技能資訊
+    private showAdvancedSkillInfo(equipped: PlayerAdvancedSkill) {
+        const def = equipped.definition;
+        const level = equipped.level;
+        const cdReduction = this.skillManager.getSyncRateCooldownReduction();
+        const damageBonus = this.skillManager.getAiEnhancementDamageBonus();
+
+        // 組合技能資訊文字
+        const infoLines: string[] = [];
+        infoLines.push(`【${def.name}】${SkillManager.formatLevel(level, def.maxLevel)}`);
+        if (def.subtitle) {
+            infoLines.push(def.subtitle);
+        }
+
+        // 燃燒的賽璐珞特殊顯示
+        if (def.id === 'advanced_burning_celluloid') {
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const baseCd = def.cooldown;
+            const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+
+            infoLines.push(`HP 消耗: 10`);
+            infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`範圍: 7 單位 / 30°`);
+            infoLines.push(`冷卻: ${finalCd}s`);
         }
 
         this.skillInfoText.setText(infoLines.join('\n'));
@@ -5334,13 +5960,41 @@ export default class MainScene extends Phaser.Scene {
         this.skillOptions = [];
         this.skillCardBgs = [];
 
-        // 取得隨機技能選項（2 攻擊 + 1 被動）
-        this.currentSkillChoices = this.skillManager.getRandomSkillOptions();
+        // 重設混合選項追蹤（非混合模式時應為空）
+        this.mixedSkillTypes = [];
+        this.mixedNormalIndices = [];
+        this.mixedAdvancedIndices = [];
+
+        // 取得混合技能選項（一般 + 進階）
+        const mixedOptions = this.skillManager.getMixedSkillOptions();
+        this.currentSkillChoices = mixedOptions.normal;
+        this.currentAdvancedSkillChoices = mixedOptions.advanced;
+
+        // 計算總選項數
+        const totalOptions = this.currentSkillChoices.length + this.currentAdvancedSkillChoices.length;
 
         // 如果沒有可選技能，不顯示面板
-        if (this.currentSkillChoices.length === 0) {
+        if (totalOptions === 0) {
             return;
         }
+
+        // 如果只有進階技能（一般技能全滿等）
+        if (this.currentSkillChoices.length === 0 && this.currentAdvancedSkillChoices.length > 0) {
+            this.isSelectingAdvancedSkill = true;
+            // 最多顯示 3 個進階技能
+            this.currentAdvancedSkillChoices = this.currentAdvancedSkillChoices.slice(0, 3);
+            this.createAdvancedSkillOptions();
+            return;
+        }
+
+        // 如果有進階技能可選，創建混合選項面板
+        if (this.currentAdvancedSkillChoices.length > 0) {
+            this.createMixedSkillOptions();
+            return;
+        }
+
+        // 只有一般技能
+        this.isSelectingAdvancedSkill = false;
 
         // 選項卡片設定（手機版增加高度避免文字超出邊框）
         const cardWidth = this.gameBounds.width * 0.25;
@@ -5542,8 +6196,11 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private showSkillPanel() {
-        // 檢查是否有可升級的技能
-        if (!this.skillManager.hasUpgradeableSkills()) {
+        // 檢查是否有可升級的技能（包含進階技能）
+        const hasNormalSkills = this.skillManager.hasUpgradeableSkills();
+        const hasAdvancedSkills = this.skillManager.getUpgradeableAdvancedSkills().length > 0;
+
+        if (!hasNormalSkills && !hasAdvancedSkills) {
             console.log('All skills are maxed out! Continue leveling for HP growth.');
             // 技能全滿後不暫停遊戲，但仍享有升級帶來的 HP 成長
             return;
@@ -5553,7 +6210,11 @@ export default class MainScene extends Phaser.Scene {
         this.createSkillOptions();
 
         // 如果沒有選項可選，不顯示面板
-        if (this.currentSkillChoices.length === 0) {
+        // 檢查一般技能、混合模式、進階技能模式
+        const hasOptions = this.currentSkillChoices.length > 0 ||
+                           this.mixedSkillTypes.length > 0 ||
+                           (this.isSelectingAdvancedSkill && this.currentAdvancedSkillChoices.length > 0);
+        if (!hasOptions) {
             return;
         }
 
@@ -5655,6 +6316,665 @@ export default class MainScene extends Phaser.Scene {
                 this.showSkillCutIn(skillDef, newLevel);
             }
         });
+    }
+
+    // 選擇進階技能
+    private selectAdvancedSkill(index: number, skillId: string) {
+        const advSkillDef = this.currentAdvancedSkillChoices[index];
+
+        // 設定為裝備的進階技能
+        const success = this.skillManager.setEquippedAdvancedSkill(skillId);
+        if (!success) {
+            console.warn(`Failed to equip advanced skill: ${skillId}`);
+            return;
+        }
+
+        // 升級進階技能
+        this.skillManager.upgradeAdvancedSkill(skillId);
+
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        const newLevel = equipped?.level ?? 1;
+        console.log(`Advanced skill equipped: ${skillId} -> Lv.${newLevel}`);
+
+        // 第一次選擇進階技能時顯示欄位
+        if (!this.advancedSkillSlotVisible) {
+            this.showAdvancedSkillSlot();
+        }
+
+        // 更新進階技能欄位顯示
+        this.updateAdvancedSkillDisplay();
+
+        // 選中動畫
+        const selectedOption = this.skillOptions[index];
+        this.tweens.add({
+            targets: selectedOption,
+            scaleX: 1.1,
+            scaleY: 1.1,
+            duration: 100,
+            yoyo: true,
+            onComplete: () => {
+                this.hideSkillPanel();
+                // 面板關閉後顯示 CUT IN（使用進階技能定義）
+                this.showAdvancedSkillCutIn(advSkillDef, newLevel);
+            }
+        });
+    }
+
+    // 建立進階技能選項卡片
+    private createAdvancedSkillOptions() {
+        // 選項卡片設定
+        const cardWidth = this.gameBounds.width * 0.25;
+        const cardHeight = this.gameBounds.height * (this.isMobile ? 0.55 : 0.5);
+        const cardGap = this.gameBounds.width * 0.05;
+        const numCards = this.currentAdvancedSkillChoices.length;
+        const totalWidth = cardWidth * numCards + cardGap * (numCards - 1);
+        const startX = this.gameBounds.x + (this.gameBounds.width - totalWidth) / 2 + cardWidth / 2;
+        const centerY = this.gameBounds.y + this.gameBounds.height * 0.55;
+
+        // 按鍵對應
+        let keys: string[];
+        if (numCards === 1) {
+            keys = ['S'];
+        } else if (numCards === 2) {
+            keys = ['A', 'D'];
+        } else {
+            keys = ['A', 'S', 'D'];
+        }
+
+        for (let i = 0; i < this.currentAdvancedSkillChoices.length; i++) {
+            const advSkillDef = this.currentAdvancedSkillChoices[i];
+            const currentLevel = this.skillManager.getAdvancedSkillLevel(advSkillDef.id);
+            const isNew = currentLevel === 0;
+            const displayCurrentLevel = isNew ? '-' : currentLevel;
+            const nextLevel = isNew ? 1 : currentLevel + 1;
+            const x = startX + i * (cardWidth + cardGap);
+
+            // 建立選項容器
+            const optionContainer = this.add.container(x, centerY);
+
+            // 卡片背景（進階技能使用漸變邊框效果）
+            const cardBg = this.add.rectangle(0, 0, cardWidth, cardHeight, 0x1a1a2e);
+            cardBg.setStrokeStyle(3, 0xffd700); // 金色邊框
+            optionContainer.add(cardBg);
+
+            // 技能類型標籤
+            const typeLabel = this.add.text(0, -cardHeight * 0.42, 'ADVANCED', {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))}px`,
+                color: '#ffd700',
+                fontStyle: 'bold'
+            });
+            typeLabel.setResolution(2);
+            typeLabel.setOrigin(0.5, 0.5);
+            optionContainer.add(typeLabel);
+
+            // 技能圖示區域
+            const iconSize = cardWidth * 0.5;
+            const iconY = -cardHeight * 0.18;
+            const iconBg = this.add.rectangle(0, iconY, iconSize, iconSize, advSkillDef.color, 0.3);
+            iconBg.setStrokeStyle(2, advSkillDef.color);
+            optionContainer.add(iconBg);
+
+            // 如果有技能圖示
+            if (advSkillDef.iconPrefix) {
+                const iconKey = `skill_${advSkillDef.iconPrefix}0${Math.min(nextLevel, advSkillDef.maxLevel)}`;
+                if (this.textures.exists(iconKey)) {
+                    const iconSprite = this.add.sprite(0, iconY, iconKey);
+                    iconSprite.setOrigin(0.5, 0.5);
+                    const targetSize = iconSize - 8;
+                    const scale = targetSize / Math.max(iconSprite.width, iconSprite.height);
+                    iconSprite.setScale(scale);
+                    optionContainer.add(iconSprite);
+                    iconBg.setAlpha(0);
+                }
+            }
+
+            // 技能名稱
+            const nameY = cardHeight * 0.06;
+            const nameText = this.add.text(0, nameY, advSkillDef.name, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.08))}px`,
+                color: '#ffd700',
+                fontStyle: 'bold'
+            });
+            nameText.setResolution(2);
+            nameText.setOrigin(0.5, 0.5);
+            optionContainer.add(nameText);
+
+            // 副標題
+            if (advSkillDef.subtitle) {
+                const subtitleText = this.add.text(0, cardHeight * 0.12, advSkillDef.subtitle, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                    color: '#999999'
+                });
+                subtitleText.setResolution(2);
+                subtitleText.setOrigin(0.5, 0.5);
+                optionContainer.add(subtitleText);
+            }
+
+            // 等級顯示（無上限技能 maxLevel < 0）
+            let levelDisplay: string;
+            const isMaxed = advSkillDef.maxLevel >= 0 && nextLevel > advSkillDef.maxLevel;
+            if (isMaxed) {
+                levelDisplay = `Lv.${displayCurrentLevel} (MAX)`;
+            } else if (isNew) {
+                levelDisplay = `NEW → Lv.${nextLevel}`;
+            } else {
+                levelDisplay = `Lv.${displayCurrentLevel} → Lv.${nextLevel}`;
+            }
+            const levelText = this.add.text(0, cardHeight * 0.20, levelDisplay, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
+                color: isMaxed ? '#ffff00' : '#88ff88',
+                fontStyle: 'bold'
+            });
+            levelText.setResolution(2);
+            levelText.setOrigin(0.5, 0.5);
+            optionContainer.add(levelText);
+
+            // 按鍵提示
+            const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
+            const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03;
+
+            // 技能描述
+            const descY = cardHeight * 0.26;
+            const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
+            const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+            const descText = this.add.text(0, descY, advSkillDef.description, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${descFontSize}px`,
+                color: '#dddddd',
+                wordWrap: { width: cardWidth * 0.85 },
+                align: 'center'
+            });
+            descText.setResolution(2);
+            descText.setOrigin(0.5, 0);
+            if (descText.height > descMaxHeight) {
+                descText.setScale(descMaxHeight / descText.height);
+            }
+            optionContainer.add(descText);
+
+            // 按鍵提示標籤（手機版隱藏）
+            if (!this.isMobile) {
+                const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.07))}px`,
+                    color: '#888888',
+                    fontStyle: 'bold'
+                });
+                keyLabel.setResolution(2);
+                keyLabel.setOrigin(0.5, 0.5);
+                optionContainer.add(keyLabel);
+            }
+
+            // 互動設定
+            cardBg.setInteractive({ useHandCursor: true });
+            cardBg.on('pointerover', () => {
+                const prevIndex = this.selectedSkillIndex;
+                this.selectedSkillIndex = i;
+                this.updateSkillCardStyle(prevIndex, false);
+                this.updateSkillCardStyle(i, true);
+            });
+            cardBg.on('pointerdown', () => {
+                this.selectedSkillIndex = i;
+                this.confirmSkillSelection();
+            });
+
+            this.skillOptions.push(optionContainer);
+            this.skillCardBgs.push(cardBg);
+            this.skillPanelContainer.add(optionContainer);
+        }
+
+        // 初始選中第一個
+        this.selectedSkillIndex = 0;
+        this.updateSkillCardStyle(0, true);
+    }
+
+    // 創建混合技能選項面板（一般 + 進階混合顯示）
+    private createMixedSkillOptions() {
+        // 重設混合選項追蹤
+        this.mixedSkillTypes = [];
+        this.mixedNormalIndices = [];
+        this.mixedAdvancedIndices = [];
+        this.isSelectingAdvancedSkill = false; // 混合模式使用特殊處理
+
+        // 合併所有選項
+        interface MixedOption {
+            type: 'normal' | 'advanced';
+            index: number;
+        }
+        const allOptions: MixedOption[] = [];
+
+        // 加入一般技能
+        this.currentSkillChoices.forEach((_, idx) => {
+            allOptions.push({ type: 'normal', index: idx });
+        });
+
+        // 加入進階技能
+        this.currentAdvancedSkillChoices.forEach((_, idx) => {
+            allOptions.push({ type: 'advanced', index: idx });
+        });
+
+        // 如果超過 3 個，隨機選 3 個
+        let selectedOptions: MixedOption[];
+        if (allOptions.length > 3) {
+            // 隨機打亂並取前 3 個
+            for (let i = allOptions.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [allOptions[i], allOptions[j]] = [allOptions[j], allOptions[i]];
+            }
+            selectedOptions = allOptions.slice(0, 3);
+        } else {
+            selectedOptions = allOptions;
+        }
+
+        // 記錄選擇的類型和索引
+        selectedOptions.forEach(opt => {
+            this.mixedSkillTypes.push(opt.type);
+            if (opt.type === 'normal') {
+                this.mixedNormalIndices.push(opt.index);
+                this.mixedAdvancedIndices.push(-1);
+            } else {
+                this.mixedNormalIndices.push(-1);
+                this.mixedAdvancedIndices.push(opt.index);
+            }
+        });
+
+        // 選項卡片設定
+        const cardWidth = this.gameBounds.width * 0.25;
+        const cardHeight = this.gameBounds.height * (this.isMobile ? 0.55 : 0.5);
+        const cardGap = this.gameBounds.width * 0.05;
+        const numCards = selectedOptions.length;
+        const totalWidth = cardWidth * numCards + cardGap * (numCards - 1);
+        const startX = this.gameBounds.x + (this.gameBounds.width - totalWidth) / 2 + cardWidth / 2;
+        const centerY = this.gameBounds.y + this.gameBounds.height * 0.55;
+
+        // 按鍵對應
+        let keys: string[];
+        if (numCards === 1) {
+            keys = ['S'];
+        } else if (numCards === 2) {
+            keys = ['A', 'D'];
+        } else {
+            keys = ['A', 'S', 'D'];
+        }
+
+        for (let i = 0; i < selectedOptions.length; i++) {
+            const opt = selectedOptions[i];
+            const x = startX + i * (cardWidth + cardGap);
+
+            // 建立選項容器
+            const optionContainer = this.add.container(x, centerY);
+
+            if (opt.type === 'normal') {
+                // 一般技能卡片
+                const skillDef = this.currentSkillChoices[opt.index];
+                const currentLevel = this.skillManager.getSkillLevel(skillDef.id);
+                const isNew = currentLevel < 0;
+                const displayCurrentLevel = isNew ? '-' : currentLevel;
+                const nextLevel = isNew ? 0 : currentLevel + 1;
+
+                // 卡片背景
+                const cardBg = this.add.rectangle(0, 0, cardWidth, cardHeight, 0x222222);
+                cardBg.setStrokeStyle(2, 0x666666);
+                optionContainer.add(cardBg);
+
+                // 技能類型標籤
+                const typeLabel = this.add.text(0, -cardHeight * 0.42, skillDef.type === 'active' ? 'ACTIVE' : 'PASSIVE', {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))}px`,
+                    color: skillDef.type === 'active' ? '#ff6666' : '#66ffff',
+                    fontStyle: 'bold'
+                });
+                typeLabel.setResolution(2);
+                typeLabel.setOrigin(0.5, 0.5);
+                optionContainer.add(typeLabel);
+
+                // 技能圖示區域
+                const iconSize = cardWidth * 0.5;
+                const iconY = -cardHeight * 0.18;
+                const iconBg = this.add.rectangle(0, iconY, iconSize, iconSize, skillDef.color, 0.3);
+                iconBg.setStrokeStyle(2, skillDef.color);
+                optionContainer.add(iconBg);
+
+                // 如果有技能圖示
+                if (skillDef.iconPrefix) {
+                    const isPassiveIcon = skillDef.iconPrefix.startsWith('P');
+                    const iconKey = isPassiveIcon
+                        ? `skill_icon_${skillDef.iconPrefix}`
+                        : `skill_icon_${skillDef.iconPrefix}${nextLevel.toString().padStart(2, '0')}`;
+                    if (this.textures.exists(iconKey)) {
+                        const iconSprite = this.add.sprite(0, iconY, iconKey);
+                        iconSprite.setOrigin(0.5, 0.5);
+                        const targetSize = iconSize - 8;
+                        const scale = targetSize / Math.max(iconSprite.width, iconSprite.height);
+                        iconSprite.setScale(scale);
+                        optionContainer.add(iconSprite);
+                        iconBg.setAlpha(0);
+                    }
+                }
+
+                // 技能名稱
+                const nameY = cardHeight * 0.06;
+                const nameText = this.add.text(0, nameY, skillDef.name, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.08))}px`,
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                });
+                nameText.setResolution(2);
+                nameText.setOrigin(0.5, 0.5);
+                optionContainer.add(nameText);
+
+                // 副標題
+                if (skillDef.subtitle) {
+                    const subtitleText = this.add.text(0, cardHeight * 0.12, skillDef.subtitle, {
+                        fontFamily: '"Noto Sans TC", sans-serif',
+                        fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                        color: '#999999'
+                    });
+                    subtitleText.setResolution(2);
+                    subtitleText.setOrigin(0.5, 0.5);
+                    optionContainer.add(subtitleText);
+                }
+
+                // 等級顯示
+                let levelDisplay: string;
+                if (nextLevel >= skillDef.maxLevel) {
+                    levelDisplay = `Lv.${displayCurrentLevel} → MAX`;
+                } else if (isNew) {
+                    levelDisplay = `NEW → Lv.${nextLevel}`;
+                } else {
+                    levelDisplay = `Lv.${displayCurrentLevel} → Lv.${nextLevel}`;
+                }
+                const levelText = this.add.text(0, cardHeight * 0.20, levelDisplay, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
+                    color: nextLevel >= skillDef.maxLevel ? '#ffff00' : '#88ff88',
+                    fontStyle: 'bold'
+                });
+                levelText.setResolution(2);
+                levelText.setOrigin(0.5, 0.5);
+                optionContainer.add(levelText);
+
+                // 按鍵提示標籤位置
+                const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
+                const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03;
+
+                // 技能描述
+                const descY = cardHeight * 0.26;
+                const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
+                const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+                const descText = this.add.text(0, descY, skillDef.description, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${descFontSize}px`,
+                    color: '#dddddd',
+                    wordWrap: { width: cardWidth * 0.85 },
+                    align: 'center'
+                });
+                descText.setResolution(2);
+                descText.setOrigin(0.5, 0);
+                if (descText.height > descMaxHeight) {
+                    const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
+                    descText.setStyle({
+                        fontFamily: '"Noto Sans TC", sans-serif',
+                        fontSize: `${smallerFontSize}px`,
+                        color: '#dddddd',
+                        wordWrap: { width: cardWidth * 0.85 },
+                        align: 'center'
+                    });
+                }
+                optionContainer.add(descText);
+
+                // 按鍵提示標籤
+                if (!this.isMobile) {
+                    const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
+                        fontFamily: '"Noto Sans TC", sans-serif',
+                        fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
+                        color: '#ffff00',
+                        fontStyle: 'bold'
+                    });
+                    keyLabel.setResolution(2);
+                    keyLabel.setOrigin(0.5, 0.5);
+                    optionContainer.add(keyLabel);
+                }
+
+                // 互動
+                cardBg.setInteractive({ useHandCursor: true });
+                const cardIndex = i;
+                cardBg.on('pointerover', () => {
+                    this.setSelectedSkill(cardIndex);
+                });
+                cardBg.on('pointerdown', () => {
+                    if (this.isMobile) {
+                        if (this.selectedSkillIndex === cardIndex) {
+                            this.confirmMixedSkillSelection();
+                        } else {
+                            this.setSelectedSkill(cardIndex);
+                        }
+                    } else {
+                        this.setSelectedSkill(cardIndex);
+                        this.confirmMixedSkillSelection();
+                    }
+                });
+
+                this.skillCardBgs.push(cardBg);
+            } else {
+                // 進階技能卡片
+                const advSkillDef = this.currentAdvancedSkillChoices[opt.index];
+                const currentLevel = this.skillManager.getAdvancedSkillLevel(advSkillDef.id);
+                const isNew = currentLevel === 0;
+                const displayCurrentLevel = isNew ? '-' : currentLevel;
+                const nextLevel = isNew ? 1 : currentLevel + 1;
+
+                // 卡片背景（進階技能用金色邊框）
+                const cardBg = this.add.rectangle(0, 0, cardWidth, cardHeight, 0x1a1a2e);
+                cardBg.setStrokeStyle(3, 0xffd700);
+                optionContainer.add(cardBg);
+
+                // 技能類型標籤
+                const typeLabel = this.add.text(0, -cardHeight * 0.42, 'ADVANCED', {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))}px`,
+                    color: '#ffd700',
+                    fontStyle: 'bold'
+                });
+                typeLabel.setResolution(2);
+                typeLabel.setOrigin(0.5, 0.5);
+                optionContainer.add(typeLabel);
+
+                // 技能圖示區域
+                const iconSize = cardWidth * 0.5;
+                const iconY = -cardHeight * 0.18;
+                const iconBg = this.add.rectangle(0, iconY, iconSize, iconSize, advSkillDef.color, 0.3);
+                iconBg.setStrokeStyle(2, advSkillDef.color);
+                optionContainer.add(iconBg);
+
+                // 如果有技能圖示
+                if (advSkillDef.iconPrefix) {
+                    const iconKey = `skill_${advSkillDef.iconPrefix}0${Math.min(nextLevel, advSkillDef.maxLevel < 0 ? nextLevel : advSkillDef.maxLevel)}`;
+                    if (this.textures.exists(iconKey)) {
+                        const iconSprite = this.add.sprite(0, iconY, iconKey);
+                        iconSprite.setOrigin(0.5, 0.5);
+                        const targetSize = iconSize - 8;
+                        const scale = targetSize / Math.max(iconSprite.width, iconSprite.height);
+                        iconSprite.setScale(scale);
+                        optionContainer.add(iconSprite);
+                        iconBg.setAlpha(0);
+                    }
+                }
+
+                // 技能名稱
+                const nameY = cardHeight * 0.06;
+                const nameText = this.add.text(0, nameY, advSkillDef.name, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.08))}px`,
+                    color: '#ffd700',
+                    fontStyle: 'bold'
+                });
+                nameText.setResolution(2);
+                nameText.setOrigin(0.5, 0.5);
+                optionContainer.add(nameText);
+
+                // 副標題
+                if (advSkillDef.subtitle) {
+                    const subtitleText = this.add.text(0, cardHeight * 0.12, advSkillDef.subtitle, {
+                        fontFamily: '"Noto Sans TC", sans-serif',
+                        fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                        color: '#999999'
+                    });
+                    subtitleText.setResolution(2);
+                    subtitleText.setOrigin(0.5, 0.5);
+                    optionContainer.add(subtitleText);
+                }
+
+                // 等級顯示（無上限技能）
+                let levelDisplay: string;
+                const isMaxed = advSkillDef.maxLevel >= 0 && nextLevel > advSkillDef.maxLevel;
+                if (isMaxed) {
+                    levelDisplay = `Lv.${displayCurrentLevel} (MAX)`;
+                } else if (isNew) {
+                    levelDisplay = `NEW → Lv.${nextLevel}`;
+                } else {
+                    levelDisplay = `Lv.${displayCurrentLevel} → Lv.${nextLevel}`;
+                }
+                const levelText = this.add.text(0, cardHeight * 0.20, levelDisplay, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
+                    color: isMaxed ? '#ffff00' : '#88ff88',
+                    fontStyle: 'bold'
+                });
+                levelText.setResolution(2);
+                levelText.setOrigin(0.5, 0.5);
+                optionContainer.add(levelText);
+
+                // 按鍵提示標籤位置
+                const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
+                const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03;
+
+                // 技能描述
+                const descY = cardHeight * 0.26;
+                const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
+                const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+                const descText = this.add.text(0, descY, advSkillDef.description, {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${descFontSize}px`,
+                    color: '#dddddd',
+                    wordWrap: { width: cardWidth * 0.85 },
+                    align: 'center'
+                });
+                descText.setResolution(2);
+                descText.setOrigin(0.5, 0);
+                if (descText.height > descMaxHeight) {
+                    descText.setScale(descMaxHeight / descText.height);
+                }
+                optionContainer.add(descText);
+
+                // 按鍵提示標籤
+                if (!this.isMobile) {
+                    const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
+                        fontFamily: '"Noto Sans TC", sans-serif',
+                        fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.07))}px`,
+                        color: '#888888',
+                        fontStyle: 'bold'
+                    });
+                    keyLabel.setResolution(2);
+                    keyLabel.setOrigin(0.5, 0.5);
+                    optionContainer.add(keyLabel);
+                }
+
+                // 互動
+                cardBg.setInteractive({ useHandCursor: true });
+                const cardIndex = i;
+                cardBg.on('pointerover', () => {
+                    this.setSelectedSkill(cardIndex);
+                });
+                cardBg.on('pointerdown', () => {
+                    if (this.isMobile) {
+                        if (this.selectedSkillIndex === cardIndex) {
+                            this.confirmMixedSkillSelection();
+                        } else {
+                            this.setSelectedSkill(cardIndex);
+                        }
+                    } else {
+                        this.setSelectedSkill(cardIndex);
+                        this.confirmMixedSkillSelection();
+                    }
+                });
+
+                this.skillCardBgs.push(cardBg);
+            }
+
+            this.skillOptions.push(optionContainer);
+            this.skillPanelContainer.add(optionContainer);
+        }
+
+        // 初始選中第一個
+        this.selectedSkillIndex = 0;
+        this.updateSkillCardStyle(0, true);
+    }
+
+    // 確認混合技能選擇
+    private confirmMixedSkillSelection() {
+        const index = this.selectedSkillIndex;
+        if (index < 0 || index >= this.mixedSkillTypes.length) return;
+
+        const type = this.mixedSkillTypes[index];
+
+        if (type === 'normal') {
+            // 一般技能
+            const normalIndex = this.mixedNormalIndices[index];
+            if (normalIndex >= 0 && normalIndex < this.currentSkillChoices.length) {
+                const skillDef = this.currentSkillChoices[normalIndex];
+                this.selectSkill(normalIndex, skillDef.id);
+            }
+        } else {
+            // 進階技能
+            const advIndex = this.mixedAdvancedIndices[index];
+            if (advIndex >= 0 && advIndex < this.currentAdvancedSkillChoices.length) {
+                const advSkillDef = this.currentAdvancedSkillChoices[advIndex];
+
+                // 裝備並升級進階技能
+                this.skillManager.setEquippedAdvancedSkill(advSkillDef.id);
+                this.skillManager.upgradeAdvancedSkill(advSkillDef.id);
+
+                const newLevel = this.skillManager.getAdvancedSkillLevel(advSkillDef.id);
+                console.log(`Advanced skill upgraded: ${advSkillDef.id} -> Lv.${newLevel}`);
+
+                // 顯示進階技能欄位（如果是第一次）
+                this.showAdvancedSkillSlot();
+
+                // 更新進階技能欄位顯示
+                this.updateAdvancedSkillDisplay();
+
+                // 顯示 CUT IN
+                this.showAdvancedSkillCutIn(advSkillDef, newLevel);
+
+                // 隱藏技能面板
+                this.hideSkillPanel();
+            }
+        }
+    }
+
+    // 顯示進階技能 CUT IN
+    private showAdvancedSkillCutIn(advSkillDef: AdvancedSkillDefinition, level: number) {
+        // 使用與一般技能相同的 CUT IN 框架，但顏色不同
+        const cutInDef: SkillDefinition = {
+            id: advSkillDef.id,
+            name: advSkillDef.name,
+            subtitle: advSkillDef.subtitle,
+            description: advSkillDef.description,
+            type: 'active',
+            color: advSkillDef.color,
+            flashColor: advSkillDef.flashColor,
+            cooldown: advSkillDef.cooldown,
+            maxLevel: advSkillDef.maxLevel,
+            iconPrefix: advSkillDef.iconPrefix,
+            levelUpMessages: advSkillDef.levelUpMessages,
+            levelUpQuotes: advSkillDef.levelUpQuotes
+        };
+        this.showSkillCutIn(cutInDef, level);
     }
 
     // ===== 技能範圍格子系統 =====
