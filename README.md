@@ -2,7 +2,7 @@
 
 交互式網頁遊戲專案
 
-**版本**: v0.6.0（右下角顯示，由 package.json 自動注入）
+**版本**: v0.6.3a（右下角顯示，由 package.json 自動注入）
 
 ## 技術棧
 
@@ -18,8 +18,8 @@
 ```
 src/
 ├── config/                 # 配置文件
-│   ├── gridText.json           # 網格文字配置
-│   └── pixelFont.json          # 像素字體定義 (A-Z, 0-9)
+│   ├── gridText.json           # 網格文字配置（標題畫面）
+│   └── pixelFont.json          # 像素字體定義 (完整 A-Z, 0-9, %, 空格)
 ├── scenes/                 # Phaser 場景
 │   ├── BootScene.ts            # 啟動場景
 │   ├── GridScene.ts            # 網格過渡動畫場景
@@ -101,8 +101,10 @@ node scripts/generate-icons.mjs
 - 網格洪水填充進場動畫
 - 圓形揭露 (Reveal Mask) 退出動畫
 - 燃燒效果轉場 (白 → 黃 → 橘 → 紅 → 消失)
-- Loading 進度顯示
-- 像素字體文字渲染
+- 兩階段 Loading：啟動時載入基礎資源，點擊開始後載入遊戲資源
+- 進度條視覺化：全寬 3 行高進度條（左右各留 2 格）
+- 像素字體文字渲染（完整 A-Z、0-9 字元）
+- 標題畫面：雙行文字「PRESS TO」「STARE INTO THE VOID」
 - 游標互動光暈效果
 - 標題 BGM 播放（BGM00，循環）
 
@@ -270,6 +272,12 @@ node scripts/generate-icons.mjs
 - **預設音量**: 50%
 
 ## UI 控制列
+
+左上角控制列（轉場完成後顯示）：
+
+- **回首頁按鈕**: Font Awesome 房屋圖示，連結至官網首頁
+- **聯繫我們按鈕**: Font Awesome 信封圖示，連結至聯繫頁面
+- **分享按鈕**: Font Awesome 分享圖示，使用 Web Share API（手機）或複製連結（桌面）
 
 右上角控制列（轉場完成後顯示）：
 

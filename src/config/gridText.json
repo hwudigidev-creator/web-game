@@ -1,10 +1,17 @@
 {
   "texts": [
     {
-      "id": "title",
-      "text": "PRESS TO START",
+      "id": "title1",
+      "text": "PRESS TO",
       "letterSpacing": 2,
-      "position": { "x": 0.5, "y": 0.5 },
+      "position": { "x": 0.5, "y": 0.44 },
+      "color": "#ffffff"
+    },
+    {
+      "id": "title2",
+      "text": "STARE INTO THE VOID",
+      "letterSpacing": 2,
+      "position": { "x": 0.5, "y": 0.56 },
       "color": "#ffffff"
     }
   ]

@@ -2588,6 +2588,10 @@ export default class MainScene extends Phaser.Scene {
         if (controls) {
             controls.classList.add('visible');
         }
+        const leftControls = document.getElementById('left-controls');
+        if (leftControls) {
+            leftControls.classList.add('visible');
+        }
 
         // 轉場完成後顯示技能選擇面板
         this.showSkillPanel();

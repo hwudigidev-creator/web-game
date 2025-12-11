@@ -30,6 +30,8 @@ export default class GridScene extends Phaser.Scene {
     private loadingCells: Set<number> = new Set(); // Loading 文字的格子
     private backgroundImage!: Phaser.GameObjects.Image; // 背景圖參考
     private titleBgm!: Phaser.Sound.BaseSound; // 標題背景音樂
+    private pendingClickOrigin: { x: number; y: number } | null = null; // 等待載入完成後轉場的點擊位置
+    private isPreloadingMain: boolean = false; // 是否正在預載 MainScene 資源
 
     // RWD 格子大小設定
     private static readonly BASE_CELL_SIZE = 10; // 基準格子大小 (1920px 時)
@@ -42,45 +44,11 @@ export default class GridScene extends Phaser.Scene {
     }
 
     preload() {
-        // 預載入背景圖（GridScene 自己用）
+        // 只預載入 GridScene 自己需要的資源（背景圖和標題 BGM）
         this.load.image('background', 'background.png');
-
-        // 預載入角色序列圖
-        this.load.image('char_idle_1', 'sprites/character/IDEL01.png');
-        this.load.image('char_idle_2', 'sprites/character/IDEL02.png');
-        this.load.image('char_run_1', 'sprites/character/RUN01.png');
-        this.load.image('char_run_2', 'sprites/character/RUN02.png');
-        this.load.image('char_attack_1', 'sprites/character/ATTACK01.png');
-        this.load.image('char_attack_2', 'sprites/character/ATTACK02.png');
-        this.load.image('char_hurt', 'sprites/character/HURT01.png');
-
-        // 預載入背景音樂
         this.load.audio('bgm_title', 'audio/BGM00.mp3');
-        this.load.audio('bgm_game_01', 'audio/BGM01.mp3');
-        this.load.audio('bgm_game_02', 'audio/BGM02.mp3');
 
-        // 預載入技能特效紋理
-        this.load.image('effect_circle', 'effects/circle.png');
-        this.load.image('effect_line', 'effects/line.png');
-        const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
-        for (const angle of sectorAngles) {
-            this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
-        }
-
-        // 預載入技能圖示
-        // A 系列（動畫大師）、B 系列（超級導演）、C 系列（遊戲先知）
-        const skillIconPrefixes = ['A', 'B', 'C'];
-        for (const prefix of skillIconPrefixes) {
-            for (let i = 0; i <= 5; i++) {
-                this.load.image(`skill_icon_${prefix}${i.toString().padStart(2, '0')}`, `icons/skills/${prefix}${i.toString().padStart(2, '0')}.png`);
-            }
-        }
-        // P 系列（被動技能，不隨等級變換）
-        for (let i = 1; i <= 4; i++) {
-            this.load.image(`skill_icon_P${i.toString().padStart(2, '0')}`, `icons/skills/P${i.toString().padStart(2, '0')}.png`);
-        }
-
-        // 監聽載入進度
+        // 監聯初始載入進度
         this.load.on('progress', (value: number) => {
             this.updateLoadingProgress(Math.floor(value * 100));
         });
@@ -105,11 +73,15 @@ export default class GridScene extends Phaser.Scene {
 
         // Click handler - 只有 isReady 時才能觸發
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-            if (!this.isReady || this.isAnimating) return;
+            if (!this.isReady || this.isAnimating || this.isPreloadingMain) return;
 
-            const col = Math.floor(pointer.x / (this.cellWidth + this.gap));
-            const row = Math.floor(pointer.y / (this.cellHeight + this.gap));
-            this.startExitAnimation(col, row);
+            // 停止標題 BGM
+            if (this.titleBgm && this.titleBgm.isPlaying) {
+                this.titleBgm.stop();
+            }
+
+            // 開始預載 MainScene 資源，完成後從點擊位置轉場
+            this.startMainScenePreload(pointer.x, pointer.y);
         });
 
         // 滑鼠移動追蹤
@@ -238,21 +210,21 @@ export default class GridScene extends Phaser.Scene {
         });
         this.loadingCells.clear();
 
-        // 顯示 LOADING XX%
+        // 顯示 LOADING XX%（位置稍微往上）
         const text = `LOADING ${percent}%`;
         const pixels = this.textRenderer.textToPixels(
             {
                 id: 'loading',
                 text: text,
                 letterSpacing: 2,
-                position: { x: 0.5, y: 0.5 },
+                position: { x: 0.5, y: 0.45 },
                 color: '#ffffff'
             },
             this.cols,
             this.rows
         );
 
-        // 套用到格子
+        // 套用文字到格子
         pixels.forEach(pixel => {
             const idx = pixel.gridY * this.cols + pixel.gridX;
             if (this.cells[idx]) {
@@ -263,6 +235,38 @@ export default class GridScene extends Phaser.Scene {
                 this.loadingCells.add(idx);
             }
         });
+
+        // 計算進度條位置（LOADING 文字下方 3 格，3 行高）
+        const charHeight = 7; // 字體高度
+        const centerY = Math.floor(this.rows * 0.45);
+        const progressBarStartY = centerY + Math.floor(charHeight / 2) + 3; // 文字底部 + 3 格
+        const progressBarHeight = 3; // 3 行高
+
+        // 進度條左右各留 2 格
+        const barStartX = 2;
+        const barEndX = this.cols - 2;
+        const barWidth = barEndX - barStartX;
+
+        // 計算進度條填充的格子數（barWidth = 100%）
+        const filledCols = Math.floor((percent / 100) * barWidth);
+
+        // 繪製進度條
+        for (let row = 0; row < progressBarHeight; row++) {
+            const y = progressBarStartY + row;
+            if (y >= this.rows) continue;
+
+            for (let i = 0; i < filledCols; i++) {
+                const x = barStartX + i;
+                const idx = y * this.cols + x;
+                if (this.cells[idx]) {
+                    this.cells[idx].originalColor = 0xffffff;
+                    this.cells[idx].isText = true;
+                    this.cells[idx].graphics.setFillStyle(0xffffff);
+                    this.cells[idx].graphics.setAlpha(0.95);
+                    this.loadingCells.add(idx);
+                }
+            }
+        }
     }
 
     private updateLoadingProgress(percent: number) {
@@ -272,21 +276,92 @@ export default class GridScene extends Phaser.Scene {
     }
 
     private preloadGameAssets() {
-        // 模擬載入進度（如果有其他資源要載入可以在這裡加）
-        // 目前用模擬的方式展示 Loading
-        let progress = 0;
-        const loadInterval = this.time.addEvent({
-            delay: 50,
-            callback: () => {
-                progress += Math.random() * 15;
-                if (progress >= 100) {
-                    progress = 100;
-                    loadInterval.destroy();
-                    this.onLoadingComplete();
+        // 初始載入只是為了顯示啟動畫面，直接完成
+        this.onLoadingComplete();
+    }
+
+    private startMainScenePreload(clickX: number, clickY: number) {
+        // 記錄點擊位置，載入完成後從這裡開始轉場
+        this.pendingClickOrigin = { x: clickX, y: clickY };
+        this.isPreloadingMain = true;
+        this.isReady = false; // 載入中不能再點擊
+
+        // 先清除「PRESS TO START」的文字格子
+        this.textPixels.forEach((pixels) => {
+            pixels.forEach(pixel => {
+                const idx = pixel.gridY * this.cols + pixel.gridX;
+                if (this.cells[idx]) {
+                    this.cells[idx].originalColor = 0x222222;
+                    this.cells[idx].isText = false;
+                    this.cells[idx].graphics.setFillStyle(0x222222);
+                    this.cells[idx].graphics.setAlpha(0.2);
                 }
-                this.showLoadingText(Math.floor(progress));
-            },
-            loop: true
+            });
+        });
+        this.textPixels.clear();
+
+        // 顯示 Loading 0%
+        this.showLoadingText(0);
+
+        // 移除舊的進度監聽器，加入新的
+        this.load.off('progress');
+        this.load.on('progress', (value: number) => {
+            this.showLoadingText(Math.floor(value * 100));
+        });
+
+        this.load.on('complete', () => {
+            this.onMainScenePreloadComplete();
+        });
+
+        // 預載入角色序列圖
+        this.load.image('char_idle_1', 'sprites/character/IDEL01.png');
+        this.load.image('char_idle_2', 'sprites/character/IDEL02.png');
+        this.load.image('char_run_1', 'sprites/character/RUN01.png');
+        this.load.image('char_run_2', 'sprites/character/RUN02.png');
+        this.load.image('char_attack_1', 'sprites/character/ATTACK01.png');
+        this.load.image('char_attack_2', 'sprites/character/ATTACK02.png');
+        this.load.image('char_hurt', 'sprites/character/HURT01.png');
+
+        // 預載入背景音樂
+        this.load.audio('bgm_game_01', 'audio/BGM01.mp3');
+        this.load.audio('bgm_game_02', 'audio/BGM02.mp3');
+
+        // 預載入技能特效紋理
+        this.load.image('effect_circle', 'effects/circle.png');
+        this.load.image('effect_line', 'effects/line.png');
+        const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+        for (const angle of sectorAngles) {
+            this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
+        }
+
+        // 預載入技能圖示
+        const skillIconPrefixes = ['A', 'B', 'C'];
+        for (const prefix of skillIconPrefixes) {
+            for (let i = 0; i <= 5; i++) {
+                this.load.image(`skill_icon_${prefix}${i.toString().padStart(2, '0')}`, `icons/skills/${prefix}${i.toString().padStart(2, '0')}.png`);
+            }
+        }
+        // P 系列（被動技能）
+        for (let i = 1; i <= 4; i++) {
+            this.load.image(`skill_icon_P${i.toString().padStart(2, '0')}`, `icons/skills/P${i.toString().padStart(2, '0')}.png`);
+        }
+
+        // 開始載入
+        this.load.start();
+    }
+
+    private onMainScenePreloadComplete() {
+        this.isPreloadingMain = false;
+
+        // 停頓 500ms 顯示 100%
+        this.time.delayedCall(500, () => {
+            // 從記錄的點擊位置開始轉場
+            if (this.pendingClickOrigin) {
+                const col = Math.floor(this.pendingClickOrigin.x / (this.cellWidth + this.gap));
+                const row = Math.floor(this.pendingClickOrigin.y / (this.cellHeight + this.gap));
+                this.startExitAnimation(col, row);
+                this.pendingClickOrigin = null;
+            }
         });
     }
 
@@ -574,11 +649,6 @@ export default class GridScene extends Phaser.Scene {
 
     private startExitAnimation(originX: number, originY: number) {
         this.isAnimating = true;
-
-        // 停止標題 BGM
-        if (this.titleBgm && this.titleBgm.isPlaying) {
-            this.titleBgm.stop();
-        }
 
         const width = this.cameras.main.width;
         const height = this.cameras.main.height;
