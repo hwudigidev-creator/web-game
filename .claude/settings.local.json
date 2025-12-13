@@ -17,7 +17,10 @@
       "Bash(dir /b \"B:\\〔WEB〕\\WEB_GAME_DDT\\public\\icons\\skills\")",
       "Bash(npm run deploy:*)",
       "Bash(dir /b \"B:\\〔WEB〕\\WEB_GAME_DDT\\*.md\")",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(node -e:*)",
+      "Bash(node remove-logs.js:*)",
+      "Bash(del remove-logs.js)"
     ],
     "deny": [],
     "ask": []

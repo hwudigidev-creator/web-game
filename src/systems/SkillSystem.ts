@@ -57,7 +57,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_burning_celluloid',
         name: '燃燒的賽璐珞',
         subtitle: '傳統手繪動畫師、逐幀動畫師',
-        description: '【靈魂渲染＋鈦金肝】消耗 10 HP，旋轉一圈 30° 扇形攻擊，造成（等級＋技能等級）傷害',
+        description: '【靈魂渲染＋鈦金肝】\n消耗10HP，旋轉一圈30°扇形攻擊',
         color: 0xff6600,  // 橘紅色（燃燒感）
         flashColor: 0xff9933,
         cooldown: 2000,  // 2 秒
@@ -75,7 +75,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_tech_artist',
         name: '技術美術大神',
         subtitle: '一人成軍的遊戲開發者',
-        description: '【咒言幻象＋AI強化】周圍 5 單位射下光線，3 單位爆炸，敵人癱瘓 0.5 秒',
+        description: '【咒言幻象＋AI強化】\n周圍5單位射下光線，敵人癱瘓0.5秒',
         color: 0x00ffcc,  // 青色（科技感）
         flashColor: 0x66ffdd,
         cooldown: 1000,  // 1 秒
@@ -93,7 +93,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_absolute_defense',
         name: '絕對邏輯防禦',
         subtitle: '無懈可擊的系統架構',
-        description: '【靈魂統領＋同步率】有護盾時輪鋸繞身旋轉，滿盾6個，撞敵耗盾',
+        description: '【靈魂統領＋同步率】\n有護盾時輪鋸繞身，滿盾6個，撞敵耗盾',
         color: 0xffdd00,  // 金黃色（防禦感）
         flashColor: 0xffee66,
         cooldown: 100,  // 0.1 秒（持續效果，高頻更新）
@@ -105,6 +105,42 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         ],
         levelUpQuotes: [
             '系統架構固若金湯，邏輯防線無懈可擊'
+        ]
+    },
+    {
+        id: 'advanced_perfect_pixel',
+        name: '完美像素審判',
+        subtitle: '構圖之神的鐵律',
+        description: '【疾光狙擊＋視網膜】\n每3秒產生井字線，四焦點輪流爆炸',
+        color: 0xffffff,  // 極白色
+        flashColor: 0xffffee,
+        cooldown: 3000,  // 3 秒
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X04',
+        requiredSkills: ['active_vfx', 'passive_retina_module'],  // 疾光狙擊 + 視網膜增強模組
+        levelUpMessages: [
+            '構圖的黃金法則，像素的完美審判'
+        ],
+        levelUpQuotes: [
+            '構圖的黃金法則，像素的完美審判'
+        ]
+    },
+    {
+        id: 'advanced_vfx_burst',
+        name: '爆發的影視特效',
+        subtitle: '好萊塢級的視覺轟炸',
+        description: '【疾光狙擊＋AI強化】\n每3.5秒發射20枚追蹤導彈',
+        color: 0xff4400,  // 橘紅色（爆炸感）
+        flashColor: 0xff6633,
+        cooldown: 3500,  // 3.5 秒
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X05',
+        requiredSkills: ['active_vfx', 'passive_ai_enhancement'],  // 疾光狙擊 + AI 賦能強化
+        levelUpMessages: [
+            '好萊塢級的視覺轟炸，每一幀都是藝術'
+        ],
+        levelUpQuotes: [
+            '好萊塢級的視覺轟炸，每一幀都是藝術'
         ]
     }
 ];
@@ -868,12 +904,6 @@ export class SkillManager {
 
     // 取得可選的進階技能（根據持有的基礎技能是否滿等）
     getAvailableAdvancedSkills(): AdvancedSkillDefinition[] {
-        // Debug: 列出玩家持有的技能及等級
-        const ownedSkills = Array.from(this.playerSkills.entries()).map(([id, skill]) =>
-            `${id}(Lv.${skill.level}/${skill.definition.maxLevel})`
-        );
-        console.log('[AdvancedSkill] Player owned skills:', ownedSkills);
-
         return ADVANCED_SKILL_LIBRARY.filter(adv => {
             // 檢查所有必要技能是否都滿等
             const allMaxed = adv.requiredSkills.every(reqId => {
@@ -881,7 +911,6 @@ export class SkillManager {
                 if (!skill) return false;
                 return skill.level >= skill.definition.maxLevel;
             });
-            console.log(`[AdvancedSkill] ${adv.id}: requires ${adv.requiredSkills.join(', ')} maxed -> ${allMaxed ? 'AVAILABLE' : 'LOCKED'}`);
             return allMaxed;
         });
     }

@@ -207,7 +207,6 @@ export class MonsterManager {
         };
 
         this.monsters.push(monster);
-        console.log(`BOSS Slime spawned at level ${bossLevel}! HP: ${bossHp}`);
     }
 
     // 設定網格倍率（與技能特效同步）
@@ -615,8 +614,6 @@ export class MonsterManager {
 
             this.monsters.push(monster);
         }
-
-        console.log(`Bat swarm spawned from ${corner}! Count: ${this.batSwarmCount}`);
     }
 
     // 使用畫面固定網格渲染所有怪物（馬賽克拼貼風格）

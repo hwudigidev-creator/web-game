@@ -465,8 +465,6 @@ export default class GridScene extends Phaser.Scene {
             width: gameWidth,
             height: gameHeight
         });
-
-        console.log(`Grid: ${this.cols}x${this.rows}, cellSize: ${cellSize}, gameBounds: ${gameWidth.toFixed(0)}x${gameHeight.toFixed(0)}`);
     }
 
     private createGrid() {

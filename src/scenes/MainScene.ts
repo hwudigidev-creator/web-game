@@ -113,6 +113,13 @@ export default class MainScene extends Phaser.Scene {
     private sawBladeSpinAngle: number = 0; // 輪鋸自轉角度（鋸齒旋轉）
     private sawBladeGraphics?: Phaser.GameObjects.Graphics; // 輪鋸圖形
     private sawBladeLastHitTime: Map<number, number> = new Map(); // 每個怪物上次被輪鋸擊中的時間
+    private currentSawBladePositions: { x: number; y: number }[] = []; // 當前輪鋸位置（世界座標）
+    private sawBladeRadius: number = 0; // 輪鋸半徑
+
+    // 完美像素審判：井字線系統
+    private perfectPixelGraphics?: Phaser.GameObjects.Graphics; // 井字線圖形
+    private perfectPixelFocusIndex: number = 0; // 當前爆炸的焦點索引 (0-3)
+    private perfectPixelLineAlpha: number = 0; // 井字線透明度（用於淡入淡出）
 
     // 技能資訊窗格
     private skillInfoPanel!: Phaser.GameObjects.Container;
@@ -162,7 +169,7 @@ export default class MainScene extends Phaser.Scene {
     private static readonly MIN_FONT_SIZE_SMALL = 12; // 小字（副標、數值）
 
     // 卡片文字 padding（避免文字超出卡片邊界）
-    private static readonly CARD_TEXT_PADDING = 0.08; // 卡片寬度的 8% 作為左右 padding
+    private static readonly CARD_TEXT_PADDING = 0.12; // 卡片寬度的 12% 作為左右 padding
 
     // 手機判斷
     private isMobile: boolean = false;
@@ -592,7 +599,7 @@ export default class MainScene extends Phaser.Scene {
                 this.activateArchitect(skill);
                 break;
             default:
-                console.log(`Skill activated: ${def.name}`);
+                break;
         }
     }
 
@@ -700,7 +707,6 @@ export default class MainScene extends Phaser.Scene {
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
             const critText = isCrit ? ' [CRIT!]' : '';
-            console.log(`Soul Render hit ${hitMonsters.length} monsters for ${finalDamage} damage${critText}, killed ${result.killCount}, exp +${result.totalExp}`);
         }
 
         // MAX 後額外能力：衝擊波（從扇形末端發射持續前進的扇形波）
@@ -1041,7 +1047,6 @@ export default class MainScene extends Phaser.Scene {
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
             const critText = isCrit ? ' [CRIT!]' : '';
-            console.log(`Coder hit ${hitMonsters.length} monsters for ${finalDamage} damage${critText}, killed ${result.killCount}, exp +${result.totalExp}`);
 
             // MAX 後額外能力：爆發（從擊殺位置再次發動）
             const burstChance = this.skillManager.getCoderBurstChance(this.currentLevel);
@@ -1325,7 +1330,6 @@ export default class MainScene extends Phaser.Scene {
                 }
 
                 this.flashWhiteCrossAtPositions(burstHitPositions);
-                console.log(`Coder Burst hit ${burstHitMonsters.length} monsters for ${damage} damage`);
             }
         }
     }
@@ -1451,7 +1455,6 @@ export default class MainScene extends Phaser.Scene {
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsterIds.length);
             const critText = isCrit ? ' [CRIT!]' : '';
-            console.log(`VFX (${beamCount} beams) hit ${hitMonsterIds.length} monsters for ${finalDamage} damage${critText}, killed ${result.killCount}, exp +${result.totalExp}`);
 
             // MAX 後額外能力：連鎖（從擊中位置再發射）
             const chainChance = this.skillManager.getVfxChainChance(this.currentLevel);
@@ -1539,7 +1542,6 @@ export default class MainScene extends Phaser.Scene {
                 }
 
                 this.flashWhiteCrossAtPositions(chainHitPositions);
-                console.log(`VFX X-Chain hit ${hitMonsterIds.length} monsters for ${damage} damage`);
             }
         }
     }
@@ -1842,6 +1844,11 @@ export default class MainScene extends Phaser.Scene {
             this.triggerShieldExplosion(skill);
         }
 
+        // 絕對邏輯防禦：護盾重新填充時，剩餘輪鋸向外飛出
+        if (this.currentSawBladePositions.length > 0) {
+            this.launchSawBladesOutward();
+        }
+
         // 護盾值為最大 HP 的 30%
         const shieldAmount = Math.floor(this.maxHp * 0.3);
 
@@ -1865,7 +1872,6 @@ export default class MainScene extends Phaser.Scene {
             this.flashSkillEffectCircle(this.characterX, this.characterY, shieldRadius, shieldFlashColor);
         }
 
-        console.log(`Architect activated: Shield ${shieldAmount}, Reflect damage ${this.shieldReflectDamage} (${reflectUnits} units)`);
     }
 
     // 護盾堅守效果：向外 3 單位圓形攻擊 + 觸發回血
@@ -1882,7 +1888,6 @@ export default class MainScene extends Phaser.Scene {
         if (this.maxShield > 0) {
             const healAmount = this.maxShield;
             this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
-            console.log(`Shield explosion! Healed ${healAmount} HP, current HP: ${this.currentHp}/${this.maxHp}`);
 
             // 更新 HP 顯示
             this.drawHpBarFill();
@@ -1931,7 +1936,6 @@ export default class MainScene extends Phaser.Scene {
 
             this.flashWhiteCrossAtPositions(hitPositions);
             this.shakeScreen(hitMonsters.length);
-            console.log(`Shield Explosion hit ${hitMonsters.length} monsters for ${damage} damage`);
         }
     }
 
@@ -2043,7 +2047,6 @@ export default class MainScene extends Phaser.Scene {
         // Shift + Backspace：切換網格技能特效顯示（預設關閉以提升效能）
         if (this.keyShift.isDown && Phaser.Input.Keyboard.JustDown(this.keyBackspace)) {
             this.showGridSkillEffects = !this.showGridSkillEffects;
-            console.log(`Grid skill effects: ${this.showGridSkillEffects ? 'ON' : 'OFF'}`);
             return;
         }
 
@@ -2096,13 +2099,11 @@ export default class MainScene extends Phaser.Scene {
 
         // 檢查是否已滿級
         if (currentSkillLevel >= def.maxLevel) {
-            console.log(`Test: ${def.name} is already MAX`);
             return;
         }
 
         // 被動技能：檢查欄位是否已滿（未擁有時）
         if (isPassive && currentSkillLevel < 0 && this.skillManager.isPassiveSlotsFull()) {
-            console.log(`Test: Passive slots full, cannot add ${def.name}`);
             return;
         }
 
@@ -2136,7 +2137,6 @@ export default class MainScene extends Phaser.Scene {
         this.levelText.setText(`Lv.${this.currentLevel}`);
         this.updateSkillBarDisplay();
 
-        console.log(`Test: ${def.name} maxed! Player level: ${this.currentLevel}`);
     }
 
     // 測試用：直接跳到 24 級並填滿所有主動技能
@@ -2178,7 +2178,6 @@ export default class MainScene extends Phaser.Scene {
         this.levelText.setText(`Lv.${this.currentLevel}`);
         this.updateSkillBarDisplay();
 
-        console.log(`Test: Jumped to level ${targetLevel} with all active skills maxed!`);
     }
 
     private addExp(amount: number) {
@@ -2239,7 +2238,6 @@ export default class MainScene extends Phaser.Scene {
         // 更新經驗條
         this.drawExpBarFill();
 
-        console.log(`Level up! Lv.${this.currentLevel}, MaxHP: ${this.maxHp}, NextExp: ${this.maxExp}`);
     }
 
     // 重新計算最大 HP（基礎 + 等級成長 + 被動技能加成）
@@ -3122,7 +3120,6 @@ export default class MainScene extends Phaser.Scene {
             // 顯示回復特效
             this.showHpHealEffect(healAmount);
 
-            console.log(`HP Regen: +${healAmount} HP (${this.currentHp}/${this.maxHp})`);
         }
     }
 
@@ -3229,7 +3226,6 @@ export default class MainScene extends Phaser.Scene {
         // 迅捷：閃避判定（精神同步率強化 MAX 後啟用）
         const dodgeChance = this.skillManager.getSyncRateDodgeChance(this.currentLevel);
         if (dodgeChance > 0 && Math.random() < dodgeChance) {
-            console.log(`Dodged! (${(dodgeChance * 100).toFixed(1)}% chance)`);
             // 顯示閃避特效（角色快速閃爍藍白色）
             this.flashDodgeEffect();
             return; // 完全閃避傷害
@@ -3261,7 +3257,6 @@ export default class MainScene extends Phaser.Scene {
             if (hadShield && this.currentShield === 0 && this.maxShield > 0) {
                 const healAmount = this.maxShield;
                 this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
-                console.log(`Shield broken! Healed ${healAmount} HP, current HP: ${this.currentHp}/${this.maxHp}`);
 
                 // 更新 HP 顯示
                 this.drawHpBarFill();
@@ -3290,7 +3285,6 @@ export default class MainScene extends Phaser.Scene {
                 if (reflectResult.totalExp > 0) {
                     this.addExp(reflectResult.totalExp);
                 }
-                console.log(`Shield reflected ${this.shieldReflectDamage} damage to ${attackingMonsters.length} monsters, killed ${reflectResult.killCount}`);
             }
         }
 
@@ -3326,9 +3320,7 @@ export default class MainScene extends Phaser.Scene {
             // 更新低血量紅暈效果
             this.updateLowHpVignette();
 
-            console.log(`Player took ${remainingDamage} damage (${shieldAbsorbed} absorbed by shield), HP: ${this.currentHp}/${this.maxHp}`);
         } else {
-            console.log(`Shield absorbed all ${shieldAbsorbed} damage, Shield: ${this.currentShield}`);
         }
 
         // 如果 HP 歸零，檢查是否可以復活
@@ -3339,7 +3331,6 @@ export default class MainScene extends Phaser.Scene {
                 this.currentHp = this.maxHp;
                 this.displayedHp = this.maxHp;
 
-                console.log('【不死】觸發！復活並回滿 HP！');
 
                 // 觸發暗影爆炸
                 this.triggerShadowExplosion();
@@ -3362,7 +3353,6 @@ export default class MainScene extends Phaser.Scene {
                     );
                 }
             } else {
-                console.log('Player died!');
                 // TODO: 遊戲結束處理
             }
         }
@@ -3679,7 +3669,6 @@ export default class MainScene extends Phaser.Scene {
             // 顯示暗影打擊特效
             this.flashShadowCrossAtPositions(hitPositions);
 
-            console.log(`【暗影爆炸】秒殺 ${hitMonsterIds.length} 隻怪物，獲得 ${result.totalExp} 經驗`);
         }
 
         // 繪製暗影圓形邊緣線
@@ -3881,7 +3870,6 @@ export default class MainScene extends Phaser.Scene {
     // 建立低血量紅暈效果（橢圓形邊緣格子會在 drawGridVignette 動態計算）
     private createLowHpVignette() {
         // vignetteEdgeCells 會在 drawGridVignette 動態填充
-        console.log(`Vignette initialized (grid: ${this.skillGridCols}x${this.skillGridRows})`);
     }
 
     // 更新低血量紅暈效果狀態
@@ -4761,7 +4749,6 @@ export default class MainScene extends Phaser.Scene {
     // 發動進階技能
     private activateAdvancedSkill(equipped: PlayerAdvancedSkill) {
         const def = equipped.definition;
-        console.log(`Advanced skill activated: ${def.name} (Lv.${equipped.level})`);
 
         // 根據進階技能類型執行不同效果
         switch (def.id) {
@@ -4773,6 +4760,12 @@ export default class MainScene extends Phaser.Scene {
                 break;
             case 'advanced_absolute_defense':
                 this.executeAbsoluteDefense(equipped.level);
+                break;
+            case 'advanced_perfect_pixel':
+                this.executePerfectPixel(equipped.level);
+                break;
+            case 'advanced_vfx_burst':
+                this.executeVfxBurst(equipped.level);
                 break;
         }
     }
@@ -4998,41 +4991,68 @@ export default class MainScene extends Phaser.Scene {
         this.skillGridContainer.add(graphics);
         graphics.setDepth(55);
 
-        const duration = 200; // 光線落下時間
+        const fallDuration = 100; // 光線落下時間（更快）
+        const lingerDuration = 350; // 殘影淡出時間
+        const totalDuration = fallDuration + lingerDuration;
         const startTime = this.time.now;
+
+        // 落點螢幕座標
+        const targetScreen = this.worldToScreen(worldX, worldY);
+        // 遊戲區頂端 Y 座標
+        const topY = 0;
+        // 從頂端到落點的完整高度
+        const fullHeight = targetScreen.y - topY;
 
         const updateEffect = () => {
             const elapsed = this.time.now - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            // 每幀重新計算螢幕座標
             const screen = this.worldToScreen(worldX, worldY);
 
             graphics.clear();
 
-            // 光線從上方落下
-            const beamWidth = 20 * (1 - progress * 0.5);
-            const beamHeight = this.gameBounds.height * 0.5 * (1 - progress);
-            const alpha = 0.8;
+            if (elapsed < fallDuration) {
+                // 階段 1：銳利光線從頂端快速落下
+                const fallProgress = elapsed / fallDuration;
 
-            // 垂直光束
-            graphics.fillStyle(color, alpha);
-            graphics.fillRect(
-                screen.x - beamWidth / 2,
-                screen.y - beamHeight - radius * progress,
-                beamWidth,
-                beamHeight
-            );
+                // 光線頭部位置（從頂端往下移動）
+                const headY = topY + fullHeight * fallProgress;
+                // 光線尾部位置（稍微延遲跟隨）
+                const tailY = Math.max(topY, headY - fullHeight * 0.3);
 
-            // 光束底部發光
-            graphics.fillStyle(0xffffff, alpha * 0.8);
-            graphics.fillCircle(screen.x, screen.y, 10 * (1 + progress));
+                // 銳利細線
+                graphics.lineStyle(2, 0xffffff, 1);
+                graphics.lineBetween(screen.x, tailY, screen.x, headY);
 
-            // 預告圓圈（逐漸擴大）
-            graphics.lineStyle(2, color, alpha * 0.5);
-            graphics.strokeCircle(screen.x, screen.y, radius * progress);
+                // 外層光暈
+                graphics.lineStyle(4, color, 0.6);
+                graphics.lineBetween(screen.x, tailY, screen.x, headY);
 
-            if (progress >= 1) {
+            } else {
+                // 階段 2：殘影淡出（從落點往上的光柱）
+                const lingerProgress = (elapsed - fallDuration) / lingerDuration;
+                const alpha = 0.8 * (1 - lingerProgress);
+
+                // 殘影高度逐漸縮短
+                const lingerHeight = fullHeight * (1 - lingerProgress * 0.7);
+
+                // 外層淡光
+                graphics.lineStyle(3, color, alpha * 0.4);
+                graphics.lineBetween(screen.x, screen.y - lingerHeight, screen.x, screen.y);
+
+                // 核心線
+                graphics.lineStyle(1, 0xffffff, alpha * 0.6);
+                graphics.lineBetween(screen.x, screen.y - lingerHeight, screen.x, screen.y);
+
+                // 底部殘留光點
+                graphics.fillStyle(0xffffff, alpha);
+                graphics.fillCircle(screen.x, screen.y, 2 * (1 - lingerProgress));
+            }
+
+            // 預告圓圈
+            const circleProgress = Math.min(elapsed / fallDuration, 1);
+            graphics.lineStyle(1, color, 0.3 * (1 - elapsed / totalDuration));
+            graphics.strokeCircle(screen.x, screen.y, radius * circleProgress);
+
+            if (elapsed >= totalDuration) {
                 graphics.destroy();
             }
         };
@@ -5098,6 +5118,7 @@ export default class MainScene extends Phaser.Scene {
         // 範圍參數
         const orbitRadius = this.gameBounds.height * 0.2; // 2 單位距離
         const bladeRadius = this.gameBounds.height * 0.05; // 0.5 單位範圍
+        this.sawBladeRadius = bladeRadius; // 儲存輪鋸半徑
 
         // 輪鋸數量根據護盾比例：滿盾 6 個，按比例減少
         const shieldRatio = this.currentShield / this.maxShield;
@@ -5133,6 +5154,8 @@ export default class MainScene extends Phaser.Scene {
             const bladeY = this.characterY + Math.sin(angle) * orbitRadius;
             bladePositions.push({ x: bladeX, y: bladeY });
         }
+        // 儲存當前輪鋸位置（用於護盾填充時飛出）
+        this.currentSawBladePositions = bladePositions;
 
         for (const monster of monsters) {
             // 檢查每個輪鋸
@@ -5234,6 +5257,149 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
+    // 輪鋸向外飛出（護盾重新填充時觸發）
+    private launchSawBladesOutward() {
+        const bladeCount = this.currentSawBladePositions.length;
+        if (bladeCount === 0) return;
+
+        const radius = this.sawBladeRadius || this.gameBounds.height * 0.05;
+
+        // 取得進階技能等級計算傷害
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        const skillLevel = equipped ? equipped.level : 1;
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 每個輪鋸向外飛出（使用當前的公轉角度）
+        for (let i = 0; i < bladeCount; i++) {
+            const startOrbitAngle = this.sawBladeAngle + (i / bladeCount) * Math.PI * 2;
+            this.launchSingleSawBlade(radius, baseDamage, startOrbitAngle);
+        }
+
+        // 清空當前輪鋸位置
+        this.currentSawBladePositions = [];
+    }
+
+    // 發射單個飛出的輪鋸（螺旋狀：一邊繞角色旋轉一邊向外飛）
+    private launchSingleSawBlade(radius: number, baseDamage: number, startOrbitAngle: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(100);
+
+        // 起始軌道半徑（從角色到輪鋸的距離）
+        const startOrbitRadius = this.gameBounds.height * 0.2; // 2 單位
+        const endOrbitRadius = this.gameBounds.height * 1.0; // 飛到 10 單位外
+
+        // 飛行參數
+        const flyDuration = 1600; // 1600ms（速度減半）
+        const rotations = 1.5; // 飛出時繞 1.5 圈（繞轉速度也減半）
+
+        // 狀態
+        const state = {
+            orbitAngle: startOrbitAngle, // 公轉角度
+            orbitRadius: startOrbitRadius, // 當前軌道半徑
+            spinAngle: this.sawBladeSpinAngle, // 自轉角度
+            progress: 0
+        };
+
+        // 繪製函數
+        const drawBlade = () => {
+            // 根據軌道半徑和角度計算世界座標
+            const worldX = this.characterX + Math.cos(state.orbitAngle) * state.orbitRadius;
+            const worldY = this.characterY + Math.sin(state.orbitAngle) * state.orbitRadius;
+            const screen = this.worldToScreen(worldX, worldY);
+            graphics.clear();
+
+            // 輪鋸主體（60% 透明度）
+            graphics.fillStyle(0xffdd00, 0.6);
+            graphics.fillCircle(screen.x, screen.y, radius);
+
+            // 邊緣
+            graphics.lineStyle(3, 0xffffff, 0.6);
+            graphics.strokeCircle(screen.x, screen.y, radius);
+
+            // 鋸齒
+            const teethCount = 8;
+            const teethLength = radius * 0.3;
+            graphics.fillStyle(0xffee66, 0.6);
+
+            for (let i = 0; i < teethCount; i++) {
+                const angle = state.spinAngle + (i / teethCount) * Math.PI * 2;
+                const sideAngle = Math.PI / teethCount;
+                const leftX = screen.x + Math.cos(angle - sideAngle * 0.5) * radius;
+                const leftY = screen.y + Math.sin(angle - sideAngle * 0.5) * radius;
+                const rightX = screen.x + Math.cos(angle + sideAngle * 0.5) * radius;
+                const rightY = screen.y + Math.sin(angle + sideAngle * 0.5) * radius;
+                const outerX = screen.x + Math.cos(angle) * (radius + teethLength);
+                const outerY = screen.y + Math.sin(angle) * (radius + teethLength);
+
+                graphics.fillTriangle(leftX, leftY, outerX, outerY, rightX, rightY);
+            }
+
+            // 中心
+            graphics.fillStyle(0xaa8800, 0.6);
+            graphics.fillCircle(screen.x, screen.y, radius * 0.3);
+
+            return { worldX, worldY };
+        };
+
+        // 擊中紀錄（避免同一怪物被多次傷害）
+        const hitMonsters = new Set<number>();
+
+        // 飛行動畫
+        this.tweens.add({
+            targets: state,
+            progress: 1,
+            duration: flyDuration,
+            ease: 'Quad.easeIn', // 加速飛出
+            onUpdate: () => {
+                // 更新軌道半徑（向外擴展）
+                state.orbitRadius = startOrbitRadius + (endOrbitRadius - startOrbitRadius) * state.progress;
+
+                // 更新公轉角度（持續繞圈）
+                state.orbitAngle = startOrbitAngle + rotations * Math.PI * 2 * state.progress;
+
+                // 高速自轉
+                state.spinAngle += 0.3;
+                if (state.spinAngle > Math.PI * 2) state.spinAngle -= Math.PI * 2;
+
+                // 繪製並取得當前位置
+                const { worldX, worldY } = drawBlade();
+
+                // 碰撞檢測
+                const monsters = this.monsterManager.getMonsters();
+                for (const monster of monsters) {
+                    if (hitMonsters.has(monster.id)) continue;
+
+                    const mdx = monster.x - worldX;
+                    const mdy = monster.y - worldY;
+                    const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+                    const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+                    if (mDist - monsterRadius <= radius) {
+                        hitMonsters.add(monster.id);
+                        // 造成傷害
+                        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                        const result = this.monsterManager.damageMonsters([monster.id], finalDamage);
+                        if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                        // 命中特效
+                        if (isCrit) {
+                            this.flashCritCrossAtPositions([{ x: monster.x, y: monster.y }]);
+                        } else {
+                            this.flashWhiteCrossAtPositions([{ x: monster.x, y: monster.y }]);
+                        }
+                    }
+                }
+            },
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+
+        drawBlade();
+    }
+
     // 每幀更新輪鋸自轉視覺效果（讓旋轉流暢）
     private updateSawBladeSpinVisual(delta: number) {
         // 沒有護盾時不顯示輪鋸
@@ -5279,6 +5445,394 @@ export default class MainScene extends Phaser.Scene {
         }
         // 重設輪鋸擊中記錄
         this.sawBladeLastHitTime.clear();
+
+        // 清除井字線圖形（完美像素審判）
+        if (this.perfectPixelGraphics) {
+            this.perfectPixelGraphics.clear();
+        }
+        this.perfectPixelFocusIndex = 0;
+        this.perfectPixelLineAlpha = 0;
+    }
+
+    // 完美像素審判：井字線 + 四焦點隨機輪流爆炸（1秒內全部炸完）
+    private executePerfectPixel(skillLevel: number) {
+        // 傷害單位 = 角色等級 + 技能等級
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 計算井字線位置（畫面 1/3 和 2/3 處）
+        const bounds = this.gameBounds;
+        const x1 = bounds.x + bounds.width / 3;
+        const x2 = bounds.x + bounds.width * 2 / 3;
+        const y1 = bounds.y + bounds.height / 3;
+        const y2 = bounds.y + bounds.height * 2 / 3;
+
+        // 四個焦點位置（井字線交叉點）
+        const focusPoints = [
+            { x: x1, y: y1 }, // 左上
+            { x: x2, y: y1 }, // 右上
+            { x: x1, y: y2 }, // 左下
+            { x: x2, y: y2 }  // 右下
+        ];
+
+        // 爆炸範圍（3 單位）
+        const explosionRadius = this.gameBounds.height * 0.3;
+        const worldExplosionRadius = explosionRadius / (this.gameBounds.height / 10);
+
+        // 繪製井字線（淡入效果）
+        this.perfectPixelLineAlpha = 1.0;
+        this.drawPerfectPixelLines(x1, x2, y1, y2);
+
+        // 隨機打亂四個焦點的順序
+        const shuffledIndices = [0, 1, 2, 3];
+        for (let i = shuffledIndices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffledIndices[i], shuffledIndices[j]] = [shuffledIndices[j], shuffledIndices[i]];
+        }
+
+        // 1秒內四個點全部各炸一次（每 250ms 炸一個）
+        const explosionInterval = 250;
+
+        shuffledIndices.forEach((focusIndex, order) => {
+            this.time.delayedCall(order * explosionInterval, () => {
+                const focus = focusPoints[focusIndex];
+
+                // 轉換螢幕座標到世界座標（爆炸檢測用）
+                const worldPos = {
+                    x: focus.x + this.cameraOffsetX,
+                    y: focus.y + this.cameraOffsetY
+                };
+
+                // 計算傷害（每次爆炸獨立計算暴擊）
+                const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+
+                // 檢測爆炸範圍內的怪物
+                const monsters = this.monsterManager.getMonsters();
+                const hitMonsters: number[] = [];
+
+                for (const monster of monsters) {
+                    const dx = monster.x - worldPos.x;
+                    const dy = monster.y - worldPos.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const monsterRadius = monster.definition.size * 0.5;
+
+                    if (dist - monsterRadius <= worldExplosionRadius) {
+                        hitMonsters.push(monster.id);
+                    }
+                }
+
+                if (hitMonsters.length > 0) {
+                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                    if (result.totalExp > 0) this.addExp(result.totalExp);
+                }
+
+                // 顯示爆炸視覺效果（極白色爆炸）
+                this.showPerfectPixelExplosion(focus.x, focus.y, explosionRadius, isCrit);
+            });
+        });
+
+        // 井字線淡出動畫（在所有爆炸結束後開始淡出）
+        this.time.delayedCall(4 * explosionInterval, () => {
+            this.tweens.add({
+                targets: this,
+                perfectPixelLineAlpha: 0,
+                duration: 2000,
+                ease: 'Power2',
+                onUpdate: () => {
+                    this.drawPerfectPixelLines(x1, x2, y1, y2);
+                }
+            });
+        });
+    }
+
+    // 繪製井字線
+    private drawPerfectPixelLines(x1: number, x2: number, y1: number, y2: number) {
+        if (!this.perfectPixelGraphics) {
+            this.perfectPixelGraphics = this.add.graphics();
+            this.uiContainer.add(this.perfectPixelGraphics);
+            this.perfectPixelGraphics.setDepth(1005);
+        }
+
+        this.perfectPixelGraphics.clear();
+
+        if (this.perfectPixelLineAlpha <= 0) return;
+
+        const bounds = this.gameBounds;
+        const lineWidth = 2;
+
+        // 繪製兩條垂直線
+        this.perfectPixelGraphics.lineStyle(lineWidth, 0xffffff, this.perfectPixelLineAlpha * 0.8);
+        this.perfectPixelGraphics.beginPath();
+        this.perfectPixelGraphics.moveTo(x1, bounds.y);
+        this.perfectPixelGraphics.lineTo(x1, bounds.y + bounds.height);
+        this.perfectPixelGraphics.strokePath();
+
+        this.perfectPixelGraphics.beginPath();
+        this.perfectPixelGraphics.moveTo(x2, bounds.y);
+        this.perfectPixelGraphics.lineTo(x2, bounds.y + bounds.height);
+        this.perfectPixelGraphics.strokePath();
+
+        // 繪製兩條水平線
+        this.perfectPixelGraphics.beginPath();
+        this.perfectPixelGraphics.moveTo(bounds.x, y1);
+        this.perfectPixelGraphics.lineTo(bounds.x + bounds.width, y1);
+        this.perfectPixelGraphics.strokePath();
+
+        this.perfectPixelGraphics.beginPath();
+        this.perfectPixelGraphics.moveTo(bounds.x, y2);
+        this.perfectPixelGraphics.lineTo(bounds.x + bounds.width, y2);
+        this.perfectPixelGraphics.strokePath();
+    }
+
+    // 顯示完美像素爆炸效果（極白色）
+    private showPerfectPixelExplosion(x: number, y: number, radius: number, isCrit: boolean) {
+        const graphics = this.add.graphics();
+        this.uiContainer.add(graphics);
+        graphics.setDepth(1006);
+
+        // 爆炸核心（極白色）
+        const coreColor = isCrit ? 0xffff00 : 0xffffff;
+        graphics.fillStyle(coreColor, 1.0);
+        graphics.fillCircle(x, y, radius * 0.3);
+
+        // 爆炸光環
+        graphics.lineStyle(4, 0xffffff, 0.9);
+        graphics.strokeCircle(x, y, radius * 0.5);
+
+        // 外圈光暈
+        graphics.lineStyle(2, 0xffffee, 0.6);
+        graphics.strokeCircle(x, y, radius);
+
+        // 十字閃光
+        const flashLength = radius * 1.2;
+        graphics.lineStyle(3, 0xffffff, 0.8);
+        graphics.beginPath();
+        graphics.moveTo(x - flashLength, y);
+        graphics.lineTo(x + flashLength, y);
+        graphics.strokePath();
+        graphics.beginPath();
+        graphics.moveTo(x, y - flashLength);
+        graphics.lineTo(x, y + flashLength);
+        graphics.strokePath();
+
+        // 淡出動畫
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 500,
+            ease: 'Power2',
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+
+        // 擴散動畫
+        const expandGraphics = this.add.graphics();
+        this.uiContainer.add(expandGraphics);
+        expandGraphics.setDepth(1005);
+
+        const expandTarget = { r: radius * 0.3 };
+        const expandTween = this.tweens.add({
+            targets: expandTarget,
+            r: radius,
+            duration: 300,
+            ease: 'Power2',
+            onUpdate: () => {
+                expandGraphics.clear();
+                expandGraphics.lineStyle(6, 0xffffff, 1 - (expandTarget.r / radius) * 0.7);
+                expandGraphics.strokeCircle(x, y, expandTarget.r);
+            },
+            onComplete: () => {
+                expandGraphics.destroy();
+            }
+        });
+    }
+
+    // 爆發的影視特效：1.5秒內發射20枚追蹤導彈
+    private executeVfxBurst(skillLevel: number) {
+        // 傷害單位 = 角色等級 + 技能等級
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 找到最近的敵人
+        const monsters = this.monsterManager.getMonsters();
+        if (monsters.length === 0) return;
+
+        // 1.5秒內發射20枚導彈（每75ms一枚）
+        const missileCount = 20;
+        const missileInterval = 75;
+
+        for (let i = 0; i < missileCount; i++) {
+            this.time.delayedCall(i * missileInterval, () => {
+                // 每次發射時重新找怪物（目標可能已死亡）
+                const currentMonsters = this.monsterManager.getMonsters();
+                if (currentMonsters.length === 0) return;
+
+                // 計算所有怪物距離並排序
+                const monstersWithDist = currentMonsters.map(monster => {
+                    const dx = monster.x - this.characterX;
+                    const dy = monster.y - this.characterY;
+                    return { monster, dist: Math.sqrt(dx * dx + dy * dy) };
+                });
+                monstersWithDist.sort((a, b) => a.dist - b.dist);
+
+                // 取最近的5隻（或全部，如果不足5隻）
+                const nearestCount = Math.min(5, monstersWithDist.length);
+                const nearestMonsters = monstersWithDist.slice(0, nearestCount);
+
+                // 隨機選一隻
+                const targetIndex = Math.floor(Math.random() * nearestMonsters.length);
+                const target = nearestMonsters[targetIndex].monster;
+
+                // 發射導彈
+                this.launchMissile(target.id, baseDamage);
+            });
+        }
+    }
+
+    // 發射單枚追蹤導彈
+    private launchMissile(targetId: number, baseDamage: number) {
+        const unitSize = this.gameBounds.height / 10;  // 螢幕 1 單位
+        const flyOutDist = this.gameBounds.height * 0.2;  // 飛出距離 2 單位（螢幕座標）
+
+        // 創建導彈圖形（加入 skillGridContainer，座標系統與 worldToScreen 一致）
+        const missile = this.add.graphics();
+        this.skillGridContainer.add(missile);
+        missile.setDepth(100);
+
+        // 玩家螢幕位置（使用 worldToScreen 取得正確位置）
+        const playerScreen = this.worldToScreen(this.characterX, this.characterY);
+        const playerScreenX = playerScreen.x;
+        const playerScreenY = playerScreen.y;
+
+        // 導彈狀態（螢幕座標）
+        const state = {
+            screenX: playerScreenX,
+            screenY: playerScreenY,
+            rotation: 0
+        };
+
+        // 繪製函數（細矩形）
+        const missileWidth = unitSize * 0.06;
+        let missileLength = unitSize * 0.3;  // 初始長度，俯衝時會拉長
+
+        const drawMissile = () => {
+            missile.clear();
+
+            // 用旋轉矩形繪製
+            missile.save();
+            missile.translateCanvas(state.screenX, state.screenY);
+            missile.rotateCanvas(state.rotation);
+
+            // 漸層矩形（尾部橘紅 → 頭部亮黃）
+            const halfLen = missileLength / 2;
+            const segments = 6;
+            const colors = [0xff4400, 0xff5500, 0xff7700, 0xff9900, 0xffcc00, 0xffff66];
+            const segmentLen = missileLength / segments;
+
+            for (let i = 0; i < segments; i++) {
+                missile.fillStyle(colors[i], 1);
+                missile.fillRect(-halfLen + i * segmentLen, -missileWidth / 2, segmentLen + 1, missileWidth);
+            }
+
+            missile.restore();
+        };
+
+        // 記錄目標
+        const monsters = this.monsterManager.getMonsters();
+        const target = monsters.find(m => m.id === targetId);
+        if (!target) {
+            missile.destroy();
+            return;
+        }
+
+        // 階段1：隨機方向飛出 2 單位（400ms）
+        const randomAngle = Math.random() * Math.PI * 2;
+        state.rotation = randomAngle;
+        const flyOutScreenX = state.screenX + Math.cos(randomAngle) * flyOutDist;
+        const flyOutScreenY = state.screenY + Math.sin(randomAngle) * flyOutDist;
+
+        drawMissile();
+
+        this.tweens.add({
+            targets: state,
+            screenX: flyOutScreenX,
+            screenY: flyOutScreenY,
+            duration: 400,
+            ease: 'Quad.easeOut',
+            onUpdate: drawMissile,
+            onComplete: () => {
+                // 取得目標當前螢幕位置
+                const targetScreen = this.worldToScreen(target.x, target.y);
+
+                // 計算俯衝方向
+                const dx = targetScreen.x - state.screenX;
+                const dy = targetScreen.y - state.screenY;
+                state.rotation = Math.atan2(dy, dx);
+
+                // 俯衝時拉長導彈（3倍）
+                missileLength = unitSize * 2.4;
+
+                // 階段2：直衝目標（500ms）
+                this.tweens.add({
+                    targets: state,
+                    screenX: targetScreen.x,
+                    screenY: targetScreen.y,
+                    duration: 500,
+                    ease: 'Linear',
+                    onUpdate: drawMissile,
+                    onComplete: () => {
+                        // 命中判定
+                        const currentMonsters = this.monsterManager.getMonsters();
+                        const hitTarget = currentMonsters.find(m => m.id === targetId);
+
+                        if (hitTarget) {
+                            const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                            const result = this.monsterManager.damageMonsters([hitTarget.id], finalDamage);
+                            if (result.totalExp > 0) this.addExp(result.totalExp);
+                        }
+
+                        // 1 單位爆炸效果
+                        this.showMissileExplosion(state.screenX, state.screenY, false);
+
+                        missile.destroy();
+                    }
+                });
+            }
+        });
+    }
+
+    // 導彈爆炸效果（1 單位大小）
+    private showMissileExplosion(x: number, y: number, _isCrit: boolean) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(101);
+
+        const unitSize = this.gameBounds.height / 10;
+        const radius = unitSize;  // 1 單位
+
+        // 爆炸核心
+        graphics.fillStyle(0xff6600, 0.8);
+        graphics.fillCircle(x, y, radius * 0.3);
+
+        // 爆炸光環
+        graphics.lineStyle(4, 0xff4400, 0.9);
+        graphics.strokeCircle(x, y, radius * 0.6);
+
+        // 外圈
+        graphics.lineStyle(2, 0xffcc00, 0.7);
+        graphics.strokeCircle(x, y, radius);
+
+        // 淡出動畫
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 250,
+            ease: 'Power2',
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
     }
 
     // 更新遊戲計時器顯示
@@ -5446,6 +6000,30 @@ export default class MainScene extends Phaser.Scene {
             infoLines.push(`旋轉速度: 2 秒/圈`);
             infoLines.push(`撞敵耗盾: ${shieldCost} (2%)`);
             infoLines.push(`當前護盾: ${this.currentShield}/${this.maxShield}`);
+        } else if (def.id === 'advanced_perfect_pixel') {
+            // 完美像素審判
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const baseCd = def.cooldown;
+            const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+
+            infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`爆炸範圍: 3 單位`);
+            infoLines.push(`焦點輪轉: 四焦點循環`);
+            infoLines.push(`冷卻: ${finalCd}s`);
+        } else if (def.id === 'advanced_vfx_burst') {
+            // 爆發的影視特效
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const baseCd = def.cooldown;
+            const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+
+            infoLines.push(`導彈數量: 10 枚`);
+            infoLines.push(`單發傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`總傷害: ${finalDamage * 10}`);
+            infoLines.push(`冷卻: ${finalCd}s`);
         }
 
         this.skillInfoText.setText(infoLines.join('\n'));
@@ -6223,12 +6801,10 @@ export default class MainScene extends Phaser.Scene {
         if (this.currentSkillChoices.length === 0 && this.currentAdvancedSkillChoices.length > 0) {
             this.isSelectingAdvancedSkill = true;
             // 隨機抽取最多 3 個進階技能
-            console.log(`[AdvancedSkill] All normal skills maxed. Available advanced: ${this.currentAdvancedSkillChoices.length}`);
             if (this.currentAdvancedSkillChoices.length > 3) {
                 // 已經在 getMixedSkillOptions 中 shuffle 過了，直接取前 3 個
                 this.currentAdvancedSkillChoices = this.currentAdvancedSkillChoices.slice(0, 3);
             }
-            console.log(`[AdvancedSkill] Showing ${this.currentAdvancedSkillChoices.length} advanced skills`);
             this.createAdvancedSkillOptions();
             return;
         }
@@ -6366,43 +6942,25 @@ export default class MainScene extends Phaser.Scene {
             levelText.setOrigin(0.5, 0.5);
             optionContainer.add(levelText);
 
-            // 按鍵提示標籤位置（手機版隱藏，但需要預留空間）
-            const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
-            const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03; // 距離底部留 padding
-
-            // 技能描述（固定位置，限制最大高度避免超出）
+            // 技能描述（固定字體大小，自動換行）
             const descY = cardHeight * 0.26;
-            const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02; // 描述區最大高度
-            const descFontSize = this.isMobile
-                ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
-                : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+            const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045));
             // 使用 padding 常數計算文字換行寬度
             const textWrapWidth = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
             const descText = this.add.text(0, descY, skillDef.description, {
                 fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${descFontSize}px`,
                 color: '#dddddd',
-                wordWrap: { width: textWrapWidth },
+                wordWrap: { width: textWrapWidth, useAdvancedWrap: true },
                 align: 'center'
             });
             descText.setResolution(2);
-            descText.setOrigin(0.5, 0);  // 從頂部開始
-
-            // 如果文字超出可用空間，縮小字體重新渲染
-            if (descText.height > descMaxHeight) {
-                const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
-                descText.setStyle({
-                    fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${smallerFontSize}px`,
-                    color: '#dddddd',
-                    wordWrap: { width: textWrapWidth },
-                    align: 'center'
-                });
-            }
+            descText.setOrigin(0.5, 0);
             optionContainer.add(descText);
 
-            // 按鍵提示標籤（手機版隱藏）
+            // 按鍵提示標籤（手機版隱藏）- 放在卡片外的下方
             if (!this.isMobile) {
+                const keyLabelY = cardHeight * 0.5 + cardHeight * 0.08; // 卡片底部外側
                 const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
@@ -6454,7 +7012,6 @@ export default class MainScene extends Phaser.Scene {
         const hasAdvancedSkills = this.skillManager.getUpgradeableAdvancedSkills().length > 0;
 
         if (!hasNormalSkills && !hasAdvancedSkills) {
-            console.log('All skills are maxed out! Continue leveling for HP growth.');
             // 技能全滿後不暫停遊戲，但仍享有升級帶來的 HP 成長
             return;
         }
@@ -6541,7 +7098,6 @@ export default class MainScene extends Phaser.Scene {
 
         const skill = this.skillManager.getPlayerSkill(skillId);
         const newLevel = skill?.level ?? 0;
-        console.log(`Skill upgraded: ${skillId} -> Lv.${newLevel}`);
 
         // 更新技能欄顯示
         this.updateSkillBarDisplay();
@@ -6552,7 +7108,6 @@ export default class MainScene extends Phaser.Scene {
             this.recalculateMoveSpeed();
             this.drawHpBarFill();
             this.updateHpText();
-            console.log(`Passive skill effect applied. MaxHP: ${this.maxHp}, MoveSpeed: ${this.moveSpeed}`);
         }
 
         // 選中動畫
@@ -6590,7 +7145,6 @@ export default class MainScene extends Phaser.Scene {
 
         const equipped = this.skillManager.getEquippedAdvancedSkill();
         const newLevel = equipped?.level ?? 1;
-        console.log(`Advanced skill equipped: ${skillId} -> Lv.${newLevel}`);
 
         // 第一次選擇進階技能時顯示欄位
         if (!this.advancedSkillSlotVisible) {
@@ -6732,46 +7286,29 @@ export default class MainScene extends Phaser.Scene {
             levelText.setOrigin(0.5, 0.5);
             optionContainer.add(levelText);
 
-            // 按鍵提示
-            const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
-            const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03;
-
-            // 技能描述
+            // 技能描述（固定字體大小，自動換行）
             const descY = cardHeight * 0.26;
-            const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
-            const descFontSize = this.isMobile
-                ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
-                : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+            const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045));
             // 使用 padding 常數計算文字換行寬度
             const textWrapWidth = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
             const descText = this.add.text(0, descY, advSkillDef.description, {
                 fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${descFontSize}px`,
                 color: '#dddddd',
-                wordWrap: { width: textWrapWidth },
+                wordWrap: { width: textWrapWidth, useAdvancedWrap: true },
                 align: 'center'
             });
             descText.setResolution(2);
             descText.setOrigin(0.5, 0);
-            // 如果文字超出可用空間，縮小字體重新渲染
-            if (descText.height > descMaxHeight) {
-                const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
-                descText.setStyle({
-                    fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${smallerFontSize}px`,
-                    color: '#dddddd',
-                    wordWrap: { width: textWrapWidth },
-                    align: 'center'
-                });
-            }
             optionContainer.add(descText);
 
-            // 按鍵提示標籤（手機版隱藏）
+            // 按鍵提示標籤（手機版隱藏）- 放在卡片外的下方
             if (!this.isMobile) {
+                const keyLabelY = cardHeight * 0.5 + cardHeight * 0.08; // 卡片底部外側
                 const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.07))}px`,
-                    color: '#888888',
+                    color: '#ffff00',
                     fontStyle: 'bold'
                 });
                 keyLabel.setResolution(2);
@@ -6961,41 +7498,25 @@ export default class MainScene extends Phaser.Scene {
                 levelText.setOrigin(0.5, 0.5);
                 optionContainer.add(levelText);
 
-                // 按鍵提示標籤位置
-                const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
-                const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03;
-
-                // 技能描述
+                // 技能描述（固定字體大小，自動換行）
                 const descY = cardHeight * 0.26;
-                const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
-                const descFontSize = this.isMobile
-                    ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
-                    : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+                const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045));
                 // 使用 padding 常數計算文字換行寬度
                 const textWrapWidth = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
                 const descText = this.add.text(0, descY, skillDef.description, {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${descFontSize}px`,
                     color: '#dddddd',
-                    wordWrap: { width: textWrapWidth },
+                    wordWrap: { width: textWrapWidth, useAdvancedWrap: true },
                     align: 'center'
                 });
                 descText.setResolution(2);
                 descText.setOrigin(0.5, 0);
-                if (descText.height > descMaxHeight) {
-                    const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
-                    descText.setStyle({
-                        fontFamily: '"Noto Sans TC", sans-serif',
-                        fontSize: `${smallerFontSize}px`,
-                        color: '#dddddd',
-                        wordWrap: { width: textWrapWidth },
-                        align: 'center'
-                    });
-                }
                 optionContainer.add(descText);
 
-                // 按鍵提示標籤
+                // 按鍵提示標籤 - 放在卡片外的下方
                 if (!this.isMobile) {
+                    const keyLabelY = cardHeight * 0.5 + cardHeight * 0.08; // 卡片底部外側
                     const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
                         fontFamily: '"Noto Sans TC", sans-serif',
                         fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
@@ -7119,46 +7640,29 @@ export default class MainScene extends Phaser.Scene {
                 levelText.setOrigin(0.5, 0.5);
                 optionContainer.add(levelText);
 
-                // 按鍵提示標籤位置
-                const keyLabelHeight = this.isMobile ? 0 : cardHeight * 0.12;
-                const keyLabelY = cardHeight * 0.5 - keyLabelHeight * 0.5 - cardHeight * 0.03;
-
-                // 技能描述
+                // 技能描述（固定字體大小，自動換行）
                 const descY = cardHeight * 0.26;
-                const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
-                const descFontSize = this.isMobile
-                    ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
-                    : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+                const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045));
                 // 使用 padding 常數計算文字換行寬度
                 const textWrapWidthAdv = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
                 const descText = this.add.text(0, descY, advSkillDef.description, {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${descFontSize}px`,
                     color: '#dddddd',
-                    wordWrap: { width: textWrapWidthAdv },
+                    wordWrap: { width: textWrapWidthAdv, useAdvancedWrap: true },
                     align: 'center'
                 });
                 descText.setResolution(2);
                 descText.setOrigin(0.5, 0);
-                // 如果文字超出可用空間，縮小字體重新渲染
-                if (descText.height > descMaxHeight) {
-                    const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
-                    descText.setStyle({
-                        fontFamily: '"Noto Sans TC", sans-serif',
-                        fontSize: `${smallerFontSize}px`,
-                        color: '#dddddd',
-                        wordWrap: { width: textWrapWidthAdv },
-                        align: 'center'
-                    });
-                }
                 optionContainer.add(descText);
 
-                // 按鍵提示標籤
+                // 按鍵提示標籤 - 放在卡片外的下方
                 if (!this.isMobile) {
+                    const keyLabelY = cardHeight * 0.5 + cardHeight * 0.08; // 卡片底部外側
                     const keyLabel = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
                         fontFamily: '"Noto Sans TC", sans-serif',
                         fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.07))}px`,
-                        color: '#888888',
+                        color: '#ffff00',
                         fontStyle: 'bold'
                     });
                     keyLabel.setResolution(2);
@@ -7225,7 +7729,6 @@ export default class MainScene extends Phaser.Scene {
                 this.skillManager.upgradeAdvancedSkill(advSkillDef.id);
 
                 const newLevel = this.skillManager.getAdvancedSkillLevel(advSkillDef.id);
-                console.log(`Advanced skill upgraded: ${advSkillDef.id} -> Lv.${newLevel}`);
 
                 // 顯示進階技能欄位（如果是第一次）
                 this.showAdvancedSkillSlot();
