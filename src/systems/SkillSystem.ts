@@ -57,7 +57,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_burning_celluloid',
         name: '燃燒的賽璐珞',
         subtitle: '傳統手繪動畫師、逐幀動畫師',
-        description: '發動時消耗 10 HP，以角色為中心旋轉一圈 30° 扇形攻擊，造成（角色等級＋技能等級）傷害單位',
+        description: '【靈魂渲染＋鈦金肝】消耗 10 HP，旋轉一圈 30° 扇形攻擊，造成（等級＋技能等級）傷害',
         color: 0xff6600,  // 橘紅色（燃燒感）
         flashColor: 0xff9933,
         cooldown: 2000,  // 2 秒
@@ -75,7 +75,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_tech_artist',
         name: '技術美術大神',
         subtitle: '一人成軍的遊戲開發者',
-        description: '每秒在角色周圍 5 單位隨機地點射下光線，產生 3 單位爆炸範圍，命中敵人癱瘓 0.5 秒',
+        description: '【咒言幻象＋AI強化】周圍 5 單位射下光線，3 單位爆炸，敵人癱瘓 0.5 秒',
         color: 0x00ffcc,  // 青色（科技感）
         flashColor: 0x66ffdd,
         cooldown: 1000,  // 1 秒
@@ -87,6 +87,24 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         ],
         levelUpQuotes: [
             '左手寫 Code，右手畫圖，一人成軍的遊戲開發者'
+        ]
+    },
+    {
+        id: 'advanced_absolute_defense',
+        name: '絕對邏輯防禦',
+        subtitle: '無懈可擊的系統架構',
+        description: '【靈魂統領＋同步率】有護盾時輪鋸繞身旋轉，滿盾6個，撞敵耗盾',
+        color: 0xffdd00,  // 金黃色（防禦感）
+        flashColor: 0xffee66,
+        cooldown: 100,  // 0.1 秒（持續效果，高頻更新）
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X03',
+        requiredSkills: ['active_architect', 'passive_sync_rate'],  // 靈魂統領（架構師）+ 精神同步率強化
+        levelUpMessages: [
+            '系統架構固若金湯，邏輯防線無懈可擊'
+        ],
+        levelUpQuotes: [
+            '系統架構固若金湯，邏輯防線無懈可擊'
         ]
     }
 ];
@@ -557,7 +575,6 @@ export class SkillManager {
         const upgradeableAdvanced = this.getUpgradeableAdvancedSkills();
 
         const normalOptions: SkillDefinition[] = [];
-        const advancedOptions: AdvancedSkillDefinition[] = [];
 
         // 第一次選擇：固定顯示前 3 個攻擊技能（不隨機），不顯示進階技能
         if (!this.hasAnyActiveSkill()) {
@@ -568,7 +585,6 @@ export class SkillManager {
         }
 
         // 目標：2 主動 + 1 被動 = 3 個一般技能
-        // 如果一般技能不足 3 個，用進階技能填充
 
         // 隨機選主動技能（最多 2 個）
         const shuffledActive = this.shuffleArray([...upgradeableActive]);
@@ -582,18 +598,10 @@ export class SkillManager {
             normalOptions.push(shuffledPassive[0]);
         }
 
-        // 計算還需要多少個選項來填滿 3 個
-        const slotsNeeded = 3 - normalOptions.length;
+        // 返回所有可用的進階技能（由 createMixedSkillOptions 決定最終顯示幾個）
+        const shuffledAdvanced = this.shuffleArray([...upgradeableAdvanced]);
 
-        // 用進階技能填充不足的部分
-        if (slotsNeeded > 0 && upgradeableAdvanced.length > 0) {
-            const shuffledAdvanced = this.shuffleArray([...upgradeableAdvanced]);
-            for (let i = 0; i < Math.min(slotsNeeded, shuffledAdvanced.length); i++) {
-                advancedOptions.push(shuffledAdvanced[i]);
-            }
-        }
-
-        return { normal: normalOptions, advanced: advancedOptions };
+        return { normal: normalOptions, advanced: shuffledAdvanced };
     }
 
     // 檢查是否還有可升級的技能
@@ -858,10 +866,23 @@ export class SkillManager {
         return allActivesMaxed && maxedPassiveCount >= SkillManager.MAX_PASSIVE_SLOTS;
     }
 
-    // 取得可選的進階技能（根據持有的基礎技能）
+    // 取得可選的進階技能（根據持有的基礎技能是否滿等）
     getAvailableAdvancedSkills(): AdvancedSkillDefinition[] {
+        // Debug: 列出玩家持有的技能及等級
+        const ownedSkills = Array.from(this.playerSkills.entries()).map(([id, skill]) =>
+            `${id}(Lv.${skill.level}/${skill.definition.maxLevel})`
+        );
+        console.log('[AdvancedSkill] Player owned skills:', ownedSkills);
+
         return ADVANCED_SKILL_LIBRARY.filter(adv => {
-            return adv.requiredSkills.every(reqId => this.playerSkills.has(reqId));
+            // 檢查所有必要技能是否都滿等
+            const allMaxed = adv.requiredSkills.every(reqId => {
+                const skill = this.playerSkills.get(reqId);
+                if (!skill) return false;
+                return skill.level >= skill.definition.maxLevel;
+            });
+            console.log(`[AdvancedSkill] ${adv.id}: requires ${adv.requiredSkills.join(', ')} maxed -> ${allMaxed ? 'AVAILABLE' : 'LOCKED'}`);
+            return allMaxed;
         });
     }
 
@@ -904,8 +925,12 @@ export class SkillManager {
         const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
         if (!def) return false;
 
-        // 檢查是否符合組合條件
-        const canEquip = def.requiredSkills.every(reqId => this.playerSkills.has(reqId));
+        // 檢查是否符合組合條件（所有必要技能都要滿等）
+        const canEquip = def.requiredSkills.every(reqId => {
+            const skill = this.playerSkills.get(reqId);
+            if (!skill) return false;
+            return skill.level >= skill.definition.maxLevel;
+        });
         if (!canEquip) return false;
 
         this.equippedAdvancedSkillId = skillId;

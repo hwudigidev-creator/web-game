@@ -108,6 +108,12 @@ export default class MainScene extends Phaser.Scene {
     private mixedNormalIndices: number[] = []; // 混合選項中一般技能在 currentSkillChoices 的索引
     private mixedAdvancedIndices: number[] = []; // 混合選項中進階技能在 currentAdvancedSkillChoices 的索引
 
+    // 絕對邏輯防禦：輪鋸系統
+    private sawBladeAngle: number = 0; // 輪鋸公轉角度（繞角色）
+    private sawBladeSpinAngle: number = 0; // 輪鋸自轉角度（鋸齒旋轉）
+    private sawBladeGraphics?: Phaser.GameObjects.Graphics; // 輪鋸圖形
+    private sawBladeLastHitTime: Map<number, number> = new Map(); // 每個怪物上次被輪鋸擊中的時間
+
     // 技能資訊窗格
     private skillInfoPanel!: Phaser.GameObjects.Container;
     private skillInfoBg!: Phaser.GameObjects.Rectangle;
@@ -151,9 +157,12 @@ export default class MainScene extends Phaser.Scene {
     private static readonly HP_DAMAGE_LERP_SPEED = 3; // 靠攏速度（每秒倍率）
 
     // RWD 最小字級（手機可讀性）
-    private static readonly MIN_FONT_SIZE_LARGE = 14; // 大字（標題、等級）
-    private static readonly MIN_FONT_SIZE_MEDIUM = 12; // 中字（HP、描述）
-    private static readonly MIN_FONT_SIZE_SMALL = 10; // 小字（副標、數值）
+    private static readonly MIN_FONT_SIZE_LARGE = 16; // 大字（標題、等級）
+    private static readonly MIN_FONT_SIZE_MEDIUM = 14; // 中字（HP、描述）
+    private static readonly MIN_FONT_SIZE_SMALL = 12; // 小字（副標、數值）
+
+    // 卡片文字 padding（避免文字超出卡片邊界）
+    private static readonly CARD_TEXT_PADDING = 0.08; // 卡片寬度的 8% 作為左右 padding
 
     // 手機判斷
     private isMobile: boolean = false;
@@ -4737,6 +4746,11 @@ export default class MainScene extends Phaser.Scene {
         // 繪製彩虹邊框
         this.redrawAdvancedSkillRainbowBorder(progress, delta);
 
+        // 持續更新輪鋸自轉角度（每幀更新，讓視覺效果流暢）
+        if (equipped.definition.id === 'advanced_absolute_defense') {
+            this.updateSawBladeSpinVisual(delta);
+        }
+
         // 冷卻完成且不是暫停中，發動進階技能
         if (progress >= 1 && !this.isPaused && !this.isHurt) {
             this.activateAdvancedSkill(equipped);
@@ -4756,6 +4770,9 @@ export default class MainScene extends Phaser.Scene {
                 break;
             case 'advanced_tech_artist':
                 this.executeTechArtist(equipped.level);
+                break;
+            case 'advanced_absolute_defense':
+                this.executeAbsoluteDefense(equipped.level);
                 break;
         }
     }
@@ -5063,6 +5080,207 @@ export default class MainScene extends Phaser.Scene {
         this.time.addEvent({ callback: updateEffect, loop: true, delay: 16 });
     }
 
+    // 絕對邏輯防禦：有護盾時產生繞角色旋轉的輪鋸（最多6個，按護盾比例）
+    private executeAbsoluteDefense(skillLevel: number) {
+        // 只在有護盾時才發動
+        if (this.currentShield <= 0) {
+            // 清除輪鋸圖形
+            if (this.sawBladeGraphics) {
+                this.sawBladeGraphics.clear();
+            }
+            return;
+        }
+
+        // 傷害單位 = 角色等級 + 技能等級
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 範圍參數
+        const orbitRadius = this.gameBounds.height * 0.2; // 2 單位距離
+        const bladeRadius = this.gameBounds.height * 0.05; // 0.5 單位範圍
+
+        // 輪鋸數量根據護盾比例：滿盾 6 個，按比例減少
+        const shieldRatio = this.currentShield / this.maxShield;
+        const maxBladeCount = 6;
+        const bladeCount = Math.max(1, Math.ceil(shieldRatio * maxBladeCount)); // 至少 1 個
+
+        // 固定轉速：2 秒一圈
+        const rotationTime = 2000;
+        const angularSpeed = (Math.PI * 2) / rotationTime; // 弧度/毫秒
+
+        // 更新輪鋸公轉角度（每次發動都更新一點）
+        const deltaAngle = angularSpeed * 100; // cooldown 是 100ms
+        this.sawBladeAngle += deltaAngle;
+        if (this.sawBladeAngle > Math.PI * 2) {
+            this.sawBladeAngle -= Math.PI * 2;
+        }
+
+        // 計算傷害（含暴擊）
+        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+
+        // 檢測輪鋸範圍內的怪物
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+        const hitPositions: { x: number; y: number }[] = [];
+        const now = this.time.now;
+        const hitCooldown = 500; // 每個怪物 0.5 秒只能被擊中一次
+
+        // 輪鋸等距分布
+        const bladePositions: { x: number; y: number }[] = [];
+        for (let i = 0; i < bladeCount; i++) {
+            const angle = this.sawBladeAngle + (i / bladeCount) * Math.PI * 2;
+            const bladeX = this.characterX + Math.cos(angle) * orbitRadius;
+            const bladeY = this.characterY + Math.sin(angle) * orbitRadius;
+            bladePositions.push({ x: bladeX, y: bladeY });
+        }
+
+        for (const monster of monsters) {
+            // 檢查每個輪鋸
+            for (const bladePos of bladePositions) {
+                const dx = monster.x - bladePos.x;
+                const dy = monster.y - bladePos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+                // 在輪鋸範圍內
+                if (dist - monsterRadius <= bladeRadius) {
+                    // 檢查擊中冷卻
+                    const lastHit = this.sawBladeLastHitTime.get(monster.id) || 0;
+                    if (now - lastHit >= hitCooldown) {
+                        hitMonsters.push(monster.id);
+                        hitPositions.push({ x: monster.x, y: monster.y });
+                        this.sawBladeLastHitTime.set(monster.id, now);
+                        break; // 同一隻怪物只被一個輪鋸擊中一次
+                    }
+                }
+            }
+        }
+
+        if (hitMonsters.length > 0) {
+            // 造成傷害
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.addExp(result.totalExp);
+
+            // 每次命中消耗護盾值（每隻怪物消耗 2% 最大護盾）
+            const shieldCostPerHit = Math.ceil(this.maxShield * 0.02);
+            const shieldCost = shieldCostPerHit * hitMonsters.length;
+            this.currentShield = Math.max(0, this.currentShield - shieldCost);
+            this.drawShieldBarFill();
+
+            // 命中回饋
+            if (isCrit) {
+                this.flashCritCrossAtPositions(hitPositions);
+            } else {
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
+        }
+
+        // 繪製 3 個輪鋸視覺效果
+        this.drawSawBlades(bladePositions, bladeRadius);
+    }
+
+    // 繪製多個輪鋸視覺效果
+    private drawSawBlades(bladePositions: { x: number; y: number }[], radius: number) {
+        // 建立或取得圖形物件
+        if (!this.sawBladeGraphics) {
+            this.sawBladeGraphics = this.add.graphics();
+            this.skillGridContainer.add(this.sawBladeGraphics);
+            this.sawBladeGraphics.setDepth(56);
+        }
+
+        this.sawBladeGraphics.clear();
+
+        // 繪製每個輪鋸
+        for (let bladeIndex = 0; bladeIndex < bladePositions.length; bladeIndex++) {
+            const bladePos = bladePositions[bladeIndex];
+
+            // 轉換為螢幕座標
+            const screen = this.worldToScreen(bladePos.x, bladePos.y);
+
+            // 繪製輪鋸主體（金色圓形）
+            this.sawBladeGraphics.fillStyle(0xffdd00, 0.6);
+            this.sawBladeGraphics.fillCircle(screen.x, screen.y, radius);
+
+            // 繪製輪鋸邊緣（白色）
+            this.sawBladeGraphics.lineStyle(3, 0xffffff, 0.8);
+            this.sawBladeGraphics.strokeCircle(screen.x, screen.y, radius);
+
+            // 繪製鋸齒（8 個尖刺）- 使用自轉角度
+            const teethCount = 8;
+            const teethLength = radius * 0.3;
+            this.sawBladeGraphics.fillStyle(0xffee66, 0.8);
+
+            for (let i = 0; i < teethCount; i++) {
+                // 使用自轉角度，讓鋸齒高速旋轉
+                const angle = this.sawBladeSpinAngle + (i / teethCount) * Math.PI * 2;
+
+                // 繪製三角形鋸齒
+                const sideAngle = Math.PI / teethCount;
+                const leftX = screen.x + Math.cos(angle - sideAngle * 0.5) * radius;
+                const leftY = screen.y + Math.sin(angle - sideAngle * 0.5) * radius;
+                const rightX = screen.x + Math.cos(angle + sideAngle * 0.5) * radius;
+                const rightY = screen.y + Math.sin(angle + sideAngle * 0.5) * radius;
+                const outerX = screen.x + Math.cos(angle) * (radius + teethLength);
+                const outerY = screen.y + Math.sin(angle) * (radius + teethLength);
+
+                this.sawBladeGraphics.fillTriangle(leftX, leftY, outerX, outerY, rightX, rightY);
+            }
+
+            // 繪製中心圓（暗金色）
+            this.sawBladeGraphics.fillStyle(0xaa8800, 0.8);
+            this.sawBladeGraphics.fillCircle(screen.x, screen.y, radius * 0.3);
+            this.sawBladeGraphics.lineStyle(2, 0xffdd00, 1);
+            this.sawBladeGraphics.strokeCircle(screen.x, screen.y, radius * 0.3);
+        }
+    }
+
+    // 每幀更新輪鋸自轉視覺效果（讓旋轉流暢）
+    private updateSawBladeSpinVisual(delta: number) {
+        // 沒有護盾時不顯示輪鋸
+        if (this.currentShield <= 0) {
+            if (this.sawBladeGraphics) {
+                this.sawBladeGraphics.clear();
+            }
+            return;
+        }
+
+        // 更新自轉角度（0.15 秒一圈，超快速旋轉）
+        const spinSpeed = (Math.PI * 2) / 150; // 弧度/毫秒
+        this.sawBladeSpinAngle += spinSpeed * delta;
+        if (this.sawBladeSpinAngle > Math.PI * 2) {
+            this.sawBladeSpinAngle -= Math.PI * 2;
+        }
+
+        // 計算輪鋸位置並重繪
+        const orbitRadius = this.gameBounds.height * 0.2; // 2 單位距離
+        const bladeRadius = this.gameBounds.height * 0.05; // 0.5 單位範圍
+
+        // 輪鋸數量根據護盾比例：滿盾 6 個，按比例減少
+        const shieldRatio = this.currentShield / this.maxShield;
+        const maxBladeCount = 6;
+        const bladeCount = Math.max(1, Math.ceil(shieldRatio * maxBladeCount));
+
+        const bladePositions: { x: number; y: number }[] = [];
+        for (let i = 0; i < bladeCount; i++) {
+            const angle = this.sawBladeAngle + (i / bladeCount) * Math.PI * 2;
+            const bladeX = this.characterX + Math.cos(angle) * orbitRadius;
+            const bladeY = this.characterY + Math.sin(angle) * orbitRadius;
+            bladePositions.push({ x: bladeX, y: bladeY });
+        }
+
+        this.drawSawBlades(bladePositions, bladeRadius);
+    }
+
+    // 清除進階技能的視覺效果（切換技能時呼叫）
+    private clearAdvancedSkillEffects() {
+        // 清除輪鋸圖形（絕對邏輯防禦）
+        if (this.sawBladeGraphics) {
+            this.sawBladeGraphics.clear();
+        }
+        // 重設輪鋸擊中記錄
+        this.sawBladeLastHitTime.clear();
+    }
+
     // 更新遊戲計時器顯示
     private updateTimerDisplay() {
         const totalSeconds = Math.floor(this.gameTimer / 1000);
@@ -5193,8 +5411,9 @@ export default class MainScene extends Phaser.Scene {
             infoLines.push(def.subtitle);
         }
 
-        // 燃燒的賽璐珞特殊顯示
+        // 根據技能 ID 顯示不同資訊
         if (def.id === 'advanced_burning_celluloid') {
+            // 燃燒的賽璐珞
             const damageUnits = this.currentLevel + level;
             const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
             const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
@@ -5205,6 +5424,28 @@ export default class MainScene extends Phaser.Scene {
             infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
             infoLines.push(`範圍: 7 單位 / 30°`);
             infoLines.push(`冷卻: ${finalCd}s`);
+        } else if (def.id === 'advanced_tech_artist') {
+            // 技術美術大神
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const baseCd = def.cooldown;
+            const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+
+            infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`範圍: 5 單位隨機 / 3 單位爆炸`);
+            infoLines.push(`癱瘓: 0.5s`);
+            infoLines.push(`冷卻: ${finalCd}s`);
+        } else if (def.id === 'advanced_absolute_defense') {
+            // 絕對邏輯防禦
+            const shieldRatio = this.currentShield / this.maxShield;
+            const bladeCount = Math.max(1, Math.ceil(shieldRatio * 6));
+            const shieldCost = Math.ceil(this.maxShield * 0.02);
+
+            infoLines.push(`輪鋸數量: ${bladeCount} / 6`);
+            infoLines.push(`旋轉速度: 2 秒/圈`);
+            infoLines.push(`撞敵耗盾: ${shieldCost} (2%)`);
+            infoLines.push(`當前護盾: ${this.currentShield}/${this.maxShield}`);
         }
 
         this.skillInfoText.setText(infoLines.join('\n'));
@@ -5981,8 +6222,13 @@ export default class MainScene extends Phaser.Scene {
         // 如果只有進階技能（一般技能全滿等）
         if (this.currentSkillChoices.length === 0 && this.currentAdvancedSkillChoices.length > 0) {
             this.isSelectingAdvancedSkill = true;
-            // 最多顯示 3 個進階技能
-            this.currentAdvancedSkillChoices = this.currentAdvancedSkillChoices.slice(0, 3);
+            // 隨機抽取最多 3 個進階技能
+            console.log(`[AdvancedSkill] All normal skills maxed. Available advanced: ${this.currentAdvancedSkillChoices.length}`);
+            if (this.currentAdvancedSkillChoices.length > 3) {
+                // 已經在 getMixedSkillOptions 中 shuffle 過了，直接取前 3 個
+                this.currentAdvancedSkillChoices = this.currentAdvancedSkillChoices.slice(0, 3);
+            }
+            console.log(`[AdvancedSkill] Showing ${this.currentAdvancedSkillChoices.length} advanced skills`);
             this.createAdvancedSkillOptions();
             return;
         }
@@ -6088,9 +6334,12 @@ export default class MainScene extends Phaser.Scene {
 
             // 副標題（如果有）
             if (skillDef.subtitle) {
+                const subtitleFontSize = this.isMobile
+                    ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))
+                    : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.055));
                 const subtitleText = this.add.text(0, cardHeight * 0.12, skillDef.subtitle, {
                     fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                    fontSize: `${subtitleFontSize}px`,
                     color: '#999999'
                 });
                 subtitleText.setResolution(2);
@@ -6124,12 +6373,16 @@ export default class MainScene extends Phaser.Scene {
             // 技能描述（固定位置，限制最大高度避免超出）
             const descY = cardHeight * 0.26;
             const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02; // 描述區最大高度
-            const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+            const descFontSize = this.isMobile
+                ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
+                : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+            // 使用 padding 常數計算文字換行寬度
+            const textWrapWidth = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
             const descText = this.add.text(0, descY, skillDef.description, {
                 fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${descFontSize}px`,
                 color: '#dddddd',
-                wordWrap: { width: cardWidth * 0.85 },
+                wordWrap: { width: textWrapWidth },
                 align: 'center'
             });
             descText.setResolution(2);
@@ -6142,7 +6395,7 @@ export default class MainScene extends Phaser.Scene {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${smallerFontSize}px`,
                     color: '#dddddd',
-                    wordWrap: { width: cardWidth * 0.85 },
+                    wordWrap: { width: textWrapWidth },
                     align: 'center'
                 });
             }
@@ -6322,6 +6575,9 @@ export default class MainScene extends Phaser.Scene {
     private selectAdvancedSkill(index: number, skillId: string) {
         const advSkillDef = this.currentAdvancedSkillChoices[index];
 
+        // 清除舊進階技能的視覺效果（例如輪鋸）
+        this.clearAdvancedSkillEffects();
+
         // 設定為裝備的進階技能
         const success = this.skillManager.setEquippedAdvancedSkill(skillId);
         if (!success) {
@@ -6443,9 +6699,12 @@ export default class MainScene extends Phaser.Scene {
 
             // 副標題
             if (advSkillDef.subtitle) {
+                const subtitleFontSize = this.isMobile
+                    ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))
+                    : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.055));
                 const subtitleText = this.add.text(0, cardHeight * 0.12, advSkillDef.subtitle, {
                     fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                    fontSize: `${subtitleFontSize}px`,
                     color: '#999999'
                 });
                 subtitleText.setResolution(2);
@@ -6480,18 +6739,30 @@ export default class MainScene extends Phaser.Scene {
             // 技能描述
             const descY = cardHeight * 0.26;
             const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
-            const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+            const descFontSize = this.isMobile
+                ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
+                : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+            // 使用 padding 常數計算文字換行寬度
+            const textWrapWidth = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
             const descText = this.add.text(0, descY, advSkillDef.description, {
                 fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${descFontSize}px`,
                 color: '#dddddd',
-                wordWrap: { width: cardWidth * 0.85 },
+                wordWrap: { width: textWrapWidth },
                 align: 'center'
             });
             descText.setResolution(2);
             descText.setOrigin(0.5, 0);
+            // 如果文字超出可用空間，縮小字體重新渲染
             if (descText.height > descMaxHeight) {
-                descText.setScale(descMaxHeight / descText.height);
+                const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
+                descText.setStyle({
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${smallerFontSize}px`,
+                    color: '#dddddd',
+                    wordWrap: { width: textWrapWidth },
+                    align: 'center'
+                });
             }
             optionContainer.add(descText);
 
@@ -6532,6 +6803,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 創建混合技能選項面板（一般 + 進階混合顯示）
+    // 優先顯示一般技能，不足 3 個時用進階技能填充
     private createMixedSkillOptions() {
         // 重設混合選項追蹤
         this.mixedSkillTypes = [];
@@ -6544,29 +6816,17 @@ export default class MainScene extends Phaser.Scene {
             type: 'normal' | 'advanced';
             index: number;
         }
-        const allOptions: MixedOption[] = [];
+        const selectedOptions: MixedOption[] = [];
 
-        // 加入一般技能
-        this.currentSkillChoices.forEach((_, idx) => {
-            allOptions.push({ type: 'normal', index: idx });
-        });
+        // 先加入一般技能（最多 3 個）
+        for (let i = 0; i < Math.min(3, this.currentSkillChoices.length); i++) {
+            selectedOptions.push({ type: 'normal', index: i });
+        }
 
-        // 加入進階技能
-        this.currentAdvancedSkillChoices.forEach((_, idx) => {
-            allOptions.push({ type: 'advanced', index: idx });
-        });
-
-        // 如果超過 3 個，隨機選 3 個
-        let selectedOptions: MixedOption[];
-        if (allOptions.length > 3) {
-            // 隨機打亂並取前 3 個
-            for (let i = allOptions.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [allOptions[i], allOptions[j]] = [allOptions[j], allOptions[i]];
-            }
-            selectedOptions = allOptions.slice(0, 3);
-        } else {
-            selectedOptions = allOptions;
+        // 剩餘空位用進階技能填充
+        const remainingSlots = 3 - selectedOptions.length;
+        for (let i = 0; i < Math.min(remainingSlots, this.currentAdvancedSkillChoices.length); i++) {
+            selectedOptions.push({ type: 'advanced', index: i });
         }
 
         // 記錄選擇的類型和索引
@@ -6669,9 +6929,12 @@ export default class MainScene extends Phaser.Scene {
 
                 // 副標題
                 if (skillDef.subtitle) {
+                    const subtitleFontSize = this.isMobile
+                        ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))
+                        : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.055));
                     const subtitleText = this.add.text(0, cardHeight * 0.12, skillDef.subtitle, {
                         fontFamily: '"Noto Sans TC", sans-serif',
-                        fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                        fontSize: `${subtitleFontSize}px`,
                         color: '#999999'
                     });
                     subtitleText.setResolution(2);
@@ -6705,12 +6968,16 @@ export default class MainScene extends Phaser.Scene {
                 // 技能描述
                 const descY = cardHeight * 0.26;
                 const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
-                const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+                const descFontSize = this.isMobile
+                    ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
+                    : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+                // 使用 padding 常數計算文字換行寬度
+                const textWrapWidth = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
                 const descText = this.add.text(0, descY, skillDef.description, {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${descFontSize}px`,
                     color: '#dddddd',
-                    wordWrap: { width: cardWidth * 0.85 },
+                    wordWrap: { width: textWrapWidth },
                     align: 'center'
                 });
                 descText.setResolution(2);
@@ -6721,7 +6988,7 @@ export default class MainScene extends Phaser.Scene {
                         fontFamily: '"Noto Sans TC", sans-serif',
                         fontSize: `${smallerFontSize}px`,
                         color: '#dddddd',
-                        wordWrap: { width: cardWidth * 0.85 },
+                        wordWrap: { width: textWrapWidth },
                         align: 'center'
                     });
                 }
@@ -6819,9 +7086,12 @@ export default class MainScene extends Phaser.Scene {
 
                 // 副標題
                 if (advSkillDef.subtitle) {
+                    const subtitleFontSize = this.isMobile
+                        ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.045))
+                        : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.055));
                     const subtitleText = this.add.text(0, cardHeight * 0.12, advSkillDef.subtitle, {
                         fontFamily: '"Noto Sans TC", sans-serif',
-                        fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04))}px`,
+                        fontSize: `${subtitleFontSize}px`,
                         color: '#999999'
                     });
                     subtitleText.setResolution(2);
@@ -6856,18 +7126,30 @@ export default class MainScene extends Phaser.Scene {
                 // 技能描述
                 const descY = cardHeight * 0.26;
                 const descMaxHeight = (keyLabelY - keyLabelHeight * 0.5) - descY - cardHeight * 0.02;
-                const descFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.04));
+                const descFontSize = this.isMobile
+                    ? Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.042))
+                    : Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.052));
+                // 使用 padding 常數計算文字換行寬度
+                const textWrapWidthAdv = cardWidth * (1 - MainScene.CARD_TEXT_PADDING * 2);
                 const descText = this.add.text(0, descY, advSkillDef.description, {
                     fontFamily: '"Noto Sans TC", sans-serif',
                     fontSize: `${descFontSize}px`,
                     color: '#dddddd',
-                    wordWrap: { width: cardWidth * 0.85 },
+                    wordWrap: { width: textWrapWidthAdv },
                     align: 'center'
                 });
                 descText.setResolution(2);
                 descText.setOrigin(0.5, 0);
+                // 如果文字超出可用空間，縮小字體重新渲染
                 if (descText.height > descMaxHeight) {
-                    descText.setScale(descMaxHeight / descText.height);
+                    const smallerFontSize = Math.max(MainScene.MIN_FONT_SIZE_SMALL - 2, Math.floor(descFontSize * 0.8));
+                    descText.setStyle({
+                        fontFamily: '"Noto Sans TC", sans-serif',
+                        fontSize: `${smallerFontSize}px`,
+                        color: '#dddddd',
+                        wordWrap: { width: textWrapWidthAdv },
+                        align: 'center'
+                    });
                 }
                 optionContainer.add(descText);
 
@@ -6934,6 +7216,9 @@ export default class MainScene extends Phaser.Scene {
             const advIndex = this.mixedAdvancedIndices[index];
             if (advIndex >= 0 && advIndex < this.currentAdvancedSkillChoices.length) {
                 const advSkillDef = this.currentAdvancedSkillChoices[advIndex];
+
+                // 清除舊進階技能的視覺效果（例如輪鋸）
+                this.clearAdvancedSkillEffects();
 
                 // 裝備並升級進階技能
                 this.skillManager.setEquippedAdvancedSkill(advSkillDef.id);
