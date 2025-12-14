@@ -101,6 +101,9 @@ export class MonsterManager {
     // BOSS 生成追蹤（記錄已生成 BOSS 的等級）
     private bossSpawnedAtLevels: Set<number> = new Set();
 
+    // 嘲諷目標（幻影分身）
+    private tauntTarget: { x: number; y: number; active: boolean } = { x: 0, y: 0, active: false };
+
     // 遊戲區域
     private gameBounds: { x: number; y: number; width: number; height: number };
     private mapWidth: number;
@@ -393,10 +396,18 @@ export class MonsterManager {
                     }
                 }
             } else {
-                // 普通怪物：朝玩家移動（暈眩中不移動）
+                // 普通怪物：朝目標移動（暈眩中不移動）
                 if (!isStunned) {
-                    const dx = playerX - monster.x;
-                    const dy = playerY - monster.y;
+                    // 決定目標：如果有嘲諷目標（幻影），移動向幻影；否則移動向玩家
+                    let targetX = playerX;
+                    let targetY = playerY;
+                    if (this.tauntTarget.active) {
+                        targetX = this.tauntTarget.x;
+                        targetY = this.tauntTarget.y;
+                    }
+
+                    const dx = targetX - monster.x;
+                    const dy = targetY - monster.y;
                     const distance = Math.sqrt(dx * dx + dy * dy);
 
                     if (distance > collisionRange) {
@@ -406,8 +417,10 @@ export class MonsterManager {
                         monster.x += dx * ratio;
                         monster.y += dy * ratio;
                     } else {
-                        // 在碰撞範圍內，每 3 秒造成傷害
-                        if (now - monster.lastDamageTime >= 3000) {
+                        // 在碰撞範圍內
+                        // 如果目標是幻影，不造成傷害（幻影不會死亡）
+                        // 如果目標是玩家，每 3 秒造成傷害
+                        if (!this.tauntTarget.active && now - monster.lastDamageTime >= 3000) {
                             totalDamage += this.calculateMonsterDamage(monster);
                             monster.lastDamageTime = now;
                             hitMonsters.push(monster);
@@ -994,5 +1007,20 @@ export class MonsterManager {
     isMonsterStunned(monster: Monster): boolean {
         if (!monster.stunEndTime) return false;
         return this.scene.time.now < monster.stunEndTime;
+    }
+
+    // 設定嘲諷目標（幻影分身位置）
+    setTauntTarget(x: number, y: number, active: boolean) {
+        this.tauntTarget = { x, y, active };
+    }
+
+    // 清除嘲諷目標
+    clearTauntTarget() {
+        this.tauntTarget.active = false;
+    }
+
+    // 取得嘲諷目標
+    getTauntTarget(): { x: number; y: number; active: boolean } {
+        return this.tauntTarget;
     }
 }

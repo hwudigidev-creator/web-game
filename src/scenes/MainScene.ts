@@ -121,6 +121,34 @@ export default class MainScene extends Phaser.Scene {
     private perfectPixelFocusIndex: number = 0; // 當前爆炸的焦點索引 (0-3)
     private perfectPixelLineAlpha: number = 0; // 井字線透明度（用於淡入淡出）
 
+    // 零信任防禦協定：8發從上方落下的持續光束
+    private zeroTrustActive: boolean = false; // 是否啟用
+    private zeroTrustGraphics?: Phaser.GameObjects.Graphics; // 矩陣圖形
+    private zeroTrustTrackedMonsters: Set<number> = new Set(); // 已追蹤的怪物（避免重複鎖定）
+    private zeroTrustBeams: {
+        targetMonsterId: number; // 鎖定的怪物 ID
+        targetX: number;         // 鎖定位置 X（世界座標）
+        targetY: number;         // 鎖定位置 Y（世界座標）
+        lastDamageTime: number;  // 上次造成傷害的時間
+        graphics: Phaser.GameObjects.Graphics;
+    }[] = []; // 最多 8 發光束
+
+    // 幻影迭代模式：影分身系統（支援多個幻影）
+    private phantoms: {
+        id: number;
+        x: number;
+        y: number;
+        targetX: number;
+        targetY: number;
+        moving: boolean;
+        sprite: Phaser.GameObjects.Sprite;
+        skillTimer: Phaser.Time.TimerEvent;
+        dismissTimer: Phaser.Time.TimerEvent;
+        lastAfterimageTime: number; // 上次殘影時間
+    }[] = [];
+    private nextPhantomId: number = 0;
+    private phantomSawBladeActive: Set<number> = new Set(); // 追蹤哪些分身已有輪鋸
+
     // 技能資訊窗格
     private skillInfoPanel!: Phaser.GameObjects.Container;
     private skillInfoBg!: Phaser.GameObjects.Rectangle;
@@ -472,6 +500,8 @@ export default class MainScene extends Phaser.Scene {
         this.updateLowHpVignetteBreathing(delta);
         this.updateSkillCooldownDisplay();
         this.updateAdvancedSkillCooldown(delta);
+        this.updatePhantomVisual(delta);
+        this.updateZeroTrustVisual(delta);
 
         // 如果遊戲暫停，處理技能選擇面板的按鍵
         if (this.isPaused) {
@@ -4767,6 +4797,17 @@ export default class MainScene extends Phaser.Scene {
             case 'advanced_vfx_burst':
                 this.executeVfxBurst(equipped.level);
                 break;
+            case 'advanced_phantom_iteration':
+                this.executePhantomIteration(equipped.level);
+                break;
+            case 'advanced_zero_trust':
+                // 零信任防禦協定是被動觸發，不需要手動執行
+                // 啟用矩陣即可
+                this.activateZeroTrust(equipped.level);
+                break;
+            case 'advanced_soul_slash':
+                this.executeSoulSlash(equipped.level);
+                break;
         }
     }
 
@@ -4928,7 +4969,7 @@ export default class MainScene extends Phaser.Scene {
         // 範圍參數
         const spawnRadius = this.gameBounds.height * 0.5; // 5 單位距離
         const explosionRadius = this.gameBounds.height * 0.3; // 3 單位爆炸範圍
-        const stunDuration = 500; // 0.5 秒癱瘓
+        const stunDuration = 1000; // 1 秒癱瘓
 
         // 隨機選擇落點（角色周圍 5 單位內）
         const randomAngle = Math.random() * Math.PI * 2;
@@ -5782,18 +5823,36 @@ export default class MainScene extends Phaser.Scene {
                     ease: 'Linear',
                     onUpdate: drawMissile,
                     onComplete: () => {
-                        // 命中判定
                         const currentMonsters = this.monsterManager.getMonsters();
-                        const hitTarget = currentMonsters.find(m => m.id === targetId);
+                        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
+                        // 第一段：命中目標傷害
+                        const hitTarget = currentMonsters.find(m => m.id === targetId);
                         if (hitTarget) {
-                            const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                             const result = this.monsterManager.damageMonsters([hitTarget.id], finalDamage);
                             if (result.totalExp > 0) this.addExp(result.totalExp);
                         }
 
-                        // 1 單位爆炸效果
-                        this.showMissileExplosion(state.screenX, state.screenY, false);
+                        // 第二段：3 單位範圍爆炸傷害（包含已受傷目標）
+                        const explosionRadius = 3; // 3 單位
+                        const hitMonsterIds: number[] = [];
+                        for (const monster of currentMonsters) {
+                            const monsterScreen = this.worldToScreen(monster.x, monster.y);
+                            const dx = monsterScreen.x - state.screenX;
+                            const dy = monsterScreen.y - state.screenY;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist <= explosionRadius * unitSize) {
+                                hitMonsterIds.push(monster.id);
+                            }
+                        }
+
+                        if (hitMonsterIds.length > 0) {
+                            const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
+                            if (result.totalExp > 0) this.addExp(result.totalExp);
+                        }
+
+                        // 3 單位爆炸效果
+                        this.showMissileExplosion(state.screenX, state.screenY, isCrit);
 
                         missile.destroy();
                     }
@@ -5802,14 +5861,14 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 導彈爆炸效果（1 單位大小）
+    // 導彈爆炸效果（3 單位大小）
     private showMissileExplosion(x: number, y: number, _isCrit: boolean) {
         const graphics = this.add.graphics();
         this.skillGridContainer.add(graphics);
         graphics.setDepth(101);
 
         const unitSize = this.gameBounds.height / 10;
-        const radius = unitSize;  // 1 單位
+        const radius = unitSize * 3;  // 3 單位
 
         // 爆炸核心
         graphics.fillStyle(0xff6600, 0.8);
@@ -5833,6 +5892,1439 @@ export default class MainScene extends Phaser.Scene {
                 graphics.destroy();
             }
         });
+    }
+
+    // 零信任防禦協定：啟用
+    private activateZeroTrust(_skillLevel: number) {
+        if (this.zeroTrustActive) return;
+        this.zeroTrustActive = true;
+
+        // 建立主圖形（8 角矩陣底圖）
+        if (!this.zeroTrustGraphics) {
+            this.zeroTrustGraphics = this.add.graphics();
+            this.skillGridContainer.add(this.zeroTrustGraphics);
+            this.zeroTrustGraphics.setDepth(49);
+        }
+    }
+
+    // 零信任防禦協定：更新邏輯（在 update 中呼叫）
+    private updateZeroTrust(skillLevel: number, _delta: number) {
+        if (!this.zeroTrustActive) return;
+
+        const unitSize = this.gameBounds.height / 10;
+        const radius = 5; // 5 單位半徑
+        const radiusPx = radius * unitSize;
+        const damageInterval = 200; // 0.2 秒
+        const damageRadius = 1; // 1 單位傷害範圍
+        const damageRadiusPx = damageRadius * unitSize;
+        const now = this.time.now;
+        const beamColor = 0xffcc00; // 金黃色
+
+        // 繪製 8 角矩陣底圖
+        const screen = this.worldToScreen(this.characterX, this.characterY);
+        if (this.zeroTrustGraphics) {
+            this.zeroTrustGraphics.clear();
+            this.zeroTrustGraphics.lineStyle(2, beamColor, 0.3);
+
+            const points: { x: number; y: number }[] = [];
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
+                points.push({
+                    x: screen.x + Math.cos(angle) * radiusPx,
+                    y: screen.y + Math.sin(angle) * radiusPx
+                });
+            }
+
+            this.zeroTrustGraphics.beginPath();
+            this.zeroTrustGraphics.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < 8; i++) {
+                this.zeroTrustGraphics.lineTo(points[i].x, points[i].y);
+            }
+            this.zeroTrustGraphics.closePath();
+            this.zeroTrustGraphics.strokePath();
+            this.zeroTrustGraphics.fillStyle(beamColor, 0.1);
+            this.zeroTrustGraphics.fillPoints(points, true);
+        }
+
+        // 傷害計算
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 取得所有怪物
+        const monsters = this.monsterManager.getMonsters();
+        const aliveMonsterIds = new Set(monsters.map(m => m.id));
+
+        // 取得範圍內的怪物
+        const monstersInRange: Monster[] = [];
+        for (const monster of monsters) {
+            const dx = monster.x - this.characterX;
+            const dy = monster.y - this.characterY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= radiusPx) {
+                monstersInRange.push(monster);
+            }
+        }
+        const monstersInRangeIds = new Set(monstersInRange.map(m => m.id));
+
+        // 處理光束：死亡或離開範圍的怪物
+        for (let i = this.zeroTrustBeams.length - 1; i >= 0; i--) {
+            const beam = this.zeroTrustBeams[i];
+            const isDead = !aliveMonsterIds.has(beam.targetMonsterId);
+            const isOutOfRange = !monstersInRangeIds.has(beam.targetMonsterId);
+
+            if (isDead || isOutOfRange) {
+                // 嘗試轉移到其他範圍內未被鎖定的敵人
+                const availableMonster = monstersInRange.find(m => !this.zeroTrustTrackedMonsters.has(m.id));
+
+                if (availableMonster) {
+                    // 轉移光束到新目標
+                    this.zeroTrustTrackedMonsters.delete(beam.targetMonsterId);
+                    this.zeroTrustTrackedMonsters.add(availableMonster.id);
+                    beam.targetMonsterId = availableMonster.id;
+                    beam.targetX = availableMonster.x;
+                    beam.targetY = availableMonster.y;
+                } else {
+                    // 沒有可轉移的目標，移除光束
+                    beam.graphics.destroy();
+                    this.zeroTrustBeams.splice(i, 1);
+                    this.zeroTrustTrackedMonsters.delete(beam.targetMonsterId);
+                }
+            }
+        }
+
+        // 計算最大光束數量：4 + 每5級+1
+        const maxBeams = 4 + Math.floor(skillLevel / 5);
+
+        // 檢測新進入範圍的怪物，建立新光束
+        for (const monster of monstersInRange) {
+            if (this.zeroTrustBeams.length >= maxBeams) break; // 已達上限
+            if (this.zeroTrustTrackedMonsters.has(monster.id)) continue; // 已鎖定
+
+            // 新怪物進入範圍，建立光束
+            this.zeroTrustTrackedMonsters.add(monster.id);
+
+            const graphics = this.add.graphics();
+            this.skillGridContainer.add(graphics);
+            graphics.setDepth(55);
+
+            this.zeroTrustBeams.push({
+                targetMonsterId: monster.id,
+                targetX: monster.x,
+                targetY: monster.y,
+                lastDamageTime: 0,
+                graphics: graphics
+            });
+        }
+
+        // 更新每個光束
+        for (const beam of this.zeroTrustBeams) {
+            // 找到目標怪物，更新位置
+            const targetMonster = monsters.find(m => m.id === beam.targetMonsterId);
+            if (targetMonster) {
+                beam.targetX = targetMonster.x;
+                beam.targetY = targetMonster.y;
+            }
+
+            // 繪製光束（從遊戲區頂端到目標點）
+            beam.graphics.clear();
+            const beamScreen = this.worldToScreen(beam.targetX, beam.targetY);
+            const topY = 0;
+
+            // 外層光暈
+            beam.graphics.lineStyle(4, beamColor, 0.6);
+            beam.graphics.beginPath();
+            beam.graphics.moveTo(beamScreen.x, topY);
+            beam.graphics.lineTo(beamScreen.x, beamScreen.y);
+            beam.graphics.strokePath();
+
+            // 核心光線
+            beam.graphics.lineStyle(2, 0xffffff, 1);
+            beam.graphics.beginPath();
+            beam.graphics.moveTo(beamScreen.x, topY);
+            beam.graphics.lineTo(beamScreen.x, beamScreen.y);
+            beam.graphics.strokePath();
+
+            // 底部光點
+            beam.graphics.fillStyle(0xffffff, 1);
+            beam.graphics.fillCircle(beamScreen.x, beamScreen.y, 4);
+
+            // 每 0.2 秒造成範圍傷害
+            if (now - beam.lastDamageTime >= damageInterval) {
+                beam.lastDamageTime = now;
+
+                // 檢測傷害範圍內的怪物
+                const hitMonsterIds: number[] = [];
+                for (const monster of monsters) {
+                    const dx = monster.x - beam.targetX;
+                    const dy = monster.y - beam.targetY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist <= damageRadius) {
+                        hitMonsterIds.push(monster.id);
+                    }
+                }
+
+                if (hitMonsterIds.length > 0) {
+                    const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                    const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
+                    if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                    // 命中時顯示小爆炸效果
+                    this.showZeroTrustHitEffect(beam.targetX, beam.targetY, isCrit);
+                }
+            }
+        }
+    }
+
+    // 零信任防禦協定：命中 8 角形擴散效果
+    private showZeroTrustHitEffect(worldX: number, worldY: number, isCrit: boolean) {
+        const screen = this.worldToScreen(worldX, worldY);
+        const unitSize = this.gameBounds.height / 10;
+
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(59);
+
+        const color = isCrit ? 0xff6600 : 0xffcc00;
+        const maxSize = unitSize * 1; // 1 單位大小
+        let progress = 0;
+
+        const updateEffect = () => {
+            progress += 0.12;
+            if (progress > 1) {
+                graphics.destroy();
+                return;
+            }
+
+            const size = maxSize * progress;
+            const alpha = 0.8 * (1 - progress);
+
+            graphics.clear();
+
+            // 繪製 8 角形
+            const points: { x: number; y: number }[] = [];
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
+                points.push({
+                    x: screen.x + Math.cos(angle) * size,
+                    y: screen.y + Math.sin(angle) * size
+                });
+            }
+
+            // 邊框
+            graphics.lineStyle(2, color, alpha);
+            graphics.beginPath();
+            graphics.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < 8; i++) {
+                graphics.lineTo(points[i].x, points[i].y);
+            }
+            graphics.closePath();
+            graphics.strokePath();
+
+            // 填充
+            graphics.fillStyle(color, alpha * 0.3);
+            graphics.fillPoints(points, true);
+        };
+
+        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16, repeat: 9 });
+    }
+
+    // 零信任防禦協定：停用並清理
+    private deactivateZeroTrust() {
+        this.zeroTrustActive = false;
+
+        // 清理光束
+        for (const beam of this.zeroTrustBeams) {
+            beam.graphics.destroy();
+        }
+        this.zeroTrustBeams = [];
+        this.zeroTrustTrackedMonsters.clear();
+
+        // 清理主圖形
+        if (this.zeroTrustGraphics) {
+            this.zeroTrustGraphics.destroy();
+            this.zeroTrustGraphics = undefined;
+        }
+    }
+
+    // 次元向量疾劃：朝最近敵人揮出貫穿全螢幕的直線斬擊
+    private executeSoulSlash(skillLevel: number) {
+        // 傷害計算
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 找最近的敵人
+        const monsters = this.monsterManager.getMonsters();
+        if (monsters.length === 0) return;
+
+        let nearestMonster = monsters[0];
+        let nearestDist = Infinity;
+        for (const monster of monsters) {
+            const dx = monster.x - this.characterX;
+            const dy = monster.y - this.characterY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestMonster = monster;
+            }
+        }
+
+        // 計算斬擊方向（從玩家指向最近敵人）
+        const dx = nearestMonster.x - this.characterX;
+        const dy = nearestMonster.y - this.characterY;
+        const angle = Math.atan2(dy, dx);
+
+        // 執行斬擊（從玩家位置）
+        this.performSoulSlash(this.characterX, this.characterY, angle, baseDamage, skillLevel, false);
+    }
+
+    // 執行單次斬擊（可遞迴觸發連鎖）
+    private performSoulSlash(originX: number, originY: number, angle: number, baseDamage: number, skillLevel: number, isChain: boolean) {
+        // 斬擊線：貫穿全螢幕（前後延伸）
+        const maxDist = Math.max(this.gameBounds.width, this.gameBounds.height) * 2;
+        const startX = originX - Math.cos(angle) * maxDist;
+        const startY = originY - Math.sin(angle) * maxDist;
+        const endX = originX + Math.cos(angle) * maxDist;
+        const endY = originY + Math.sin(angle) * maxDist;
+
+        // 繪製斬擊線視覺效果
+        if (isChain) {
+            // 連鎖斬擊用不同顏色
+            this.drawChainSlashEffect(startX, startY, endX, endY, angle, originX, originY);
+        } else {
+            this.drawSoulSlashEffect(startX, startY, endX, endY, angle);
+        }
+
+        // 檢測斬擊線上的所有怪物
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+        const hitPositions: { x: number; y: number }[] = [];
+        const slashWidth = this.gameBounds.height * 0.05; // 0.5 單位寬度
+
+        for (const monster of monsters) {
+            // 計算怪物到斬擊線的距離
+            const distToLine = this.pointToLineDistance(
+                monster.x, monster.y,
+                startX, startY, endX, endY
+            );
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+            if (distToLine <= slashWidth + monsterRadius) {
+                hitMonsters.push(monster.id);
+                hitPositions.push({ x: monster.x, y: monster.y });
+            }
+        }
+
+        // 造成傷害
+        if (hitMonsters.length > 0) {
+            const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.addExp(result.totalExp);
+
+            // 命中回饋
+            if (isCrit) {
+                this.flashCritCrossAtPositions(hitPositions);
+            } else {
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
+
+            // 連鎖斬擊機率：每級 1%（只有主斬擊能觸發連鎖，連鎖不再觸發連鎖）
+            if (!isChain) {
+                const chainChance = skillLevel * 0.01;
+                for (const hitPos of hitPositions) {
+                    if (Math.random() < chainChance) {
+                        // 觸發連鎖！從擊中位置發射新斬擊
+                        // 角度偏移 30~60 度（隨機正負）
+                        const offsetDeg = 30 + Math.random() * 30; // 30~60 度
+                        const offsetRad = offsetDeg * Math.PI / 180;
+                        const newAngle = angle + (Math.random() < 0.5 ? offsetRad : -offsetRad);
+
+                        // 延遲一點時間再觸發連鎖，有視覺效果
+                        this.time.delayedCall(50, () => {
+                            this.performSoulSlash(hitPos.x, hitPos.y, newAngle, baseDamage, skillLevel, true);
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 繪製連鎖斬擊視覺效果（青色）
+    private drawChainSlashEffect(startX: number, startY: number, endX: number, endY: number, angle: number, originX: number, originY: number) {
+        const screenStart = this.worldToScreen(startX, startY);
+        const screenEnd = this.worldToScreen(endX, endY);
+
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(60);
+
+        // 連鎖斬擊用青色
+        const slashColor = 0x00ffff;
+
+        // 外層光暈
+        graphics.lineStyle(10, slashColor, 0.3);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 中層
+        graphics.lineStyle(5, slashColor, 0.6);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 核心線
+        graphics.lineStyle(2, 0xffffff, 0.9);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 淡出效果
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 150,
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+
+        // 連鎖起點閃光
+        const originScreen = this.worldToScreen(originX, originY);
+        this.showChainSlashFlashEffect(originScreen.x, originScreen.y, angle);
+    }
+
+    // 連鎖斬擊閃光效果（青色）
+    private showChainSlashFlashEffect(x: number, y: number, angle: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(61);
+
+        const flashSize = this.gameBounds.height * 0.08;
+
+        graphics.lineStyle(3, 0x00ffff, 0.8);
+        graphics.beginPath();
+        graphics.arc(x, y, flashSize, angle - 0.3, angle + 0.3, false);
+        graphics.strokePath();
+
+        graphics.lineStyle(1, 0xffffff, 1);
+        graphics.beginPath();
+        graphics.arc(x, y, flashSize * 0.7, angle - 0.2, angle + 0.2, false);
+        graphics.strokePath();
+
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 80,
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+    }
+
+    // 計算點到線段的距離
+    private pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+
+        if (lenSq !== 0) {
+            param = dot / lenSq;
+        }
+
+        let xx, yy;
+
+        if (param < 0) {
+            xx = x1;
+            yy = y1;
+        } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+        } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+        }
+
+        const ddx = px - xx;
+        const ddy = py - yy;
+        return Math.sqrt(ddx * ddx + ddy * ddy);
+    }
+
+    // 繪製靈魂斬擊視覺效果
+    private drawSoulSlashEffect(startX: number, startY: number, endX: number, endY: number, angle: number) {
+        const screenStart = this.worldToScreen(startX, startY);
+        const screenEnd = this.worldToScreen(endX, endY);
+
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(60);
+
+        // 斬擊線（多層疊加）
+        const slashColor = 0xff3366;
+
+        // 外層光暈
+        graphics.lineStyle(12, slashColor, 0.3);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 中層
+        graphics.lineStyle(6, slashColor, 0.6);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 核心線
+        graphics.lineStyle(2, 0xffffff, 0.9);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 淡出效果
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 150,
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+
+        // 斬擊起點閃光效果
+        const charScreen = this.worldToScreen(this.characterX, this.characterY);
+        this.showSlashFlashEffect(charScreen.x, charScreen.y, angle);
+    }
+
+    // 斬擊閃光效果
+    private showSlashFlashEffect(x: number, y: number, angle: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(61);
+
+        const flashSize = this.gameBounds.height * 0.1;
+
+        // 繪製弧形斬擊痕跡
+        graphics.lineStyle(4, 0xff3366, 0.8);
+        graphics.beginPath();
+        graphics.arc(x, y, flashSize, angle - 0.3, angle + 0.3, false);
+        graphics.strokePath();
+
+        graphics.lineStyle(2, 0xffffff, 1);
+        graphics.beginPath();
+        graphics.arc(x, y, flashSize * 0.8, angle - 0.2, angle + 0.2, false);
+        graphics.strokePath();
+
+        // 淡出
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 100,
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+    }
+
+    // 幻影迭代模式：召喚影分身（可同時存在多個）
+    private executePhantomIteration(skillLevel: number) {
+        // 可施放的進階技能（不包含自己、零信任防禦協定、次元向量疾劃）
+        const availableSkillIds = [
+            'advanced_burning_celluloid',
+            'advanced_tech_artist',
+            'advanced_perfect_pixel',
+            'advanced_vfx_burst',
+            'advanced_absolute_logic'  // 輪鋸（模擬能量盾）
+        ];
+
+        const unitSize = this.gameBounds.height / 10;
+
+        // 初始位置（玩家周圍 3 單位內）
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * 3 * unitSize; // 0~3 單位內
+        const startX = this.characterX + Math.cos(angle) * distance;
+        const startY = this.characterY + Math.sin(angle) * distance;
+
+        // 創建分身 Sprite（半透明玩家圖像）
+        const sprite = this.add.sprite(0, 0, 'char_idle_1');
+        sprite.setOrigin(0.5, 1);
+        sprite.setScale(this.character.scaleX, this.character.scaleY);
+        sprite.setAlpha(0.5);
+        sprite.setTint(0x9966ff);
+        sprite.play('char_idle');
+        this.skillGridContainer.add(sprite);
+        sprite.setDepth(55);
+
+        const phantomId = this.nextPhantomId++;
+
+        // 持續時間 = 技能等級/5 + 10 秒
+        const totalDuration = (Math.floor(skillLevel / 5) + 10) * 1000;
+        const skillInterval = 500; // 每 0.5 秒施放一次
+        const repeatCount = Math.max(0, Math.floor(totalDuration / skillInterval) - 1);
+
+        // 每 0.5 秒施放一個隨機進階技能
+        const skillTimer = this.time.addEvent({
+            delay: skillInterval,
+            repeat: repeatCount,
+            callback: () => {
+                const phantom = this.phantoms.find(p => p.id === phantomId);
+                if (!phantom) return;
+
+                // 隨機選一個進階技能施放
+                const randomSkillId = availableSkillIds[Math.floor(Math.random() * availableSkillIds.length)];
+                this.executePhantomSkillAt(randomSkillId, skillLevel, phantom.x, phantom.y, phantomId);
+
+                // 施放後設定新的移動目標（玩家附近 3 單位內）
+                this.setPhantomMoveTargetFor(phantom);
+            }
+        });
+
+        // 持續時間後分身消失
+        const dismissTimer = this.time.delayedCall(totalDuration, () => {
+            this.dismissPhantomById(phantomId);
+        });
+
+        // 加入幻影列表
+        const phantom = {
+            id: phantomId,
+            x: startX,
+            y: startY,
+            targetX: startX,
+            targetY: startY,
+            moving: false,
+            sprite: sprite,
+            skillTimer: skillTimer,
+            dismissTimer: dismissTimer,
+            lastAfterimageTime: 0
+        };
+        this.phantoms.push(phantom);
+
+        // 更新嘲諷目標（使用第一個幻影的位置）
+        this.updatePhantomTauntTarget();
+
+        // 分身出現特效
+        this.showPhantomSpawnEffectAt(startX, startY);
+    }
+
+    // 設定指定幻影的移動目標
+    private setPhantomMoveTargetFor(phantom: typeof this.phantoms[0]) {
+        const unitSize = this.gameBounds.height / 10;
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * 3 * unitSize; // 0~3 單位內
+
+        phantom.targetX = this.characterX + Math.cos(angle) * distance;
+        phantom.targetY = this.characterY + Math.sin(angle) * distance;
+        phantom.moving = true;
+
+        // 播放跑步動畫
+        if (phantom.sprite && phantom.sprite.anims) {
+            phantom.sprite.play('char_run', true);
+        }
+    }
+
+    // 更新嘲諷目標（使用第一個幻影）
+    private updatePhantomTauntTarget() {
+        if (this.phantoms.length > 0) {
+            const first = this.phantoms[0];
+            this.monsterManager.setTauntTarget(first.x, first.y, true);
+        } else {
+            this.monsterManager.clearTauntTarget();
+        }
+    }
+
+    // 分身在指定位置施放技能
+    private executePhantomSkillAt(skillId: string, skillLevel: number, phantomX: number, phantomY: number, phantomId?: number) {
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        const level = equipped ? equipped.level : skillLevel;
+
+        // 傷害單位 = 角色等級 + 技能等級
+        const damageUnits = this.currentLevel + level;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 顯示分身施放特效
+        this.showPhantomCastEffectAt(phantomX, phantomY);
+
+        switch (skillId) {
+            case 'advanced_burning_celluloid':
+                this.phantomCastBurningCelluloidAt(baseDamage, phantomX, phantomY);
+                break;
+            case 'advanced_tech_artist':
+                this.phantomCastTechArtistAt(baseDamage, phantomX, phantomY);
+                break;
+            case 'advanced_perfect_pixel':
+                this.phantomCastPerfectPixelAt(baseDamage, phantomX, phantomY);
+                break;
+            case 'advanced_vfx_burst':
+                this.phantomCastVfxBurstAt(baseDamage, phantomX, phantomY);
+                break;
+            case 'advanced_absolute_logic':
+                this.phantomCastAbsoluteLogicAt(baseDamage, phantomId);
+                break;
+        }
+    }
+
+    // 分身版燃燒的賽璐珞（指定座標）
+    private phantomCastBurningCelluloidAt(baseDamage: number, phantomX: number, phantomY: number) {
+        const range = this.gameBounds.height * 0.5; // 5 單位
+        const halfAngleDeg = 15; // 30 度扇形
+        const halfAngle = halfAngleDeg * Math.PI / 180;
+        const color = 0x9966ff; // 分身用紫色
+
+        // 旋轉一圈
+        const rotationSteps = 12;
+        const stepDelay = 80;
+
+        for (let i = 0; i < rotationSteps; i++) {
+            this.time.delayedCall(i * stepDelay, () => {
+                const targetAngle = (i / rotationSteps) * Math.PI * 2;
+
+                // 扇形範圍內的怪物
+                const monsters = this.monsterManager.getMonsters();
+                const hitMonsters: number[] = [];
+
+                for (const monster of monsters) {
+                    const dx = monster.x - phantomX;
+                    const dy = monster.y - phantomY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist <= range) {
+                        const monsterAngle = Math.atan2(dy, dx);
+                        let angleDiff = Math.abs(monsterAngle - targetAngle);
+                        if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+                        if (angleDiff <= halfAngle) {
+                            hitMonsters.push(monster.id);
+                        }
+                    }
+                }
+
+                if (hitMonsters.length > 0) {
+                    const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                    if (result.totalExp > 0) this.addExp(result.totalExp);
+                }
+
+                // 視覺效果
+                this.flashSkillEffectSector(phantomX, phantomY, range, targetAngle, halfAngleDeg, color);
+            });
+        }
+    }
+
+    // 分身版技術美術大神（指定座標）
+    private phantomCastTechArtistAt(baseDamage: number, phantomX: number, phantomY: number) {
+        const unitSize = this.gameBounds.height / 10;
+        const range = unitSize * 5;
+        const explosionRadius = unitSize * 3;
+
+        // 隨機位置
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.random() * range;
+        const targetX = phantomX + Math.cos(angle) * dist;
+        const targetY = phantomY + Math.sin(angle) * dist;
+
+        // 光線效果
+        this.showLightBeamEffect(targetX, targetY, explosionRadius, 0x9966ff);
+
+        // 延遲後爆炸
+        this.time.delayedCall(150, () => {
+            const monsters = this.monsterManager.getMonsters();
+            const hitMonsters: number[] = [];
+
+            for (const monster of monsters) {
+                const dx = monster.x - targetX;
+                const dy = monster.y - targetY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist <= explosionRadius) {
+                    hitMonsters.push(monster.id);
+                    // 暈眩效果
+                    this.monsterManager.stunMonsters([monster.id], 1000);
+                }
+            }
+
+            if (hitMonsters.length > 0) {
+                const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                if (result.totalExp > 0) this.addExp(result.totalExp);
+            }
+
+            this.showExplosionEffect(targetX, targetY, explosionRadius, 0x9966ff);
+        });
+    }
+
+    // 分身版完美像素審判（指定座標）
+    private phantomCastPerfectPixelAt(baseDamage: number, phantomX: number, phantomY: number) {
+        const unitSize = this.gameBounds.height / 10;
+        const lineLength = unitSize * 6;
+        const explosionRadius = unitSize * 1.5;
+
+        // 4 個焦點位置（井字線交叉點）
+        const thirdLen = lineLength / 3;
+        const focusPoints = [
+            { x: phantomX - thirdLen / 2, y: phantomY - thirdLen / 2 },
+            { x: phantomX + thirdLen / 2, y: phantomY - thirdLen / 2 },
+            { x: phantomX - thirdLen / 2, y: phantomY + thirdLen / 2 },
+            { x: phantomX + thirdLen / 2, y: phantomY + thirdLen / 2 }
+        ];
+
+        // 隨機順序爆炸
+        const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+
+        order.forEach((index, i) => {
+            this.time.delayedCall(i * 250, () => {
+                const point = focusPoints[index];
+
+                const monsters = this.monsterManager.getMonsters();
+                const hitMonsters: number[] = [];
+
+                for (const monster of monsters) {
+                    const dx = monster.x - point.x;
+                    const dy = monster.y - point.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist <= explosionRadius) {
+                        hitMonsters.push(monster.id);
+                    }
+                }
+
+                if (hitMonsters.length > 0) {
+                    const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                    if (result.totalExp > 0) this.addExp(result.totalExp);
+                }
+
+                this.showExplosionEffect(point.x, point.y, explosionRadius, 0x9966ff);
+            });
+        });
+    }
+
+    // 分身版爆發的影視特效（指定座標）
+    private phantomCastVfxBurstAt(baseDamage: number, phantomX: number, phantomY: number) {
+        const monsters = this.monsterManager.getMonsters();
+        if (monsters.length === 0) return;
+
+        // 找最近的 5 隻怪物
+        const nearestMonsters = monsters
+            .map(m => {
+                const dx = m.x - phantomX;
+                const dy = m.y - phantomY;
+                return { monster: m, dist: Math.sqrt(dx * dx + dy * dy) };
+            })
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, 5);
+
+        // 發射 5 枚導彈
+        for (let i = 0; i < Math.min(5, nearestMonsters.length); i++) {
+            this.time.delayedCall(i * 100, () => {
+                const target = nearestMonsters[i % nearestMonsters.length].monster;
+                this.launchPhantomMissileAt(target.id, baseDamage, phantomX, phantomY);
+            });
+        }
+    }
+
+    // 分身版導彈（指定座標）
+    private launchPhantomMissileAt(targetId: number, baseDamage: number, phantomX: number, phantomY: number) {
+        const unitSize = this.gameBounds.height / 10;
+        const flyOutDist = this.gameBounds.height * 0.15;
+
+        const missile = this.add.graphics();
+        this.skillGridContainer.add(missile);
+        missile.setDepth(100);
+
+        const phantomScreen = this.worldToScreen(phantomX, phantomY);
+
+        const state = {
+            screenX: phantomScreen.x,
+            screenY: phantomScreen.y,
+            rotation: 0
+        };
+
+        const missileWidth = unitSize * 0.05;
+        let missileLength = unitSize * 0.25;
+
+        const drawMissile = () => {
+            missile.clear();
+            missile.save();
+            missile.translateCanvas(state.screenX, state.screenY);
+            missile.rotateCanvas(state.rotation);
+
+            const halfLen = missileLength / 2;
+            const colors = [0x6633cc, 0x7744dd, 0x8855ee, 0x9966ff, 0xaa77ff, 0xbb88ff];
+            const segmentLen = missileLength / 6;
+
+            for (let i = 0; i < 6; i++) {
+                missile.fillStyle(colors[i], 0.8);
+                missile.fillRect(-halfLen + i * segmentLen, -missileWidth / 2, segmentLen + 1, missileWidth);
+            }
+            missile.restore();
+        };
+
+        const monsters = this.monsterManager.getMonsters();
+        const target = monsters.find(m => m.id === targetId);
+        if (!target) {
+            missile.destroy();
+            return;
+        }
+
+        const randomAngle = Math.random() * Math.PI * 2;
+        state.rotation = randomAngle;
+        const flyOutScreenX = state.screenX + Math.cos(randomAngle) * flyOutDist;
+        const flyOutScreenY = state.screenY + Math.sin(randomAngle) * flyOutDist;
+
+        drawMissile();
+
+        this.tweens.add({
+            targets: state,
+            screenX: flyOutScreenX,
+            screenY: flyOutScreenY,
+            duration: 300,
+            ease: 'Quad.easeOut',
+            onUpdate: drawMissile,
+            onComplete: () => {
+                const targetScreen = this.worldToScreen(target.x, target.y);
+                const dx = targetScreen.x - state.screenX;
+                const dy = targetScreen.y - state.screenY;
+                state.rotation = Math.atan2(dy, dx);
+                missileLength = unitSize * 1.5;
+
+                this.tweens.add({
+                    targets: state,
+                    screenX: targetScreen.x,
+                    screenY: targetScreen.y,
+                    duration: 400,
+                    ease: 'Linear',
+                    onUpdate: drawMissile,
+                    onComplete: () => {
+                        const currentMonsters = this.monsterManager.getMonsters();
+                        const hitTarget = currentMonsters.find(m => m.id === targetId);
+
+                        if (hitTarget) {
+                            const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                            const result = this.monsterManager.damageMonsters([hitTarget.id], finalDamage);
+                            if (result.totalExp > 0) this.addExp(result.totalExp);
+                        }
+
+                        this.showMissileExplosion(state.screenX, state.screenY, false);
+                        missile.destroy();
+                    }
+                });
+            }
+        });
+    }
+
+    // 分身版絕對邏輯防禦 - 輪鋸跟隨分身移動（分身存在期間持續）
+    private phantomCastAbsoluteLogicAt(baseDamage: number, phantomId?: number) {
+        if (phantomId === undefined) return;
+
+        // 如果該分身已經有輪鋸，不重複產生
+        if (this.phantomSawBladeActive.has(phantomId)) return;
+        this.phantomSawBladeActive.add(phantomId);
+
+        const unitSize = this.gameBounds.height / 10;
+        const orbitRadiusWorld = 2; // 2 單位距離（世界座標）
+        const orbitRadiusPx = unitSize * orbitRadiusWorld;
+        const bladeRadiusPx = unitSize * 0.5; // 0.5 單位範圍
+        const bladeRadiusWorld = 0.5;
+        const bladeCount = 3; // 分身產生 3 個輪鋸
+
+        // 公轉 2 倍速（數量只有一半，視覺上看起來轉速一樣）
+        const orbitSpeed = (Math.PI * 2) / 1000; // 公轉：1 秒一圈（玩家 2 秒）
+        const spinSpeed = (Math.PI * 2) / 150;   // 自轉：0.15 秒一圈（與玩家相同）
+
+        // 建立輪鋸圖形
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(100);
+
+        // 輪鋸狀態
+        const state = {
+            angle: 0,
+            spinAngle: 0
+        };
+
+        // 追蹤已擊中的怪物（每隻怪物 0.5 秒只能被擊中一次）
+        const hitCooldown: Map<number, number> = new Map();
+
+        // 取得分身當前位置的函數
+        const getPhantomPosition = (): { x: number; y: number } | null => {
+            const phantom = this.phantoms.find(p => p.id === phantomId);
+            return phantom ? { x: phantom.x, y: phantom.y } : null;
+        };
+
+        // 繪製輪鋸
+        const drawBlades = (phantomPos: { x: number; y: number }) => {
+            graphics.clear();
+
+            const phantomScreen = this.worldToScreen(phantomPos.x, phantomPos.y);
+
+            for (let i = 0; i < bladeCount; i++) {
+                const bladeAngle = state.angle + (i / bladeCount) * Math.PI * 2;
+                const bladeScreenX = phantomScreen.x + Math.cos(bladeAngle) * orbitRadiusPx;
+                const bladeScreenY = phantomScreen.y + Math.sin(bladeAngle) * orbitRadiusPx;
+
+                // 輪鋸主體（紫色，分身專用）
+                graphics.fillStyle(0x9966ff, 0.6);
+                graphics.fillCircle(bladeScreenX, bladeScreenY, bladeRadiusPx);
+
+                // 輪鋸邊緣
+                graphics.lineStyle(3, 0xcc99ff, 0.8);
+                graphics.strokeCircle(bladeScreenX, bladeScreenY, bladeRadiusPx);
+
+                // 鋸齒
+                const teethCount = 8;
+                for (let t = 0; t < teethCount; t++) {
+                    const toothAngle = state.spinAngle + (t / teethCount) * Math.PI * 2;
+                    const innerRadius = bladeRadiusPx * 0.6;
+                    const outerRadius = bladeRadiusPx * 1.2;
+
+                    const x1 = bladeScreenX + Math.cos(toothAngle) * innerRadius;
+                    const y1 = bladeScreenY + Math.sin(toothAngle) * innerRadius;
+                    const x2 = bladeScreenX + Math.cos(toothAngle + 0.15) * outerRadius;
+                    const y2 = bladeScreenY + Math.sin(toothAngle + 0.15) * outerRadius;
+                    const x3 = bladeScreenX + Math.cos(toothAngle + 0.3) * innerRadius;
+                    const y3 = bladeScreenY + Math.sin(toothAngle + 0.3) * innerRadius;
+
+                    graphics.lineStyle(2, 0xcc99ff, 0.8);
+                    graphics.beginPath();
+                    graphics.moveTo(x1, y1);
+                    graphics.lineTo(x2, y2);
+                    graphics.lineTo(x3, y3);
+                    graphics.strokePath();
+                }
+            }
+        };
+
+        // 更新輪鋸
+        const updateBlades = () => {
+            // 檢查分身是否還存在（分身消失則輪鋸也消失）
+            const phantomPos = getPhantomPosition();
+            if (!phantomPos) {
+                graphics.destroy();
+                this.phantomSawBladeActive.delete(phantomId);
+                return;
+            }
+
+            const delta = 16;
+            state.angle += orbitSpeed * delta;
+            state.spinAngle -= spinSpeed * delta; // 自轉（負值=反向旋轉）
+
+            // 角度歸一化
+            if (state.angle > Math.PI * 2) state.angle -= Math.PI * 2;
+            if (state.spinAngle < -Math.PI * 2) state.spinAngle += Math.PI * 2;
+
+            // 檢測碰撞（使用分身當前位置）
+            const monsters = this.monsterManager.getMonsters();
+            const now = this.time.now;
+            const hitMonsters: number[] = [];
+            const hitPositions: { x: number; y: number }[] = [];
+
+            for (let i = 0; i < bladeCount; i++) {
+                const bladeAngle = state.angle + (i / bladeCount) * Math.PI * 2;
+                const bladeWorldX = phantomPos.x + Math.cos(bladeAngle) * orbitRadiusWorld;
+                const bladeWorldY = phantomPos.y + Math.sin(bladeAngle) * orbitRadiusWorld;
+
+                for (const monster of monsters) {
+                    const dx = monster.x - bladeWorldX;
+                    const dy = monster.y - bladeWorldY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const monsterRadius = monster.definition.size * 0.5;
+
+                    if (dist <= bladeRadiusWorld + monsterRadius) {
+                        const lastHit = hitCooldown.get(monster.id) || 0;
+                        if (now - lastHit >= 500) {
+                            hitMonsters.push(monster.id);
+                            hitPositions.push({ x: monster.x, y: monster.y });
+                            hitCooldown.set(monster.id, now);
+                        }
+                    }
+                }
+            }
+
+            // 造成傷害
+            if (hitMonsters.length > 0) {
+                const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                if (result.totalExp > 0) {
+                    this.addExp(result.totalExp);
+                }
+
+                // 擊中特效
+                if (isCrit) {
+                    this.flashCritCrossAtPositions(hitPositions);
+                } else {
+                    this.flashWhiteCrossAtPositions(hitPositions);
+                }
+            }
+
+            drawBlades(phantomPos);
+        };
+
+        // 開始輪鋸動畫（持續到分身消失）
+        const initialPos = getPhantomPosition();
+        if (initialPos) {
+            drawBlades(initialPos);
+            this.time.addEvent({
+                callback: updateBlades,
+                loop: true,
+                delay: 16
+            });
+        }
+    }
+
+    // 分身版靈魂斬擊（指定座標）
+    private phantomCastSoulSlashAt(baseDamage: number, phantomX: number, phantomY: number) {
+        // 找最近的敵人
+        const monsters = this.monsterManager.getMonsters();
+        if (monsters.length === 0) return;
+
+        let nearestMonster = monsters[0];
+        let nearestDist = Infinity;
+        for (const monster of monsters) {
+            const dx = monster.x - phantomX;
+            const dy = monster.y - phantomY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestMonster = monster;
+            }
+        }
+
+        // 計算斬擊方向（從分身指向最近敵人）
+        const dx = nearestMonster.x - phantomX;
+        const dy = nearestMonster.y - phantomY;
+        const angle = Math.atan2(dy, dx);
+
+        // 斬擊線：貫穿全螢幕（前後延伸）
+        const maxDist = Math.max(this.gameBounds.width, this.gameBounds.height) * 2;
+        const startX = phantomX - Math.cos(angle) * maxDist;
+        const startY = phantomY - Math.sin(angle) * maxDist;
+        const endX = phantomX + Math.cos(angle) * maxDist;
+        const endY = phantomY + Math.sin(angle) * maxDist;
+
+        // 繪製斬擊線視覺效果（分身用紫色）
+        this.drawPhantomSoulSlashEffect(startX, startY, endX, endY, angle, phantomX, phantomY);
+
+        // 檢測斬擊線上的所有怪物
+        const hitMonsters: number[] = [];
+        const hitPositions: { x: number; y: number }[] = [];
+        const slashWidth = this.gameBounds.height * 0.05; // 0.5 單位寬度
+
+        for (const monster of monsters) {
+            const distToLine = this.pointToLineDistance(
+                monster.x, monster.y,
+                startX, startY, endX, endY
+            );
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+            if (distToLine <= slashWidth + monsterRadius) {
+                hitMonsters.push(monster.id);
+                hitPositions.push({ x: monster.x, y: monster.y });
+            }
+        }
+
+        // 造成傷害
+        if (hitMonsters.length > 0) {
+            const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.addExp(result.totalExp);
+
+            if (isCrit) {
+                this.flashCritCrossAtPositions(hitPositions);
+            } else {
+                this.flashWhiteCrossAtPositions(hitPositions);
+            }
+        }
+    }
+
+    // 分身版靈魂斬擊視覺效果（紫色）
+    private drawPhantomSoulSlashEffect(startX: number, startY: number, endX: number, endY: number, angle: number, phantomX: number, phantomY: number) {
+        const screenStart = this.worldToScreen(startX, startY);
+        const screenEnd = this.worldToScreen(endX, endY);
+
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(60);
+
+        // 斬擊線（紫色）
+        const slashColor = 0x9966ff;
+
+        // 外層光暈
+        graphics.lineStyle(12, slashColor, 0.3);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 中層
+        graphics.lineStyle(6, slashColor, 0.6);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 核心線
+        graphics.lineStyle(2, 0xffffff, 0.9);
+        graphics.beginPath();
+        graphics.moveTo(screenStart.x, screenStart.y);
+        graphics.lineTo(screenEnd.x, screenEnd.y);
+        graphics.strokePath();
+
+        // 淡出效果
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 150,
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+
+        // 分身位置閃光效果
+        const phantomScreen = this.worldToScreen(phantomX, phantomY);
+        this.showPhantomSlashFlashEffect(phantomScreen.x, phantomScreen.y, angle);
+    }
+
+    // 分身斬擊閃光效果（紫色）
+    private showPhantomSlashFlashEffect(x: number, y: number, angle: number) {
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+        graphics.setDepth(61);
+
+        const flashSize = this.gameBounds.height * 0.1;
+
+        graphics.lineStyle(4, 0x9966ff, 0.8);
+        graphics.beginPath();
+        graphics.arc(x, y, flashSize, angle - 0.3, angle + 0.3, false);
+        graphics.strokePath();
+
+        graphics.lineStyle(2, 0xffffff, 1);
+        graphics.beginPath();
+        graphics.arc(x, y, flashSize * 0.8, angle - 0.2, angle + 0.2, false);
+        graphics.strokePath();
+
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 100,
+            onComplete: () => {
+                graphics.destroy();
+            }
+        });
+    }
+
+    // 分身出現特效（指定座標）
+    private showPhantomSpawnEffectAt(phantomX: number, phantomY: number) {
+        const screen = this.worldToScreen(phantomX, phantomY);
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+
+        const unitSize = this.gameBounds.height / 10;
+
+        // 擴散光圈
+        let radius = 0;
+        const maxRadius = unitSize * 1.5;
+
+        const expand = () => {
+            graphics.clear();
+            radius += 8;
+
+            if (radius < maxRadius) {
+                const alpha = 1 - radius / maxRadius;
+                graphics.lineStyle(3, 0x9966ff, alpha);
+                graphics.strokeCircle(screen.x, screen.y, radius);
+            } else {
+                graphics.destroy();
+            }
+        };
+
+        this.time.addEvent({ callback: expand, delay: 16, repeat: Math.floor(maxRadius / 8) });
+    }
+
+    // 分身施放特效（指定座標）
+    private showPhantomCastEffectAt(phantomX: number, phantomY: number) {
+        const screen = this.worldToScreen(phantomX, phantomY);
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+
+        // 閃光效果
+        graphics.fillStyle(0xbb88ff, 0.6);
+        graphics.fillCircle(screen.x, screen.y, 20);
+
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => graphics.destroy()
+        });
+    }
+
+    // 指定 ID 的分身消失
+    private dismissPhantomById(phantomId: number) {
+        const index = this.phantoms.findIndex(p => p.id === phantomId);
+        if (index === -1) return;
+
+        const phantom = this.phantoms[index];
+
+        // 停止計時器
+        phantom.skillTimer.destroy();
+        phantom.dismissTimer.destroy();
+
+        // 消失特效
+        const screen = this.worldToScreen(phantom.x, phantom.y);
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+
+        graphics.fillStyle(0x9966ff, 0.5);
+        graphics.fillCircle(screen.x, screen.y, 30);
+
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            scaleX: 2,
+            scaleY: 2,
+            duration: 300,
+            onComplete: () => graphics.destroy()
+        });
+
+        // 銷毀分身圖像
+        phantom.sprite.destroy();
+
+        // 從列表移除
+        this.phantoms.splice(index, 1);
+
+        // 更新嘲諷目標
+        this.updatePhantomTauntTarget();
+    }
+
+    // 創建殘影效果
+    private createAfterimage(phantom: typeof this.phantoms[0]) {
+        const screen = this.worldToScreen(phantom.x, phantom.y);
+
+        // 創建殘影 sprite
+        const afterimage = this.add.sprite(screen.x, screen.y, 'char_idle_1');
+        afterimage.setOrigin(0.5, 1);
+        afterimage.setScale(phantom.sprite.scaleX, phantom.sprite.scaleY);
+        afterimage.setFlipX(phantom.sprite.flipX);
+        afterimage.setAlpha(0.3);
+        afterimage.setTint(0x9966ff);
+        this.skillGridContainer.add(afterimage);
+        afterimage.setDepth(54);
+
+        // 淡出並銷毀
+        this.tweens.add({
+            targets: afterimage,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => afterimage.destroy()
+        });
+    }
+
+    // 零信任防禦協定：視覺更新（在 update 中呼叫）
+    private updateZeroTrustVisual(delta: number) {
+        // 檢查是否裝備了零信任防禦協定
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        if (!equipped || equipped.definition.id !== 'advanced_zero_trust') {
+            // 未裝備，停用並清理
+            if (this.zeroTrustActive) {
+                this.deactivateZeroTrust();
+            }
+            return;
+        }
+
+        // 啟用（如果尚未啟用）
+        if (!this.zeroTrustActive) {
+            this.activateZeroTrust(equipped.level);
+        }
+
+        // 更新光束
+        this.updateZeroTrust(equipped.level, delta);
+    }
+
+    // 每幀更新所有分身視覺與移動
+    private updatePhantomVisual(delta: number) {
+        const now = this.time.now;
+
+        for (const phantom of this.phantoms) {
+            // 如果正在移動，以 4 倍速移動到目標點
+            if (phantom.moving) {
+                const dx = phantom.targetX - phantom.x;
+                const dy = phantom.targetY - phantom.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                // 4 倍玩家移動速度
+                const phantomSpeed = this.moveSpeed * 4;
+                const moveDistance = (phantomSpeed * delta) / 1000;
+
+                if (distance <= moveDistance) {
+                    // 到達目標
+                    phantom.x = phantom.targetX;
+                    phantom.y = phantom.targetY;
+                    phantom.moving = false;
+
+                    // 播放待機動畫
+                    if (phantom.sprite.anims) {
+                        phantom.sprite.play('char_idle', true);
+                    }
+                } else {
+                    // 移動中
+                    const ratio = moveDistance / distance;
+                    phantom.x += dx * ratio;
+                    phantom.y += dy * ratio;
+
+                    // 根據移動方向翻轉
+                    if (dx < 0) {
+                        phantom.sprite.setFlipX(true);
+                    } else if (dx > 0) {
+                        phantom.sprite.setFlipX(false);
+                    }
+
+                    // 產生殘影（每 50ms）
+                    if (now - phantom.lastAfterimageTime > 50) {
+                        this.createAfterimage(phantom);
+                        phantom.lastAfterimageTime = now;
+                    }
+                }
+            }
+
+            // 更新分身位置（螢幕座標）
+            const screen = this.worldToScreen(phantom.x, phantom.y);
+            phantom.sprite.setPosition(screen.x, screen.y);
+
+            // 同步縮放
+            phantom.sprite.setScale(this.character.scaleX, this.character.scaleY);
+        }
+
+        // 更新嘲諷目標（使用第一個幻影）
+        if (this.phantoms.length > 0) {
+            const first = this.phantoms[0];
+            this.monsterManager.setTauntTarget(first.x, first.y, true);
+        }
+    }
+
+    // 取得分身位置（供怪物 AI 使用）- 返回第一個幻影位置
+    getPhantomPosition(): { x: number; y: number; active: boolean } {
+        if (this.phantoms.length > 0) {
+            const first = this.phantoms[0];
+            return {
+                x: first.x,
+                y: first.y,
+                active: true
+            };
+        }
+        return {
+            x: 0,
+            y: 0,
+            active: false
+        };
     }
 
     // 更新遊戲計時器顯示
@@ -5975,7 +7467,7 @@ export default class MainScene extends Phaser.Scene {
             const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
 
             infoLines.push(`HP 消耗: 10`);
-            infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
             infoLines.push(`範圍: 7 單位 / 30°`);
             infoLines.push(`冷卻: ${finalCd}s`);
         } else if (def.id === 'advanced_tech_artist') {
@@ -5986,16 +7478,20 @@ export default class MainScene extends Phaser.Scene {
             const baseCd = def.cooldown;
             const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
 
-            infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
             infoLines.push(`範圍: 5 單位隨機 / 3 單位爆炸`);
-            infoLines.push(`癱瘓: 0.5s`);
+            infoLines.push(`癱瘓: 1s`);
             infoLines.push(`冷卻: ${finalCd}s`);
         } else if (def.id === 'advanced_absolute_defense') {
             // 絕對邏輯防禦
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
             const shieldRatio = this.currentShield / this.maxShield;
             const bladeCount = Math.max(1, Math.ceil(shieldRatio * 6));
             const shieldCost = Math.ceil(this.maxShield * 0.02);
 
+            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
             infoLines.push(`輪鋸數量: ${bladeCount} / 6`);
             infoLines.push(`旋轉速度: 2 秒/圈`);
             infoLines.push(`撞敵耗盾: ${shieldCost} (2%)`);
@@ -6008,7 +7504,7 @@ export default class MainScene extends Phaser.Scene {
             const baseCd = def.cooldown;
             const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
 
-            infoLines.push(`傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
+            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
             infoLines.push(`爆炸範圍: 3 單位`);
             infoLines.push(`焦點輪轉: 四焦點循環`);
             infoLines.push(`冷卻: ${finalCd}s`);
@@ -6019,10 +7515,53 @@ export default class MainScene extends Phaser.Scene {
             const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
             const baseCd = def.cooldown;
             const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+            const missileCount = 20;
 
-            infoLines.push(`導彈數量: 10 枚`);
-            infoLines.push(`單發傷害: ${finalDamage} (Lv${this.currentLevel}+Sk${level})`);
-            infoLines.push(`總傷害: ${finalDamage * 10}`);
+            infoLines.push(`導彈數量: ${missileCount} 枚`);
+            infoLines.push(`單發傷害: ${damageUnits} 單位（${finalDamage}）`);
+            infoLines.push(`總傷害: ${finalDamage * missileCount}`);
+            infoLines.push(`冷卻: ${finalCd}s`);
+        } else if (def.id === 'advanced_zero_trust') {
+            // 零信任防禦協定
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const dps = finalDamage * 5; // 每 0.2 秒一次 = 每秒 5 次
+            const maxBeams = 4 + Math.floor(level / 5);
+
+            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
+            infoLines.push(`每秒傷害: ${dps}（0.2秒/次）`);
+            infoLines.push(`光束數量: ${maxBeams} 發（4+Lv/5）`);
+            infoLines.push(`傷害範圍: 1 單位`);
+            infoLines.push(`矩陣半徑: 5 單位`);
+        } else if (def.id === 'advanced_phantom_iteration') {
+            // 幻影迭代模式
+            const duration = Math.floor(level / 5) + 10;
+            const baseCd = def.cooldown;
+            const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+            const canOverlap = duration > parseFloat(finalCd);
+
+            infoLines.push(`持續時間: ${duration} 秒 (Sk${level}/5+10)`);
+            infoLines.push(`冷卻: ${finalCd}s`);
+            infoLines.push(`分身行為: 每0.5秒施放隨機進階技能`);
+            infoLines.push(`嘲諷: 怪物優先攻擊分身`);
+            if (canOverlap) {
+                infoLines.push(`狀態: 可多分身重疊！`);
+            } else {
+                const needLevel = Math.ceil((parseFloat(finalCd) - 8 + 1) * 5);
+                infoLines.push(`狀態: Lv${needLevel} 開始可重疊`);
+            }
+        } else if (def.id === 'advanced_soul_slash') {
+            // 靈魂斬擊
+            const damageUnits = this.currentLevel + level;
+            const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+            const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const baseCd = def.cooldown;
+            const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
+
+            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
+            infoLines.push(`範圍: 貫穿全螢幕直線`);
+            infoLines.push(`寬度: 0.5 單位`);
             infoLines.push(`冷卻: ${finalCd}s`);
         }
 
@@ -6508,8 +8047,8 @@ export default class MainScene extends Phaser.Scene {
         }
         this.skillCutInContainer.add(bottomLineGraphics);
 
-        // 等級顯示文字
-        const levelDisplay = newLevel >= skillDef.maxLevel ? 'MAX' : `Lv.${newLevel}`;
+        // 等級顯示文字（進階技能 maxLevel=-1 表示無上限，不顯示 MAX）
+        const levelDisplay = (skillDef.maxLevel > 0 && newLevel >= skillDef.maxLevel) ? 'MAX' : `Lv.${newLevel}`;
 
         // 主標題：技能名稱提升到等級
         const titleText = `${skillDef.name} 提升到 ${levelDisplay}`;
@@ -7747,22 +9286,226 @@ export default class MainScene extends Phaser.Scene {
 
     // 顯示進階技能 CUT IN
     private showAdvancedSkillCutIn(advSkillDef: AdvancedSkillDefinition, level: number) {
-        // 使用與一般技能相同的 CUT IN 框架，但顏色不同
-        const cutInDef: SkillDefinition = {
-            id: advSkillDef.id,
-            name: advSkillDef.name,
-            subtitle: advSkillDef.subtitle,
-            description: advSkillDef.description,
-            type: 'active',
-            color: advSkillDef.color,
-            flashColor: advSkillDef.flashColor,
-            cooldown: advSkillDef.cooldown,
-            maxLevel: advSkillDef.maxLevel,
-            iconPrefix: advSkillDef.iconPrefix,
-            levelUpMessages: advSkillDef.levelUpMessages,
-            levelUpQuotes: advSkillDef.levelUpQuotes
-        };
-        this.showSkillCutIn(cutInDef, level);
+        // 動態生成進階技能的升級訊息
+        const dynamicMessage = this.generateAdvancedSkillMessage(advSkillDef, level);
+        const dynamicQuote = this.generateAdvancedSkillQuote(advSkillDef, level);
+
+        // 進階技能專用 CUT IN（不使用 showSkillCutIn 避免 MAX 判斷問題）
+        this.showAdvancedSkillCutInDirect(advSkillDef, level, dynamicMessage, dynamicQuote);
+    }
+
+    // 進階技能專用 CUT IN 顯示（無 MAX 上限）
+    private showAdvancedSkillCutInDirect(
+        advSkillDef: AdvancedSkillDefinition,
+        level: number,
+        message: string,
+        quote: string
+    ) {
+        // 清除之前的內容
+        this.skillCutInContainer.removeAll(true);
+
+        // CUT IN 條的高度和位置（畫面上半中間）
+        const barHeight = this.gameBounds.height * 0.18;
+        const barY = this.gameBounds.y + this.gameBounds.height * 0.25;
+        const fadeWidth = this.gameBounds.width * 0.15;
+        const solidWidth = this.gameBounds.width - fadeWidth * 2;
+
+        // 中間實心黑色背景
+        const bgCenter = this.add.rectangle(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY,
+            solidWidth,
+            barHeight,
+            0x000000,
+            0.75
+        );
+        this.skillCutInContainer.add(bgCenter);
+
+        // 左側漸層
+        const leftFade = this.add.graphics();
+        const leftStartX = this.gameBounds.x;
+        const leftEndX = this.gameBounds.x + fadeWidth;
+        const fadeSteps = 20;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.75;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            leftFade.fillStyle(0x000000, alpha);
+            leftFade.fillRect(x, barY - barHeight / 2, w, barHeight);
+        }
+        this.skillCutInContainer.add(leftFade);
+
+        // 右側漸層
+        const rightFade = this.add.graphics();
+        const rightStartX = this.gameBounds.x + this.gameBounds.width - fadeWidth;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.75;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            rightFade.fillStyle(0x000000, alpha);
+            rightFade.fillRect(x, barY - barHeight / 2, w, barHeight);
+        }
+        this.skillCutInContainer.add(rightFade);
+
+        // 邊線
+        const lineThickness = 3;
+        const color = advSkillDef.color;
+
+        // 上邊線
+        const topLineGraphics = this.add.graphics();
+        const lineY = barY - barHeight / 2 - lineThickness / 2;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.8;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            topLineGraphics.fillStyle(color, alpha);
+            topLineGraphics.fillRect(x, lineY, w, lineThickness);
+        }
+        topLineGraphics.fillStyle(color, 0.8);
+        topLineGraphics.fillRect(leftEndX, lineY, solidWidth, lineThickness);
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.8;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            topLineGraphics.fillStyle(color, alpha);
+            topLineGraphics.fillRect(x, lineY, w, lineThickness);
+        }
+        this.skillCutInContainer.add(topLineGraphics);
+
+        // 下邊線
+        const bottomLineGraphics = this.add.graphics();
+        const bottomLineY = barY + barHeight / 2 - lineThickness / 2;
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (i / fadeSteps) * 0.8;
+            const x = leftStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            bottomLineGraphics.fillStyle(color, alpha);
+            bottomLineGraphics.fillRect(x, bottomLineY, w, lineThickness);
+        }
+        bottomLineGraphics.fillStyle(color, 0.8);
+        bottomLineGraphics.fillRect(leftEndX, bottomLineY, solidWidth, lineThickness);
+        for (let i = 0; i < fadeSteps; i++) {
+            const alpha = (1 - i / fadeSteps) * 0.8;
+            const x = rightStartX + (fadeWidth / fadeSteps) * i;
+            const w = fadeWidth / fadeSteps + 1;
+            bottomLineGraphics.fillStyle(color, alpha);
+            bottomLineGraphics.fillRect(x, bottomLineY, w, lineThickness);
+        }
+        this.skillCutInContainer.add(bottomLineGraphics);
+
+        // 主標題：進階技能永遠顯示 Lv.X（無 MAX）
+        const titleText = `${advSkillDef.name} 提升到 Lv.${level}`;
+        const title = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY - barHeight * 0.30,
+            titleText,
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.32))}px`,
+                color: '#ffffff',
+                fontStyle: 'bold'
+            }
+        );
+        title.setResolution(2);
+        title.setOrigin(0.5, 0.5);
+        this.skillCutInContainer.add(title);
+
+        // 角色對話
+        if (quote) {
+            const quoteText = this.add.text(
+                this.gameBounds.x + this.gameBounds.width / 2,
+                barY + barHeight * 0.05,
+                quote,
+                {
+                    fontFamily: '"Noto Sans TC", sans-serif',
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.28))}px`,
+                    color: '#ffffff'
+                }
+            );
+            quoteText.setResolution(2);
+            quoteText.setOrigin(0.5, 0.5);
+            this.skillCutInContainer.add(quoteText);
+        }
+
+        // 數值描述
+        const description = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            barY + barHeight * 0.25,
+            message,
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.18))}px`,
+                color: Phaser.Display.Color.IntegerToColor(color).rgba
+            }
+        );
+        description.setResolution(2);
+        description.setOrigin(0.5, 0.5);
+        this.skillCutInContainer.add(description);
+
+        // 滑入動畫
+        this.skillCutInContainer.setX(-this.gameBounds.width);
+        this.skillCutInContainer.setVisible(true);
+        this.skillCutInContainer.setAlpha(1);
+
+        this.tweens.add({
+            targets: this.skillCutInContainer,
+            x: 0,
+            duration: 250,
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                this.time.delayedCall(1500, () => {
+                    this.tweens.add({
+                        targets: this.skillCutInContainer,
+                        x: this.gameBounds.width,
+                        duration: 200,
+                        ease: 'Power2.easeIn',
+                        onComplete: () => {
+                            this.skillCutInContainer.setVisible(false);
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    // 動態生成進階技能升級訊息
+    private generateAdvancedSkillMessage(advSkillDef: AdvancedSkillDefinition, level: number): string {
+        // 傷害單位 = 角色等級 + 技能等級，每單位 = 10 傷害
+        const damageUnits = this.currentLevel + level;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
+
+        // 根據技能 ID 生成不同的訊息
+        switch (advSkillDef.id) {
+            case 'advanced_burning_celluloid':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            case 'advanced_tech_artist':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            case 'advanced_absolute_defense':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            case 'advanced_perfect_pixel':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            case 'advanced_vfx_burst':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            case 'advanced_phantom_iteration': {
+                const duration = Math.floor(level / 5) + 8;
+                return `Lv.${level} - 持續 ${duration} 秒`;
+            }
+            case 'advanced_zero_trust':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            case 'advanced_soul_slash':
+                return `Lv.${level} - 傷害 ${damageUnits} 單位（${baseDamage}）`;
+            default:
+                return `Lv.${level}`;
+        }
+    }
+
+    // 動態生成進階技能升級台詞
+    private generateAdvancedSkillQuote(advSkillDef: AdvancedSkillDefinition, _level: number): string {
+        // 使用定義中的第一個台詞作為基礎，如果沒有則使用副標題
+        if (advSkillDef.levelUpQuotes && advSkillDef.levelUpQuotes.length > 0) {
+            return advSkillDef.levelUpQuotes[0];
+        }
+        return advSkillDef.subtitle || '';
     }
 
     // ===== 技能範圍格子系統 =====

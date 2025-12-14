@@ -64,30 +64,20 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         maxLevel: -1,  // 無上限
         iconPrefix: 'X01',
         requiredSkills: ['active_soul_render', 'passive_titanium_liver'],  // 靈魂渲染（動畫大師）+ 鈦金肝
-        levelUpMessages: [
-            '你選擇成為傳統手繪動畫師、逐幀動畫師'
-        ],
-        levelUpQuotes: [
-            '你選擇成為傳統手繪動畫師、逐幀動畫師'
-        ]
+        levelUpQuotes: ['你選擇成為傳統手繪動畫師、逐幀動畫師']
     },
     {
         id: 'advanced_tech_artist',
         name: '技術美術大神',
         subtitle: '一人成軍的遊戲開發者',
-        description: '【咒言幻象＋AI強化】\n周圍5單位射下光線，敵人癱瘓0.5秒',
+        description: '【咒言幻象＋視網膜】\n周圍5單位射下光線，敵人癱瘓0.5秒',
         color: 0x00ffcc,  // 青色（科技感）
         flashColor: 0x66ffdd,
         cooldown: 1000,  // 1 秒
         maxLevel: -1,  // 無上限
         iconPrefix: 'X02',
-        requiredSkills: ['active_coder', 'passive_ai_enhancement'],  // 咒言幻象（遊戲先知）+ AI 賦能強化
-        levelUpMessages: [
-            '左手寫 Code，右手畫圖，一人成軍的遊戲開發者'
-        ],
-        levelUpQuotes: [
-            '左手寫 Code，右手畫圖，一人成軍的遊戲開發者'
-        ]
+        requiredSkills: ['active_coder', 'passive_retina_module'],  // 咒言幻象（遊戲先知）+ 視網膜增強模組
+        levelUpQuotes: ['左手寫 Code，右手畫圖，一人成軍的遊戲開發者']
     },
     {
         id: 'advanced_absolute_defense',
@@ -100,12 +90,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         maxLevel: -1,  // 無上限
         iconPrefix: 'X03',
         requiredSkills: ['active_architect', 'passive_sync_rate'],  // 靈魂統領（架構師）+ 精神同步率強化
-        levelUpMessages: [
-            '系統架構固若金湯，邏輯防線無懈可擊'
-        ],
-        levelUpQuotes: [
-            '系統架構固若金湯，邏輯防線無懈可擊'
-        ]
+        levelUpQuotes: ['系統架構固若金湯，邏輯防線無懈可擊']
     },
     {
         id: 'advanced_perfect_pixel',
@@ -118,12 +103,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         maxLevel: -1,  // 無上限
         iconPrefix: 'X04',
         requiredSkills: ['active_vfx', 'passive_retina_module'],  // 疾光狙擊 + 視網膜增強模組
-        levelUpMessages: [
-            '構圖的黃金法則，像素的完美審判'
-        ],
-        levelUpQuotes: [
-            '構圖的黃金法則，像素的完美審判'
-        ]
+        levelUpQuotes: ['構圖的黃金法則，像素的完美審判']
     },
     {
         id: 'advanced_vfx_burst',
@@ -136,12 +116,46 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         maxLevel: -1,  // 無上限
         iconPrefix: 'X05',
         requiredSkills: ['active_vfx', 'passive_ai_enhancement'],  // 疾光狙擊 + AI 賦能強化
-        levelUpMessages: [
-            '好萊塢級的視覺轟炸，每一幀都是藝術'
-        ],
-        levelUpQuotes: [
-            '好萊塢級的視覺轟炸，每一幀都是藝術'
-        ]
+        levelUpQuotes: ['好萊塢級的視覺轟炸，每一幀都是藝術']
+    },
+    {
+        id: 'advanced_phantom_iteration',
+        name: '幻影迭代模式',
+        subtitle: '無限分身的創作者',
+        description: '【咒言幻象＋AI強化】\n召喚影分身，吸引砲火並施放特殊技',
+        color: 0x9966ff,  // 紫藍色（幻影感）
+        flashColor: 0xbb88ff,
+        cooldown: 20000,  // 20 秒
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X06',
+        requiredSkills: ['active_coder', 'passive_ai_enhancement'],  // 咒言幻象（遊戲先知）+ AI 賦能強化
+        levelUpQuotes: ['影分身現身，無限迭代的創作者']
+    },
+    {
+        id: 'advanced_zero_trust',
+        name: '零信任防禦協定',
+        subtitle: '絕對安全的系統架構',
+        description: '【靈魂統領＋AI強化】\n展開8角矩陣，8發持續光束掃描範圍內敵人',
+        color: 0xffcc00,  // 金黃色
+        flashColor: 0xffee66,
+        cooldown: 0,  // 持續效果，無冷卻
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X07',
+        requiredSkills: ['active_architect', 'passive_ai_enhancement'],  // 靈魂統領（架構師）+ AI 賦能強化
+        levelUpQuotes: ['零信任，驗證一切，絕不妥協']
+    },
+    {
+        id: 'advanced_soul_slash',
+        name: '次元向量疾劃',
+        subtitle: '貫穿次元的向量之刃',
+        description: '【靈魂渲染＋AI強化】\n朝最近敵人揮出貫穿全螢幕的直線斬擊\n每級 1% 機率從擊中敵人觸發連鎖斬擊',
+        color: 0xff3366,  // 紅紫色（斬擊感）
+        flashColor: 0xff6699,
+        cooldown: 500,  // 0.5 秒
+        maxLevel: -1,  // 無上限
+        iconPrefix: 'X08',
+        requiredSkills: ['active_soul_render', 'passive_ai_enhancement'],  // 靈魂渲染（動畫大師）+ AI 賦能強化
+        levelUpQuotes: ['向量運算，次元切割']
     }
 ];
 
@@ -173,7 +187,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '你增進了手繪動畫和停格動畫的製作技術', // LV2
             '你苦練了3D角色模型和3D場景的設計', // LV3
             '你完全理解了動畫法則，提升了角色動畫的製作精度', // LV4
-            '你成為了動畫大師，即將解鎖驚人的能力', // LV5/MAX
+            '你成為了動畫大師，解鎖了進階技能組合', // LV5/MAX
         ],
         maxExtraAbility: {
             name: '穿透',
@@ -209,7 +223,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '你增進了程式設計能力和遊戲引擎的創作能力', // LV2
             '你整合了虛擬網紅製作技術，讓自媒體營銷具爆發力', // LV3
             '你導入了人工智慧協作能力，產能提升了數倍', // LV4
-            '你成為了遊戲先知，即將解鎖驚人的能力', // LV5/MAX
+            '你成為了遊戲先知，解鎖了進階技能組合', // LV5/MAX
         ],
         maxExtraAbility: {
             name: '爆發',
@@ -245,7 +259,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '你增進了影片剪輯和動態影像的設計能力', // LV2
             '你苦練了數位成音技術影像獲得更多回饋', // LV3
             '你學會應用特效合成後製提升了影像各種可能性', // LV4
-            '你成為了超級導演，即將解鎖驚人的能力', // LV5/MAX
+            '你成為了超級導演，解鎖了進階技能組合', // LV5/MAX
         ],
         maxExtraAbility: {
             name: '連鎖',
@@ -634,10 +648,23 @@ export class SkillManager {
             normalOptions.push(shuffledPassive[0]);
         }
 
-        // 返回所有可用的進階技能（由 createMixedSkillOptions 決定最終顯示幾個）
-        const shuffledAdvanced = this.shuffleArray([...upgradeableAdvanced]);
+        // 返回進階技能選項（如果已裝備，確保它在選項中）
+        let advancedOptions: AdvancedSkillDefinition[] = [];
+        if (this.equippedAdvancedSkillId) {
+            const equipped = upgradeableAdvanced.find(a => a.id === this.equippedAdvancedSkillId);
+            if (equipped) {
+                // 已裝備的放第一個
+                const others = upgradeableAdvanced.filter(a => a.id !== this.equippedAdvancedSkillId);
+                const shuffledOthers = this.shuffleArray([...others]);
+                advancedOptions = [equipped, ...shuffledOthers];
+            } else {
+                advancedOptions = this.shuffleArray([...upgradeableAdvanced]);
+            }
+        } else {
+            advancedOptions = this.shuffleArray([...upgradeableAdvanced]);
+        }
 
-        return { normal: normalOptions, advanced: shuffledAdvanced };
+        return { normal: normalOptions, advanced: advancedOptions };
     }
 
     // 檢查是否還有可升級的技能
@@ -927,8 +954,23 @@ export class SkillManager {
     }
 
     // 隨機選取進階技能選項（3選1）
+    // 規則：如果已裝備進階技能，至少要有一個是當前裝備的
     getRandomAdvancedSkillOptions(): AdvancedSkillDefinition[] {
         const available = this.getUpgradeableAdvancedSkills();
+
+        // 如果已裝備進階技能，確保它在選項中
+        if (this.equippedAdvancedSkillId) {
+            const equipped = available.find(a => a.id === this.equippedAdvancedSkillId);
+            if (equipped) {
+                // 從可選列表中移除已裝備的
+                const others = available.filter(a => a.id !== this.equippedAdvancedSkillId);
+                const shuffledOthers = this.shuffleArray([...others]);
+                // 已裝備的 + 最多 2 個其他的
+                return [equipped, ...shuffledOthers.slice(0, 2)];
+            }
+        }
+
+        // 沒有裝備進階技能，正常隨機
         const shuffled = this.shuffleArray([...available]);
         return shuffled.slice(0, 3);
     }
@@ -1013,5 +1055,19 @@ export class SkillManager {
     // 計算進階技能的最終冷卻時間（套用被動減速）
     calculateAdvancedSkillCooldown(baseCooldown: number): number {
         return this.calculateFinalCooldown(baseCooldown);
+    }
+
+    // 取得已學習過的進階技能列表（等級 > 0）
+    getLearnedAdvancedSkills(): AdvancedSkillDefinition[] {
+        const learned: AdvancedSkillDefinition[] = [];
+        for (const [skillId, level] of this.advancedSkillLevels.entries()) {
+            if (level > 0) {
+                const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
+                if (def) {
+                    learned.push(def);
+                }
+            }
+        }
+        return learned;
     }
 }

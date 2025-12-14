@@ -29,6 +29,10 @@ export default class GridScene extends Phaser.Scene {
     private isLoading: boolean = true; // 是否正在載入
     private loadingCells: Set<number> = new Set(); // Loading 文字的格子
     private backgroundImage!: Phaser.GameObjects.Image; // 背景圖參考
+    private cubeImage!: Phaser.GameObjects.Image; // 左下角 cube 圖片
+    private neroSImage!: Phaser.GameObjects.Image; // 右上角 NeroS 圖片
+    private cubeBaseScale: number = 1; // cube 基礎縮放
+    private cubeBaseY: number = 0; // cube 基礎 Y 位置
     private titleBgm!: Phaser.Sound.BaseSound; // 標題背景音樂
     private pendingClickOrigin: { x: number; y: number } | null = null; // 等待載入完成後轉場的點擊位置
     private isPreloadingMain: boolean = false; // 是否正在預載 MainScene 資源
@@ -46,6 +50,9 @@ export default class GridScene extends Phaser.Scene {
     preload() {
         // 只預載入 GridScene 自己需要的資源（背景圖和標題 BGM）
         this.load.image('background', 'background.png');
+        this.load.image('cube', 'cube.png');
+        this.load.image('neros', 'NeroS.png');
+        this.load.image('glow', 'glow.png');
         this.load.audio('bgm_title', 'audio/BGM00.mp3');
 
         // 監聯初始載入進度
@@ -195,7 +202,89 @@ export default class GridScene extends Phaser.Scene {
         this.backgroundImage.setScale(scale);
 
         // 確保在最底層
-        this.backgroundImage.setDepth(-1);
+        this.backgroundImage.setDepth(-2);
+        // 背景亮度 50%
+        this.backgroundImage.setTint(0x808080); // 50% 亮度 (0.50 * 255 ≈ 128 = 0x80)
+
+        // 在背景圖和網格之間加入 NeroS（右側）和 cube（左側）
+        // NeroS 圖片 - 右側，高度為畫面 150%，上下置中（允許超出）
+        this.neroSImage = this.add.image(width, height / 2, 'neros');
+        this.neroSImage.setOrigin(1, 0.5); // 右側置中對齊
+        this.neroSImage.setDepth(-1.5); // 背景圖之上，cube 之下
+
+        // 右邊 30% 中間加入紫色漸層光暈圖片（在 NeroS 之後，背景之前）
+        const glowX = width * 0.7; // 右邊 30% 位置
+        const glowY = height / 2; // 上下置中
+        const glowSize = height * 2; // 畫面 200% 高度
+
+        const glowImage = this.add.image(glowX, glowY, 'glow');
+        glowImage.setDepth(-1.6); // NeroS(-1.5) 之後，背景(-2) 之前
+        const glowScale = glowSize / glowImage.height;
+        glowImage.setScale(glowScale);
+
+        // 光暈不規則電流閃爍動畫
+        const flicker = () => {
+            const randomScale = glowScale * (1 + Math.random() * 0.15); // 隨機縮放 0~15%
+            const randomAlpha = 0.6 + Math.random() * 0.4; // 隨機透明度 0.6~1
+            const randomDuration = 30 + Math.random() * 120; // 隨機速度 30~150ms
+
+            this.tweens.add({
+                targets: glowImage,
+                scaleX: randomScale,
+                scaleY: randomScale,
+                alpha: randomAlpha,
+                duration: randomDuration,
+                ease: 'Sine.easeInOut',
+                onComplete: flicker
+            });
+        };
+        flicker();
+        const nerosScale = (height * 1.5) / this.neroSImage.height;
+        this.neroSImage.setScale(nerosScale);
+        // NeroS 亮度 75%
+        this.neroSImage.setTint(0xbfbfbf); // 75% 亮度 (0.75 * 255 ≈ 191 = 0xbf)
+
+        // NeroS 呼吸縮放動畫（1.5% 尺寸變化，是 cube 的一半）
+        this.tweens.add({
+            targets: this.neroSImage,
+            scaleX: nerosScale * 1.015,
+            scaleY: nerosScale * 1.015,
+            duration: 2000,
+            ease: 'Sine.easeInOut',
+            yoyo: true,
+            repeat: -1
+        });
+
+        // cube 圖片 - 左側，距離左邊 10%，高度為畫面 70%（在 NeroS 之前）
+        this.cubeImage = this.add.image(width * 0.1, height, 'cube');
+        this.cubeImage.setOrigin(0, 1); // 左下角對齊
+        this.cubeImage.setDepth(-1); // NeroS 之上，網格之下
+        const cubeScale = (height * 0.7) / this.cubeImage.height;
+        this.cubeImage.setScale(cubeScale);
+        // 儲存 cube 的基礎尺寸和位置供動畫使用
+        this.cubeBaseScale = cubeScale;
+        this.cubeBaseY = height;
+
+        // cube 呼吸縮放動畫（3% 尺寸變化）
+        this.tweens.add({
+            targets: this.cubeImage,
+            scaleX: cubeScale * 1.03,
+            scaleY: cubeScale * 1.03,
+            duration: 2000,
+            ease: 'Sine.easeInOut',
+            yoyo: true,
+            repeat: -1
+        });
+
+        // cube 上下飄動動畫（畫面 2%）
+        this.tweens.add({
+            targets: this.cubeImage,
+            y: height - (height * 0.02),
+            duration: 2500,
+            ease: 'Sine.easeInOut',
+            yoyo: true,
+            repeat: -1
+        });
     }
 
     private showLoadingText(percent: number) {
@@ -669,8 +758,10 @@ export default class GridScene extends Phaser.Scene {
             cell.graphics.setAlpha(1);
         });
 
-        // 隱藏 GridScene 的背景圖，讓燒開的格子露出 MainScene
+        // 隱藏 GridScene 的背景圖和角色圖，讓燒開的格子露出 MainScene
         this.backgroundImage.setVisible(false);
+        this.cubeImage.setVisible(false);
+        this.neroSImage.setVisible(false);
 
         // Calculate delay based on actual distance (Euclidean) for true circle
         const timePerUnit = 5;
