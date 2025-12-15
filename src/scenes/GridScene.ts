@@ -552,16 +552,6 @@ export default class GridScene extends Phaser.Scene {
                 ease: 'Sine.easeIn'
             });
 
-            // 網格格子漸變消失
-            this.cells.forEach(cell => {
-                this.tweens.add({
-                    targets: cell.graphics,
-                    alpha: 0,
-                    duration: fadeOutDuration,
-                    ease: 'Sine.easeIn'
-                });
-            });
-
             // 漸變完成後開始轉場
             this.time.delayedCall(fadeOutDuration, () => {
                 if (this.pendingClickOrigin) {
