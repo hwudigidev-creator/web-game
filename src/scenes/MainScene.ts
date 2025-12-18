@@ -271,6 +271,7 @@ export default class MainScene extends Phaser.Scene {
     private static readonly TEXTURE_SECTOR_PREFIX = 'effect_sector_'; // 扇形紋理前綴 (後綴為角度)
     private static readonly TEXTURE_CIRCLE = 'effect_circle'; // 圓形紋理
     private static readonly TEXTURE_LINE = 'effect_line'; // 直線紋理
+    private static readonly TEXTURE_SOULWAVE = 'effect_soulwave'; // 衝擊波紋理
     // 紋理尺寸
     private static readonly EFFECT_TEXTURE_SIZE = 256; // 圓形、扇形
     private static readonly EFFECT_LINE_HEIGHT = 64;   // 直線高度
@@ -879,10 +880,24 @@ export default class MainScene extends Phaser.Scene {
             }
             const baseAlpha = 1.0 * (1 - fadeProgress);
 
+            // 順時針旋轉：計算旋轉角度（最後 20% 加速）
+            const baseRotationSpeed = Math.PI * 2; // 基礎速度：每秒 1 圈
+            let rotationAngle: number;
+            if (progress < 0.8) {
+                // 前 80%：正常速度
+                rotationAngle = progress * duration / 1000 * baseRotationSpeed;
+            } else {
+                // 最後 20%：加速 3 倍
+                const normalPart = 0.8 * duration / 1000 * baseRotationSpeed;
+                const acceleratedProgress = (progress - 0.8) / 0.2; // 0~1
+                const acceleratedPart = acceleratedProgress * 0.2 * duration / 1000 * baseRotationSpeed * 3;
+                rotationAngle = normalPart + acceleratedPart;
+            }
+
             if (baseAlpha > 0.01) {
                 // 繪製 3 段，每段 120 度，帶漸層透明（兩端亮、中間暗）
                 for (let seg = 0; seg < segmentCount; seg++) {
-                    const segStartAngle = seg * segmentAngle - Math.PI / 2; // 從頂部開始
+                    const segStartAngle = seg * segmentAngle - Math.PI / 2 + rotationAngle; // 從頂部開始 + 旋轉
 
                     for (let i = 0; i < subSegments; i++) {
                         // 計算這個小段的透明度（兩端 1.0，中間 0.2）
@@ -9774,35 +9789,65 @@ export default class MainScene extends Phaser.Scene {
 
         // 設定縮放
         const scale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
-        sprite.setScale(scale);
+        sprite.setScale(scale * 0.3);
 
         // 設定顏色
         sprite.setTint(color);
         sprite.setAlpha(0);
+        sprite.setRotation(0); // 重置旋轉
 
-        // 展開動畫
-        this.tweens.add({
-            targets: sprite,
-            alpha: { from: 0, to: 0.75 },
-            scale: { from: scale * 0.3, to: scale },
-            duration: 150,
-            ease: 'Quad.easeOut',
-            onComplete: () => {
-                // 停留後淡出
-                this.time.delayedCall(150, () => {
-                    this.tweens.add({
-                        targets: sprite,
-                        alpha: 0,
-                        scale: scale * 1.2,
-                        duration: 200,
-                        ease: 'Quad.easeIn',
-                        onComplete: () => {
-                            this.releaseSkillEffectSprite(sprite);
-                        }
-                    });
-                });
+        // 動畫參數
+        const totalDuration = 500; // 總時長 500ms
+        const startTime = this.time.now;
+        const slowRotationSpeed = Math.PI * 5; // 前 80%（400ms）：轉 1 圈
+        const fastRotationSpeed = Math.PI * 200; // 後 20%（100ms）：轉 10 圈
+
+        // 動畫更新函數（同時處理旋轉、縮放、透明度）
+        const updateEffect = () => {
+            if (!sprite.active) return;
+
+            const elapsed = this.time.now - startTime;
+            const progress = Math.min(elapsed / totalDuration, 1);
+
+            // 計算旋轉角度（前 80% 慢，後 20% 加速）
+            let rotationAngle: number;
+            if (progress < 0.8) {
+                // 前 80%：慢速旋轉
+                rotationAngle = progress * totalDuration / 1000 * slowRotationSpeed;
+            } else {
+                // 後 20%：加速旋轉
+                const slowPart = 0.8 * totalDuration / 1000 * slowRotationSpeed;
+                const fastProgress = (progress - 0.8) / 0.2; // 0~1
+                const fastPart = fastProgress * 0.2 * totalDuration / 1000 * fastRotationSpeed;
+                rotationAngle = slowPart + fastPart;
             }
-        });
+            sprite.setRotation(rotationAngle);
+
+            // 計算縮放（前 80% 慢慢放大，後 20% 快速放大並淡出）
+            let currentScale: number;
+            let currentAlpha: number;
+            if (progress < 0.8) {
+                // 前 80%：慢慢放大到目標大小
+                const scaleProgress = progress / 0.8;
+                currentScale = scale * 0.3 + (scale - scale * 0.3) * scaleProgress;
+                currentAlpha = 0.75;
+            } else {
+                // 後 20%：快速放大並淡出
+                const fadeProgress = (progress - 0.8) / 0.2;
+                currentScale = scale + (scale * 0.2) * fadeProgress;
+                currentAlpha = 0.75 * (1 - fadeProgress);
+            }
+            sprite.setScale(currentScale);
+            sprite.setAlpha(currentAlpha);
+
+            if (progress < 1) {
+                this.time.delayedCall(16, updateEffect);
+            } else {
+                this.releaseSkillEffectSprite(sprite);
+            }
+        };
+
+        updateEffect();
     }
 
     // 直線特效（使用物件池）
@@ -9862,39 +9907,33 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 移動中的扇形特效（穿透波用，使用物件池）
+    // 移動中的衝擊波特效（穿透波用，使用物件池）
     private flashSkillEffectSectorMoving(
         originX: number, originY: number,
-        startRadius: number, angle: number, halfAngle: number,
+        startRadius: number, angle: number, _halfAngle: number,
         color: number, travelDistance: number
     ) {
         const sprite = this.getSkillEffectSprite();
         if (!sprite) return;
 
-        // 計算初始弧長（用於保持弧長不變）
-        const arcLength = startRadius * halfAngle * 2;
-        const halfAngleDeg = halfAngle * (180 / Math.PI);
+        // 使用衝擊波紋理
+        sprite.setTexture(MainScene.TEXTURE_SOULWAVE);
 
-        // 選擇最接近的紋理
-        const textureKey = this.getSectorTextureKey(halfAngleDeg * 2);
-        sprite.setTexture(textureKey);
-
-        // 波的厚度（只顯示外圍 50% 的部分，透過透明內圈實現）
-        const waveThickness = startRadius * 0.5;
-
-        // 初始位置
-        sprite.setPosition(originX, originY);
+        // 設定大小和旋轉
+        const scale = (startRadius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+        sprite.setScale(scale);
         sprite.setRotation(angle);
-
-        const initialScale = (startRadius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
-        sprite.setScale(initialScale);
         sprite.setTint(color);
-        sprite.setAlpha(0.4);
+        sprite.setAlpha(0.6);
 
-        const duration = 1000; // 速度減半
+        // 計算起始位置（從扇形末端開始）
+        const startX = originX + Math.cos(angle) * startRadius;
+        const startY = originY + Math.sin(angle) * startRadius;
+        sprite.setPosition(startX, startY);
+
+        const duration = 1000;
         const startTime = this.time.now;
 
-        // 使用 tweens timeline 控制移動
         const updateMovement = () => {
             const elapsed = this.time.now - startTime;
             const progress = Math.min(elapsed / duration, 1);
@@ -9904,24 +9943,14 @@ export default class MainScene extends Phaser.Scene {
                 return;
             }
 
-            // 當前弧線的半徑位置
-            const currentRadius = startRadius + travelDistance * progress;
-            // 保持弧長不變，計算新的半角
-            const currentHalfAngle = arcLength / (2 * currentRadius);
-            const currentHalfAngleDeg = currentHalfAngle * (180 / Math.PI);
+            // 計算當前位置（直接飛出去）
+            const currentDist = startRadius + travelDistance * progress;
+            const currentX = originX + Math.cos(angle) * currentDist;
+            const currentY = originY + Math.sin(angle) * currentDist;
+            sprite.setPosition(currentX, currentY);
 
-            // 更新紋理（如果角度變化太大）
-            const newTextureKey = this.getSectorTextureKey(currentHalfAngleDeg * 2);
-            if (sprite.texture.key !== newTextureKey) {
-                sprite.setTexture(newTextureKey);
-            }
-
-            // 更新縮放
-            const scale = (currentRadius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
-            sprite.setScale(scale);
-
-            // 透明度：邊緣 40%，逐漸淡出
-            const alpha = 0.4 * (1 - progress * 0.5);
+            // 透明度：逐漸淡出
+            const alpha = 0.6 * (1 - progress * 0.7);
             sprite.setAlpha(alpha);
 
             // 繼續下一幀

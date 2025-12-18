@@ -15,6 +15,9 @@ export default class BootScene extends Phaser.Scene {
         for (const angle of sectorAngles) {
             this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
         }
+
+        // 載入衝擊波紋理（靈魂渲染穿透用）
+        this.load.image('effect_soulwave', 'effects/soulwave.png');
     }
 
     create() {
