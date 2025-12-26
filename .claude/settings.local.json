@@ -20,7 +20,8 @@
       "Bash(dir:*)",
       "Bash(node -e:*)",
       "Bash(node remove-logs.js:*)",
-      "Bash(del remove-logs.js)"
+      "Bash(del remove-logs.js)",
+      "Bash(timeout /t 3 /nobreak)"
     ],
     "deny": [],
     "ask": []

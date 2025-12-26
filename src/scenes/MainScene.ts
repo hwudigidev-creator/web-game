@@ -75,7 +75,12 @@ export default class MainScene extends Phaser.Scene {
     // 技能選擇面板
     private skillPanelContainer!: Phaser.GameObjects.Container;
     private isPaused: boolean = false;
+    private isSkillSelecting: boolean = false; // 防止重複點擊
     private skillOptions: Phaser.GameObjects.Container[] = [];
+    // 技能選擇按鍵 (1, 2, 3)
+    private keyOne!: Phaser.Input.Keyboard.Key;
+    private keyTwo!: Phaser.Input.Keyboard.Key;
+    private keyThree!: Phaser.Input.Keyboard.Key;
     private skillCardBgs: Phaser.GameObjects.Rectangle[] = [];
 
     // 遊戲計時器
@@ -449,6 +454,11 @@ export default class MainScene extends Phaser.Scene {
                 D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
             };
 
+            // 技能選擇按鍵 (1, 2, 3)
+            this.keyOne = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
+            this.keyTwo = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
+            this.keyThree = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
+
             // 測試用 +/- 按鍵
             this.keyPlus = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PLUS);
             this.keyMinus = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.MINUS);
@@ -492,6 +502,19 @@ export default class MainScene extends Phaser.Scene {
     }
 
     update(_time: number, delta: number) {
+        // 如果遊戲暫停，只處理技能選擇面板的按鍵和必要的 UI 更新
+        if (this.isPaused) {
+            // 純視覺效果可以繼續（UI 流動動畫）
+            this.updateHpBarFlow(delta);
+            this.updateShieldBarFlow(delta);
+            this.updateExpBarFlow(delta);
+            this.updateShieldAura(delta);
+            this.updateLowHpVignetteBreathing(delta);
+            this.updateSkillCooldownDisplay();
+            this.handleSkillPanelInput();
+            return;
+        }
+
         // 更新 HP 條、護盾條和經驗條流動效果
         this.updateHpBarFlow(delta);
         this.updateShieldBarFlow(delta);
@@ -503,12 +526,6 @@ export default class MainScene extends Phaser.Scene {
         this.updateAdvancedSkillCooldown(delta);
         this.updatePhantomVisual(delta);
         this.updateZeroTrustVisual(delta);
-
-        // 如果遊戲暫停，處理技能選擇面板的按鍵
-        if (this.isPaused) {
-            this.handleSkillPanelInput();
-            return;
-        }
 
         // 更新遊戲計時器（只在非暫停時累加）
         this.gameTimer += delta;
@@ -2307,7 +2324,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private handleSkillPanelInput() {
-        if (!this.cursors) return;
+        if (!this.keyOne) return;
 
         // 計算選項數量（混合模式、進階模式、一般模式）
         let numChoices: number;
@@ -2320,12 +2337,12 @@ export default class MainScene extends Phaser.Scene {
         }
 
         // 根據選項數量決定按鍵對應
-        // 3 個選項：A=0, S=1, D=2
-        // 2 個選項：A=0, D=1
-        // 1 個選項：S=0
+        // 3 個選項：1=0, 2=1, 3=2
+        // 2 個選項：1=0, 3=1
+        // 1 個選項：2=0
         if (numChoices === 1) {
-            // 只有一個選項，用 S 鍵
-            if (Phaser.Input.Keyboard.JustDown(this.cursors.S)) {
+            // 只有一個選項，用 2 鍵
+            if (Phaser.Input.Keyboard.JustDown(this.keyTwo)) {
                 if (this.selectedSkillIndex === 0) {
                     this.confirmSkillSelection();
                 } else {
@@ -2333,15 +2350,15 @@ export default class MainScene extends Phaser.Scene {
                 }
             }
         } else if (numChoices === 2) {
-            // 兩個選項，用 A 和 D 鍵
-            if (Phaser.Input.Keyboard.JustDown(this.cursors.A)) {
+            // 兩個選項，用 1 和 3 鍵
+            if (Phaser.Input.Keyboard.JustDown(this.keyOne)) {
                 if (this.selectedSkillIndex === 0) {
                     this.confirmSkillSelection();
                 } else {
                     this.setSelectedSkill(0);
                 }
             }
-            if (Phaser.Input.Keyboard.JustDown(this.cursors.D)) {
+            if (Phaser.Input.Keyboard.JustDown(this.keyThree)) {
                 if (this.selectedSkillIndex === 1) {
                     this.confirmSkillSelection();
                 } else {
@@ -2349,22 +2366,22 @@ export default class MainScene extends Phaser.Scene {
                 }
             }
         } else {
-            // 三個選項，用 A, S, D 鍵
-            if (Phaser.Input.Keyboard.JustDown(this.cursors.A)) {
+            // 三個選項，用 1, 2, 3 鍵
+            if (Phaser.Input.Keyboard.JustDown(this.keyOne)) {
                 if (this.selectedSkillIndex === 0) {
                     this.confirmSkillSelection();
                 } else {
                     this.setSelectedSkill(0);
                 }
             }
-            if (Phaser.Input.Keyboard.JustDown(this.cursors.S)) {
+            if (Phaser.Input.Keyboard.JustDown(this.keyTwo)) {
                 if (this.selectedSkillIndex === 1) {
                     this.confirmSkillSelection();
                 } else {
                     this.setSelectedSkill(1);
                 }
             }
-            if (Phaser.Input.Keyboard.JustDown(this.cursors.D)) {
+            if (Phaser.Input.Keyboard.JustDown(this.keyThree)) {
                 if (this.selectedSkillIndex === 2) {
                     this.confirmSkillSelection();
                 } else {
@@ -2411,6 +2428,10 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private confirmSkillSelection() {
+        // 防止重複點擊
+        if (this.isSkillSelecting) return;
+        this.isSkillSelecting = true;
+
         // 處理混合技能選擇模式
         if (this.mixedSkillTypes.length > 0) {
             this.confirmMixedSkillSelection();
@@ -7969,7 +7990,7 @@ export default class MainScene extends Phaser.Scene {
         this.skillCutInContainer.removeAll(true);
 
         // CUT IN 條的高度和位置（畫面上半中間）
-        const barHeight = this.gameBounds.height * 0.18; // 加高區塊
+        const barHeight = this.gameBounds.height * 0.22; // 加高區塊
         const barY = this.gameBounds.y + this.gameBounds.height * 0.25;
         const fadeWidth = this.gameBounds.width * 0.15; // 兩側漸層區域寬度
         const solidWidth = this.gameBounds.width - fadeWidth * 2; // 中間實心區域
@@ -8073,7 +8094,7 @@ export default class MainScene extends Phaser.Scene {
             titleText,
             {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.32))}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.26))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             }
@@ -8094,7 +8115,7 @@ export default class MainScene extends Phaser.Scene {
                 quoteText,
                 {
                     fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.28))}px`,
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.23))}px`,
                     color: '#ffffff'
                 }
             );
@@ -8114,7 +8135,7 @@ export default class MainScene extends Phaser.Scene {
             descriptionText,
             {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.18))}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.15))}px`,
                 color: Phaser.Display.Color.IntegerToColor(skillDef.color).rgba
             }
         );
@@ -8138,7 +8159,7 @@ export default class MainScene extends Phaser.Scene {
                 abilityText,
                 {
                     fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.16))}px`,
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.13))}px`,
                     color: '#ffcc00' // 金色顯示 MAX 能力
                 }
             );
@@ -8168,6 +8189,9 @@ export default class MainScene extends Phaser.Scene {
                         onComplete: () => {
                             this.skillCutInContainer.setVisible(false);
                             this.skillCutInContainer.setX(0);
+                            // CutIn 動畫結束，恢復遊戲
+                            this.isPaused = false;
+                            this.isSkillSelecting = false;
                         }
                     });
                 });
@@ -8181,7 +8205,7 @@ export default class MainScene extends Phaser.Scene {
         this.skillCutInContainer.removeAll(true);
 
         // CUT IN 條的高度和位置
-        const barHeight = this.gameBounds.height * 0.15;
+        const barHeight = this.gameBounds.height * 0.22; // 加高區塊
         const barY = this.gameBounds.y + this.gameBounds.height * 0.25;
         const fadeWidth = this.gameBounds.width * 0.15;
         const solidWidth = this.gameBounds.width - fadeWidth * 2;
@@ -8275,7 +8299,7 @@ export default class MainScene extends Phaser.Scene {
             title,
             {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.35))}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.24))}px`,
                 color: Phaser.Display.Color.IntegerToColor(skillDef.color).rgba,
                 fontStyle: 'bold'
             }
@@ -8291,7 +8315,7 @@ export default class MainScene extends Phaser.Scene {
             quote,
             {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.25))}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.17))}px`,
                 color: '#ffffff'
             }
         );
@@ -8387,11 +8411,11 @@ export default class MainScene extends Phaser.Scene {
         // 1 個選項：S
         let keys: string[];
         if (numCards === 1) {
-            keys = ['S'];
+            keys = ['2'];
         } else if (numCards === 2) {
-            keys = ['A', 'D'];
+            keys = ['1', '3'];
         } else {
-            keys = ['A', 'S', 'D'];
+            keys = ['1', '2', '3'];
         }
 
         for (let i = 0; i < this.currentSkillChoices.length; i++) {
@@ -8583,6 +8607,7 @@ export default class MainScene extends Phaser.Scene {
         }
 
         this.isPaused = true;
+        this.isSkillSelecting = false; // 重置選擇狀態，允許新的選擇
         this.isPointerDown = false; // 停止移動
         this.skillPanelContainer.setVisible(true);
 
@@ -8627,14 +8652,14 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private hideSkillPanel() {
-        // 淡出動畫
+        // 淡出動畫（不在這裡取消暫停，等 CutIn 結束後才恢復）
         this.tweens.add({
             targets: this.skillPanelContainer,
             alpha: 0,
             duration: 200,
             onComplete: () => {
                 this.skillPanelContainer.setVisible(false);
-                this.isPaused = false;
+                // 注意：isPaused 會在 CutIn 動畫結束後才設為 false
             }
         });
     }
@@ -8738,11 +8763,11 @@ export default class MainScene extends Phaser.Scene {
         // 按鍵對應
         let keys: string[];
         if (numCards === 1) {
-            keys = ['S'];
+            keys = ['2'];
         } else if (numCards === 2) {
-            keys = ['A', 'D'];
+            keys = ['1', '3'];
         } else {
-            keys = ['A', 'S', 'D'];
+            keys = ['1', '2', '3'];
         }
 
         for (let i = 0; i < this.currentAdvancedSkillChoices.length; i++) {
@@ -8944,11 +8969,11 @@ export default class MainScene extends Phaser.Scene {
         // 按鍵對應
         let keys: string[];
         if (numCards === 1) {
-            keys = ['S'];
+            keys = ['2'];
         } else if (numCards === 2) {
-            keys = ['A', 'D'];
+            keys = ['1', '3'];
         } else {
-            keys = ['A', 'S', 'D'];
+            keys = ['1', '2', '3'];
         }
 
         for (let i = 0; i < selectedOptions.length; i++) {
@@ -9257,6 +9282,10 @@ export default class MainScene extends Phaser.Scene {
 
     // 確認混合技能選擇
     private confirmMixedSkillSelection() {
+        // 防止重複點擊
+        if (this.isSkillSelecting) return;
+        this.isSkillSelecting = true;
+
         const index = this.selectedSkillIndex;
         if (index < 0 || index >= this.mixedSkillTypes.length) return;
 
@@ -9320,7 +9349,7 @@ export default class MainScene extends Phaser.Scene {
         this.skillCutInContainer.removeAll(true);
 
         // CUT IN 條的高度和位置（畫面上半中間）
-        const barHeight = this.gameBounds.height * 0.18;
+        const barHeight = this.gameBounds.height * 0.22; // 加高區塊
         const barY = this.gameBounds.y + this.gameBounds.height * 0.25;
         const fadeWidth = this.gameBounds.width * 0.15;
         const solidWidth = this.gameBounds.width - fadeWidth * 2;
@@ -9416,7 +9445,7 @@ export default class MainScene extends Phaser.Scene {
             titleText,
             {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.32))}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.26))}px`,
                 color: '#ffffff',
                 fontStyle: 'bold'
             }
@@ -9433,7 +9462,7 @@ export default class MainScene extends Phaser.Scene {
                 quote,
                 {
                     fontFamily: '"Noto Sans TC", sans-serif',
-                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.28))}px`,
+                    fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(barHeight * 0.23))}px`,
                     color: '#ffffff'
                 }
             );
@@ -9449,7 +9478,7 @@ export default class MainScene extends Phaser.Scene {
             message,
             {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.18))}px`,
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(barHeight * 0.15))}px`,
                 color: Phaser.Display.Color.IntegerToColor(color).rgba
             }
         );
@@ -9476,6 +9505,9 @@ export default class MainScene extends Phaser.Scene {
                         ease: 'Power2.easeIn',
                         onComplete: () => {
                             this.skillCutInContainer.setVisible(false);
+                            // CutIn 動畫結束，恢復遊戲
+                            this.isPaused = false;
+                            this.isSkillSelecting = false;
                         }
                     });
                 });
