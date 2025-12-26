@@ -116,7 +116,7 @@ export default class MainScene extends Phaser.Scene {
     // 絕對邏輯防禦：輪鋸系統
     private sawBladeAngle: number = 0; // 輪鋸公轉角度（繞角色）
     private sawBladeSpinAngle: number = 0; // 輪鋸自轉角度（鋸齒旋轉）
-    private sawBladeGraphics?: Phaser.GameObjects.Graphics; // 輪鋸圖形
+    private sawBladeSprites: { outer: Phaser.GameObjects.Sprite; inner: Phaser.GameObjects.Sprite }[] = []; // 輪鋸護盾圖（雙層）
     private sawBladeLastHitTime: Map<number, number> = new Map(); // 每個怪物上次被輪鋸擊中的時間
     private currentSawBladePositions: { x: number; y: number }[] = []; // 當前輪鋸位置（世界座標）
     private sawBladeRadius: number = 0; // 輪鋸半徑
@@ -128,7 +128,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 零信任防禦協定：8發從上方落下的持續光束
     private zeroTrustActive: boolean = false; // 是否啟用
-    private zeroTrustGraphics?: Phaser.GameObjects.Graphics; // 矩陣圖形
+    private zeroTrustSprite?: Phaser.GameObjects.Sprite; // 八角矩陣護盾圖
     private zeroTrustTrackedMonsters: Set<number> = new Set(); // 已追蹤的怪物（避免重複鎖定）
     private zeroTrustBeams: {
         targetMonsterId: number; // 鎖定的怪物 ID
@@ -149,6 +149,8 @@ export default class MainScene extends Phaser.Scene {
         sprite: Phaser.GameObjects.Sprite;
         skillTimer: Phaser.Time.TimerEvent;
         dismissTimer: Phaser.Time.TimerEvent;
+        tauntTimer: Phaser.Time.TimerEvent; // 嘲諷週期計時器
+        chainRayTimer: Phaser.Time.TimerEvent; // 彈射射線計時器
         lastAfterimageTime: number; // 上次殘影時間
     }[] = [];
     private nextPhantomId: number = 0;
@@ -277,6 +279,7 @@ export default class MainScene extends Phaser.Scene {
     private static readonly TEXTURE_CIRCLE = 'effect_circle'; // 圓形紋理
     private static readonly TEXTURE_LINE = 'effect_line'; // 直線紋理
     private static readonly TEXTURE_SOULWAVE = 'effect_soulwave'; // 衝擊波紋理
+    private static readonly TEXTURE_SHIELD = 'effect_shield'; // 護盾紋理
     // 紋理尺寸
     private static readonly EFFECT_TEXTURE_SIZE = 256; // 圓形、扇形
     private static readonly EFFECT_LINE_HEIGHT = 64;   // 直線高度
@@ -1925,14 +1928,10 @@ export default class MainScene extends Phaser.Scene {
         // 繪製護盾條
         this.drawShieldBarFill();
 
-        // 繪製護盾特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
-        const shieldRadius = this.gameBounds.height * 0.15;
+        // 繪製護盾特效（使用護盾圖片）
+        const shieldRadius = this.gameBounds.height * 0.18;
         const shieldFlashColor = skill.definition.flashColor || skill.definition.color;
-        if (this.showGridSkillEffects) {
-            this.flashSkillAreaCircle(this.characterX, this.characterY, shieldRadius, shieldFlashColor);
-        } else {
-            this.flashSkillEffectCircle(this.characterX, this.characterY, shieldRadius, shieldFlashColor);
-        }
+        this.flashShieldEffect(this.characterX, this.characterY, shieldRadius, shieldFlashColor);
 
     }
 
@@ -1949,12 +1948,8 @@ export default class MainScene extends Phaser.Scene {
         // 繪製圓形邊緣線
         this.drawCircleEdge(explosionRadius, color);
 
-        // 繪製圓形特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
-        if (this.showGridSkillEffects) {
-            this.flashSkillAreaCircle(this.characterX, this.characterY, explosionRadius, flashColor);
-        } else {
-            this.flashSkillEffectCircle(this.characterX, this.characterY, explosionRadius, flashColor);
-        }
+        // 繪製護盾爆炸特效（使用護盾圖片）
+        this.flashShieldEffect(this.characterX, this.characterY, explosionRadius, flashColor);
 
         // 檢測範圍內的怪物
         const monsters = this.monsterManager.getMonsters();
@@ -4905,8 +4900,9 @@ export default class MainScene extends Phaser.Scene {
                     }
                 }
 
-                // 顯示旋轉扇形特效
-                this.showRotatingSectorEffect(currentAngle, range, halfAngle, 0xff6600);
+                // 顯示旋轉扇形特效（使用和分身相同的圖片特效）
+                const halfAngleDeg = sectorAngle / 2;
+                this.flashSkillEffectSector(this.characterX, this.characterY, range, currentAngle, halfAngleDeg, 0xff6600);
             });
         }
 
@@ -4916,8 +4912,8 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 顯示旋轉扇形特效（燃燒的賽璐珞用）
-    private showRotatingSectorEffect(angle: number, radius: number, halfAngle: number, color: number) {
+    // [已移除] 舊的手繪旋轉扇形特效，改用 flashSkillEffectSector
+    private _showRotatingSectorEffect_deprecated(angle: number, radius: number, halfAngle: number, color: number) {
         const graphics = this.add.graphics();
         this.skillGridContainer.add(graphics);
         graphics.setDepth(55);
@@ -5158,9 +5154,10 @@ export default class MainScene extends Phaser.Scene {
     private executeAbsoluteDefense(skillLevel: number) {
         // 只在有護盾時才發動
         if (this.currentShield <= 0) {
-            // 清除輪鋸圖形
-            if (this.sawBladeGraphics) {
-                this.sawBladeGraphics.clear();
+            // 隱藏輪鋸（雙層）
+            for (const blade of this.sawBladeSprites) {
+                blade.outer.setVisible(false);
+                blade.inner.setVisible(false);
             }
             return;
         }
@@ -5238,6 +5235,9 @@ export default class MainScene extends Phaser.Scene {
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) this.addExp(result.totalExp);
 
+            // 擊退被掃中的目標（從角色位置向外推 1 單位）
+            this.monsterManager.knockbackMonsters(hitMonsters, this.characterX, this.characterY, 1);
+
             // 每次命中消耗護盾值（每隻怪物消耗 2% 最大護盾）
             const shieldCostPerHit = Math.ceil(this.maxShield * 0.02);
             const shieldCost = shieldCostPerHit * hitMonsters.length;
@@ -5256,58 +5256,53 @@ export default class MainScene extends Phaser.Scene {
         this.drawSawBlades(bladePositions, bladeRadius);
     }
 
-    // 繪製多個輪鋸視覺效果
+    // 繪製多個輪鋸視覺效果（使用護盾圖片，雙層逆轉設計）
     private drawSawBlades(bladePositions: { x: number; y: number }[], radius: number) {
-        // 建立或取得圖形物件
-        if (!this.sawBladeGraphics) {
-            this.sawBladeGraphics = this.add.graphics();
-            this.skillGridContainer.add(this.sawBladeGraphics);
-            this.sawBladeGraphics.setDepth(56);
+        // 調整 sprite 數量（每個輪鋸需要兩層）
+        while (this.sawBladeSprites.length < bladePositions.length) {
+            // 外層
+            const outer = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+            this.skillGridContainer.add(outer);
+            outer.setDepth(56);
+            outer.setTint(0xffdd00); // 金色
+            outer.setAlpha(0.7);
+
+            // 內層（1/2 大小，逆轉）
+            const inner = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+            this.skillGridContainer.add(inner);
+            inner.setDepth(57);
+            inner.setTint(0xffee66); // 較亮金色
+            inner.setAlpha(0.8);
+
+            this.sawBladeSprites.push({ outer, inner });
         }
 
-        this.sawBladeGraphics.clear();
+        // 隱藏多餘的 sprite
+        for (let i = bladePositions.length; i < this.sawBladeSprites.length; i++) {
+            this.sawBladeSprites[i].outer.setVisible(false);
+            this.sawBladeSprites[i].inner.setVisible(false);
+        }
 
-        // 繪製每個輪鋸
-        for (let bladeIndex = 0; bladeIndex < bladePositions.length; bladeIndex++) {
-            const bladePos = bladePositions[bladeIndex];
+        // 更新每個輪鋸
+        for (let i = 0; i < bladePositions.length; i++) {
+            const bladePos = bladePositions[i];
+            const { outer, inner } = this.sawBladeSprites[i];
 
             // 轉換為螢幕座標
             const screen = this.worldToScreen(bladePos.x, bladePos.y);
 
-            // 繪製輪鋸主體（金色圓形）
-            this.sawBladeGraphics.fillStyle(0xffdd00, 0.6);
-            this.sawBladeGraphics.fillCircle(screen.x, screen.y, radius);
+            // 外層
+            outer.setPosition(screen.x, screen.y);
+            outer.setVisible(true);
+            const outerScale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+            outer.setScale(outerScale);
+            outer.setRotation(this.sawBladeSpinAngle);
 
-            // 繪製輪鋸邊緣（白色）
-            this.sawBladeGraphics.lineStyle(3, 0xffffff, 0.8);
-            this.sawBladeGraphics.strokeCircle(screen.x, screen.y, radius);
-
-            // 繪製鋸齒（8 個尖刺）- 使用自轉角度
-            const teethCount = 8;
-            const teethLength = radius * 0.3;
-            this.sawBladeGraphics.fillStyle(0xffee66, 0.8);
-
-            for (let i = 0; i < teethCount; i++) {
-                // 使用自轉角度，讓鋸齒高速旋轉
-                const angle = this.sawBladeSpinAngle + (i / teethCount) * Math.PI * 2;
-
-                // 繪製三角形鋸齒
-                const sideAngle = Math.PI / teethCount;
-                const leftX = screen.x + Math.cos(angle - sideAngle * 0.5) * radius;
-                const leftY = screen.y + Math.sin(angle - sideAngle * 0.5) * radius;
-                const rightX = screen.x + Math.cos(angle + sideAngle * 0.5) * radius;
-                const rightY = screen.y + Math.sin(angle + sideAngle * 0.5) * radius;
-                const outerX = screen.x + Math.cos(angle) * (radius + teethLength);
-                const outerY = screen.y + Math.sin(angle) * (radius + teethLength);
-
-                this.sawBladeGraphics.fillTriangle(leftX, leftY, outerX, outerY, rightX, rightY);
-            }
-
-            // 繪製中心圓（暗金色）
-            this.sawBladeGraphics.fillStyle(0xaa8800, 0.8);
-            this.sawBladeGraphics.fillCircle(screen.x, screen.y, radius * 0.3);
-            this.sawBladeGraphics.lineStyle(2, 0xffdd00, 1);
-            this.sawBladeGraphics.strokeCircle(screen.x, screen.y, radius * 0.3);
+            // 內層（1/2 大小，逆轉）
+            inner.setPosition(screen.x, screen.y);
+            inner.setVisible(true);
+            inner.setScale(outerScale * 0.5);
+            inner.setRotation(-this.sawBladeSpinAngle * 1.5); // 反方向且稍快
         }
     }
 
@@ -5334,11 +5329,20 @@ export default class MainScene extends Phaser.Scene {
         this.currentSawBladePositions = [];
     }
 
-    // 發射單個飛出的輪鋸（螺旋狀：一邊繞角色旋轉一邊向外飛）
+    // 發射單個飛出的輪鋸（螺旋狀：一邊繞角色旋轉一邊向外飛，雙層八角設計）
     private launchSingleSawBlade(radius: number, baseDamage: number, startOrbitAngle: number) {
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(100);
+        // 建立雙層 sprite
+        const outer = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+        this.skillGridContainer.add(outer);
+        outer.setDepth(100);
+        outer.setTint(0xffdd00);
+        outer.setAlpha(0.7);
+
+        const inner = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+        this.skillGridContainer.add(inner);
+        inner.setDepth(101);
+        inner.setTint(0xffee66);
+        inner.setAlpha(0.8);
 
         // 起始軌道半徑（從角色到輪鋸的距離）
         const startOrbitRadius = this.gameBounds.height * 0.2; // 2 單位
@@ -5356,43 +5360,24 @@ export default class MainScene extends Phaser.Scene {
             progress: 0
         };
 
-        // 繪製函數
-        const drawBlade = () => {
+        const outerScale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+
+        // 更新 sprite 位置函數
+        const updateBlade = () => {
             // 根據軌道半徑和角度計算世界座標
             const worldX = this.characterX + Math.cos(state.orbitAngle) * state.orbitRadius;
             const worldY = this.characterY + Math.sin(state.orbitAngle) * state.orbitRadius;
             const screen = this.worldToScreen(worldX, worldY);
-            graphics.clear();
 
-            // 輪鋸主體（60% 透明度）
-            graphics.fillStyle(0xffdd00, 0.6);
-            graphics.fillCircle(screen.x, screen.y, radius);
+            // 外層
+            outer.setPosition(screen.x, screen.y);
+            outer.setScale(outerScale);
+            outer.setRotation(state.spinAngle);
 
-            // 邊緣
-            graphics.lineStyle(3, 0xffffff, 0.6);
-            graphics.strokeCircle(screen.x, screen.y, radius);
-
-            // 鋸齒
-            const teethCount = 8;
-            const teethLength = radius * 0.3;
-            graphics.fillStyle(0xffee66, 0.6);
-
-            for (let i = 0; i < teethCount; i++) {
-                const angle = state.spinAngle + (i / teethCount) * Math.PI * 2;
-                const sideAngle = Math.PI / teethCount;
-                const leftX = screen.x + Math.cos(angle - sideAngle * 0.5) * radius;
-                const leftY = screen.y + Math.sin(angle - sideAngle * 0.5) * radius;
-                const rightX = screen.x + Math.cos(angle + sideAngle * 0.5) * radius;
-                const rightY = screen.y + Math.sin(angle + sideAngle * 0.5) * radius;
-                const outerX = screen.x + Math.cos(angle) * (radius + teethLength);
-                const outerY = screen.y + Math.sin(angle) * (radius + teethLength);
-
-                graphics.fillTriangle(leftX, leftY, outerX, outerY, rightX, rightY);
-            }
-
-            // 中心
-            graphics.fillStyle(0xaa8800, 0.6);
-            graphics.fillCircle(screen.x, screen.y, radius * 0.3);
+            // 內層（1/2 大小，逆轉且稍快）
+            inner.setPosition(screen.x, screen.y);
+            inner.setScale(outerScale * 0.5);
+            inner.setRotation(-state.spinAngle * 1.5);
 
             return { worldX, worldY };
         };
@@ -5417,8 +5402,8 @@ export default class MainScene extends Phaser.Scene {
                 state.spinAngle += 0.3;
                 if (state.spinAngle > Math.PI * 2) state.spinAngle -= Math.PI * 2;
 
-                // 繪製並取得當前位置
-                const { worldX, worldY } = drawBlade();
+                // 更新並取得當前位置
+                const { worldX, worldY } = updateBlade();
 
                 // 碰撞檢測
                 const monsters = this.monsterManager.getMonsters();
@@ -5437,6 +5422,9 @@ export default class MainScene extends Phaser.Scene {
                         const result = this.monsterManager.damageMonsters([monster.id], finalDamage);
                         if (result.totalExp > 0) this.addExp(result.totalExp);
 
+                        // 擊退
+                        this.monsterManager.knockbackMonsters([monster.id], this.characterX, this.characterY, 1);
+
                         // 命中特效
                         if (isCrit) {
                             this.flashCritCrossAtPositions([{ x: monster.x, y: monster.y }]);
@@ -5447,19 +5435,21 @@ export default class MainScene extends Phaser.Scene {
                 }
             },
             onComplete: () => {
-                graphics.destroy();
+                outer.destroy();
+                inner.destroy();
             }
         });
 
-        drawBlade();
+        updateBlade();
     }
 
     // 每幀更新輪鋸自轉視覺效果（讓旋轉流暢）
     private updateSawBladeSpinVisual(delta: number) {
         // 沒有護盾時不顯示輪鋸
         if (this.currentShield <= 0) {
-            if (this.sawBladeGraphics) {
-                this.sawBladeGraphics.clear();
+            for (const blade of this.sawBladeSprites) {
+                blade.outer.setVisible(false);
+                blade.inner.setVisible(false);
             }
             return;
         }
@@ -5493,9 +5483,10 @@ export default class MainScene extends Phaser.Scene {
 
     // 清除進階技能的視覺效果（切換技能時呼叫）
     private clearAdvancedSkillEffects() {
-        // 清除輪鋸圖形（絕對邏輯防禦）
-        if (this.sawBladeGraphics) {
-            this.sawBladeGraphics.clear();
+        // 隱藏輪鋸（絕對邏輯防禦，雙層）
+        for (const blade of this.sawBladeSprites) {
+            blade.outer.setVisible(false);
+            blade.inner.setVisible(false);
         }
         // 重設輪鋸擊中記錄
         this.sawBladeLastHitTime.clear();
@@ -5912,11 +5903,12 @@ export default class MainScene extends Phaser.Scene {
         if (this.zeroTrustActive) return;
         this.zeroTrustActive = true;
 
-        // 建立主圖形（8 角矩陣底圖）
-        if (!this.zeroTrustGraphics) {
-            this.zeroTrustGraphics = this.add.graphics();
-            this.skillGridContainer.add(this.zeroTrustGraphics);
-            this.zeroTrustGraphics.setDepth(49);
+        // 建立八角矩陣護盾圖
+        if (!this.zeroTrustSprite) {
+            this.zeroTrustSprite = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+            this.skillGridContainer.add(this.zeroTrustSprite);
+            this.zeroTrustSprite.setDepth(49);
+            this.zeroTrustSprite.setAlpha(0.3);
         }
     }
 
@@ -5933,30 +5925,16 @@ export default class MainScene extends Phaser.Scene {
         const now = this.time.now;
         const beamColor = 0xffcc00; // 金黃色
 
-        // 繪製 8 角矩陣底圖
+        // 更新八角矩陣護盾圖位置、大小與旋轉
         const screen = this.worldToScreen(this.characterX, this.characterY);
-        if (this.zeroTrustGraphics) {
-            this.zeroTrustGraphics.clear();
-            this.zeroTrustGraphics.lineStyle(2, beamColor, 0.3);
-
-            const points: { x: number; y: number }[] = [];
-            for (let i = 0; i < 8; i++) {
-                const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
-                points.push({
-                    x: screen.x + Math.cos(angle) * radiusPx,
-                    y: screen.y + Math.sin(angle) * radiusPx
-                });
-            }
-
-            this.zeroTrustGraphics.beginPath();
-            this.zeroTrustGraphics.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < 8; i++) {
-                this.zeroTrustGraphics.lineTo(points[i].x, points[i].y);
-            }
-            this.zeroTrustGraphics.closePath();
-            this.zeroTrustGraphics.strokePath();
-            this.zeroTrustGraphics.fillStyle(beamColor, 0.1);
-            this.zeroTrustGraphics.fillPoints(points, true);
+        if (this.zeroTrustSprite) {
+            this.zeroTrustSprite.setPosition(screen.x, screen.y);
+            const scale = (radiusPx * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+            this.zeroTrustSprite.setScale(scale);
+            this.zeroTrustSprite.setTint(beamColor);
+            this.zeroTrustSprite.setAlpha(0.3);
+            // 慢慢旋轉（每秒約 18 度）
+            this.zeroTrustSprite.rotation += 0.005;
         }
 
         // 傷害計算
@@ -6088,57 +6066,58 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 零信任防禦協定：命中 8 角形擴散效果
+    // 零信任防禦協定：命中 8 角形擴散效果（雙層逆轉設計）
     private showZeroTrustHitEffect(worldX: number, worldY: number, isCrit: boolean) {
         const screen = this.worldToScreen(worldX, worldY);
         const unitSize = this.gameBounds.height / 10;
 
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(59);
-
         const color = isCrit ? 0xff6600 : 0xffcc00;
-        const maxSize = unitSize * 1; // 1 單位大小
-        let progress = 0;
+        const maxSize = unitSize * 3; // 3 單位大小（3倍）
+        const targetScale = (maxSize * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+        const rotations = Math.PI * 4; // 兩圈
+        const duration = 300;
 
-        const updateEffect = () => {
-            progress += 0.12;
-            if (progress > 1) {
-                graphics.destroy();
-                return;
+        // 外層
+        const outer = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
+        this.skillGridContainer.add(outer);
+        outer.setDepth(59);
+        outer.setTint(color);
+        outer.setScale(0.1);
+        outer.setAlpha(0.8);
+
+        // 內層
+        const inner = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
+        this.skillGridContainer.add(inner);
+        inner.setDepth(60);
+        inner.setTint(0xffffff);
+        inner.setScale(0.05);
+        inner.setAlpha(0.9);
+
+        // 外層動畫：擴散 + 順時針旋轉 + 淡出
+        this.tweens.add({
+            targets: outer,
+            scale: targetScale,
+            rotation: rotations,
+            alpha: 0,
+            duration: duration,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                outer.destroy();
             }
+        });
 
-            const size = maxSize * progress;
-            const alpha = 0.8 * (1 - progress);
-
-            graphics.clear();
-
-            // 繪製 8 角形
-            const points: { x: number; y: number }[] = [];
-            for (let i = 0; i < 8; i++) {
-                const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
-                points.push({
-                    x: screen.x + Math.cos(angle) * size,
-                    y: screen.y + Math.sin(angle) * size
-                });
+        // 內層動畫：擴散 + 逆時針旋轉 + 淡出
+        this.tweens.add({
+            targets: inner,
+            scale: targetScale * 0.5,
+            rotation: -rotations * 1.5,
+            alpha: 0,
+            duration: duration,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                inner.destroy();
             }
-
-            // 邊框
-            graphics.lineStyle(2, color, alpha);
-            graphics.beginPath();
-            graphics.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < 8; i++) {
-                graphics.lineTo(points[i].x, points[i].y);
-            }
-            graphics.closePath();
-            graphics.strokePath();
-
-            // 填充
-            graphics.fillStyle(color, alpha * 0.3);
-            graphics.fillPoints(points, true);
-        };
-
-        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16, repeat: 9 });
+        });
     }
 
     // 零信任防禦協定：停用並清理
@@ -6152,10 +6131,10 @@ export default class MainScene extends Phaser.Scene {
         this.zeroTrustBeams = [];
         this.zeroTrustTrackedMonsters.clear();
 
-        // 清理主圖形
-        if (this.zeroTrustGraphics) {
-            this.zeroTrustGraphics.destroy();
-            this.zeroTrustGraphics = undefined;
+        // 清理八角矩陣護盾圖
+        if (this.zeroTrustSprite) {
+            this.zeroTrustSprite.destroy();
+            this.zeroTrustSprite = undefined;
         }
     }
 
@@ -6450,13 +6429,11 @@ export default class MainScene extends Phaser.Scene {
 
     // 幻影迭代模式：召喚影分身（可同時存在多個）
     private executePhantomIteration(skillLevel: number) {
-        // 可施放的進階技能（不包含自己、零信任防禦協定、次元向量疾劃）
+        // 可施放的進階技能（不包含自己、零信任、次元斬、完美像素、絕對邏輯、爆發特效）
+        // 彈射射線改為獨立計時器，每 0.5 秒自動觸發
         const availableSkillIds = [
             'advanced_burning_celluloid',
-            'advanced_tech_artist',
-            'advanced_perfect_pixel',
-            'advanced_vfx_burst',
-            'advanced_absolute_logic'  // 輪鋸（模擬能量盾）
+            'advanced_tech_artist'
         ];
 
         const unitSize = this.gameBounds.height / 10;
@@ -6481,10 +6458,10 @@ export default class MainScene extends Phaser.Scene {
 
         // 持續時間 = 技能等級/5 + 10 秒
         const totalDuration = (Math.floor(skillLevel / 5) + 10) * 1000;
-        const skillInterval = 500; // 每 0.5 秒施放一次
+        const skillInterval = 1000; // 每 1 秒施放一次（移動頻率降半）
         const repeatCount = Math.max(0, Math.floor(totalDuration / skillInterval) - 1);
 
-        // 每 0.5 秒施放一個隨機進階技能
+        // 每 1 秒施放一個隨機進階技能
         const skillTimer = this.time.addEvent({
             delay: skillInterval,
             repeat: repeatCount,
@@ -6496,7 +6473,7 @@ export default class MainScene extends Phaser.Scene {
                 const randomSkillId = availableSkillIds[Math.floor(Math.random() * availableSkillIds.length)];
                 this.executePhantomSkillAt(randomSkillId, skillLevel, phantom.x, phantom.y, phantomId);
 
-                // 施放後設定新的移動目標（玩家附近 3 單位內）
+                // 施放後設定新的移動目標（玩家附近 1~5 單位內）
                 this.setPhantomMoveTargetFor(phantom);
             }
         });
@@ -6504,6 +6481,49 @@ export default class MainScene extends Phaser.Scene {
         // 持續時間後分身消失
         const dismissTimer = this.time.delayedCall(totalDuration, () => {
             this.dismissPhantomById(phantomId);
+        });
+
+        // 嘲諷機制：每 5 秒啟動嘲諷，持續 2 秒
+        const tauntCycle = 5000; // 5 秒週期
+        const tauntDuration = 2000; // 嘲諷持續 2 秒
+        const tauntTimer = this.time.addEvent({
+            delay: tauntCycle,
+            repeat: Math.floor(totalDuration / tauntCycle),
+            callback: () => {
+                const phantom = this.phantoms.find(p => p.id === phantomId);
+                if (!phantom) return;
+
+                // 啟動嘲諷（吸引怪物到分身位置）
+                this.monsterManager.setTauntTarget(phantom.x, phantom.y, true);
+
+                // 2 秒後關閉嘲諷
+                this.time.delayedCall(tauntDuration, () => {
+                    // 只有當這個分身還存在時才清除嘲諷
+                    const stillExists = this.phantoms.find(p => p.id === phantomId);
+                    if (stillExists) {
+                        this.monsterManager.clearTauntTarget();
+                    }
+                });
+            }
+        });
+
+        // 彈射射線計時器：每 0.5 秒觸發一次
+        const chainRayInterval = 500;
+        const chainRayTimer = this.time.addEvent({
+            delay: chainRayInterval,
+            repeat: Math.floor(totalDuration / chainRayInterval),
+            callback: () => {
+                const p = this.phantoms.find(ph => ph.id === phantomId);
+                if (!p) return;
+
+                // 計算傷害
+                const equipped = this.skillManager.getEquippedAdvancedSkill();
+                const level = equipped ? equipped.level : skillLevel;
+                const damageUnits = this.currentLevel + level;
+                const damage = MainScene.DAMAGE_UNIT * damageUnits;
+
+                this.phantomCastChainRay(damage, p.x, p.y);
+            }
         });
 
         // 加入幻影列表
@@ -6517,12 +6537,11 @@ export default class MainScene extends Phaser.Scene {
             sprite: sprite,
             skillTimer: skillTimer,
             dismissTimer: dismissTimer,
+            tauntTimer: tauntTimer,
+            chainRayTimer: chainRayTimer,
             lastAfterimageTime: 0
         };
         this.phantoms.push(phantom);
-
-        // 更新嘲諷目標（使用第一個幻影的位置）
-        this.updatePhantomTauntTarget();
 
         // 分身出現特效
         this.showPhantomSpawnEffectAt(startX, startY);
@@ -6532,7 +6551,7 @@ export default class MainScene extends Phaser.Scene {
     private setPhantomMoveTargetFor(phantom: typeof this.phantoms[0]) {
         const unitSize = this.gameBounds.height / 10;
         const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 3 * unitSize; // 0~3 單位內
+        const distance = (1 + Math.random() * 4) * unitSize; // 1~5 單位內（更大範圍）
 
         phantom.targetX = this.characterX + Math.cos(angle) * distance;
         phantom.targetY = this.characterY + Math.sin(angle) * distance;
@@ -6541,16 +6560,6 @@ export default class MainScene extends Phaser.Scene {
         // 播放跑步動畫
         if (phantom.sprite && phantom.sprite.anims) {
             phantom.sprite.play('char_run', true);
-        }
-    }
-
-    // 更新嘲諷目標（使用第一個幻影）
-    private updatePhantomTauntTarget() {
-        if (this.phantoms.length > 0) {
-            const first = this.phantoms[0];
-            this.monsterManager.setTauntTarget(first.x, first.y, true);
-        } else {
-            this.monsterManager.clearTauntTarget();
         }
     }
 
@@ -6581,6 +6590,9 @@ export default class MainScene extends Phaser.Scene {
                 break;
             case 'advanced_absolute_logic':
                 this.phantomCastAbsoluteLogicAt(baseDamage, phantomId);
+                break;
+            case 'phantom_chain_ray':
+                this.phantomCastChainRay(baseDamage, phantomX, phantomY);
                 break;
         }
     }
@@ -7134,6 +7146,176 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
+    // 分身專屬：彈射射線（在本尊與所有分身之間來回彈射）
+    private phantomCastChainRay(baseDamage: number, phantomX: number, phantomY: number) {
+        // 收集所有彈射點：本尊 + 所有分身
+        const points: { x: number; y: number }[] = [];
+
+        // 加入本尊位置
+        points.push({ x: this.characterX, y: this.characterY });
+
+        // 加入所有分身位置
+        for (const phantom of this.phantoms) {
+            points.push({ x: phantom.x, y: phantom.y });
+        }
+
+        // 至少需要 2 個點才能形成射線
+        if (points.length < 2) return;
+
+        // 從施放者位置開始，找到施放者在 points 中的索引
+        let startIndex = 0;
+        let minDist = Infinity;
+        for (let i = 0; i < points.length; i++) {
+            const dx = points[i].x - phantomX;
+            const dy = points[i].y - phantomY;
+            const dist = dx * dx + dy * dy;
+            if (dist < minDist) {
+                minDist = dist;
+                startIndex = i;
+            }
+        }
+
+        // 建立彈射順序：從施放者開始，依序連接所有點，最後回到起點
+        const chainOrder: number[] = [startIndex];
+        const visited = new Set<number>([startIndex]);
+
+        // 依距離順序連接剩餘的點
+        while (chainOrder.length < points.length) {
+            const lastIdx = chainOrder[chainOrder.length - 1];
+            const lastPoint = points[lastIdx];
+
+            let nearestIdx = -1;
+            let nearestDist = Infinity;
+
+            for (let i = 0; i < points.length; i++) {
+                if (visited.has(i)) continue;
+                const dx = points[i].x - lastPoint.x;
+                const dy = points[i].y - lastPoint.y;
+                const dist = dx * dx + dy * dy;
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearestIdx = i;
+                }
+            }
+
+            if (nearestIdx !== -1) {
+                chainOrder.push(nearestIdx);
+                visited.add(nearestIdx);
+            }
+        }
+
+        // 回到起點形成閉環
+        chainOrder.push(startIndex);
+
+        // 收集所有怪物
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsterIds = new Set<number>();
+
+        // 繪製射線並檢測碰撞
+        const graphics = this.add.graphics();
+        this.skillGridContainer.add(graphics);
+
+        // 射線寬度（用於碰撞檢測）
+        const rayWidth = this.gameBounds.height * 0.02; // 0.2 單位寬
+
+        // 依序繪製每段射線
+        for (let i = 0; i < chainOrder.length - 1; i++) {
+            const p1 = points[chainOrder[i]];
+            const p2 = points[chainOrder[i + 1]];
+
+            const screen1 = this.worldToScreen(p1.x, p1.y);
+            const screen2 = this.worldToScreen(p2.x, p2.y);
+
+            // 繪製紫色射線
+            graphics.lineStyle(4, 0xbb66ff, 0.9);
+            graphics.beginPath();
+            graphics.moveTo(screen1.x, screen1.y);
+            graphics.lineTo(screen2.x, screen2.y);
+            graphics.strokePath();
+
+            // 繪製內部亮線
+            graphics.lineStyle(2, 0xeeccff, 1);
+            graphics.beginPath();
+            graphics.moveTo(screen1.x, screen1.y);
+            graphics.lineTo(screen2.x, screen2.y);
+            graphics.strokePath();
+
+            // 檢測這段射線經過的怪物
+            for (const monster of monsters) {
+                if (hitMonsterIds.has(monster.id)) continue;
+
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+                // 計算怪物到線段的距離
+                const dist = this.pointToSegmentDistance(
+                    monster.x, monster.y,
+                    p1.x, p1.y,
+                    p2.x, p2.y
+                );
+
+                if (dist <= monsterRadius + rayWidth) {
+                    hitMonsterIds.add(monster.id);
+                }
+            }
+        }
+
+        // 在每個節點繪製光點
+        for (let i = 0; i < points.length; i++) {
+            const screen = this.worldToScreen(points[i].x, points[i].y);
+            graphics.fillStyle(0xeeccff, 1);
+            graphics.fillCircle(screen.x, screen.y, 8);
+            graphics.fillStyle(0xffffff, 0.8);
+            graphics.fillCircle(screen.x, screen.y, 4);
+        }
+
+        // 對命中的怪物造成傷害
+        if (hitMonsterIds.size > 0) {
+            const monsterIdArray = Array.from(hitMonsterIds);
+            const hitPositions = monsters
+                .filter(m => hitMonsterIds.has(m.id))
+                .map(m => ({ x: m.x, y: m.y }));
+
+            const result = this.monsterManager.damageMonsters(monsterIdArray, baseDamage);
+            if (result.totalExp > 0) {
+                this.addExp(result.totalExp);
+            }
+
+            this.flashWhiteCrossAtPositions(hitPositions);
+            this.shakeScreen(Math.min(hitMonsterIds.size, 3));
+        }
+
+        // 射線淡出動畫
+        this.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => graphics.destroy()
+        });
+    }
+
+    // 計算點到線段的最短距離
+    private pointToSegmentDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lengthSquared = dx * dx + dy * dy;
+
+        if (lengthSquared === 0) {
+            // 線段長度為 0，直接計算點到點距離
+            return Math.sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1));
+        }
+
+        // 計算投影比例 t
+        let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+        t = Math.max(0, Math.min(1, t));
+
+        // 計算投影點
+        const projX = x1 + t * dx;
+        const projY = y1 + t * dy;
+
+        // 返回點到投影點的距離
+        return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
+    }
+
     // 分身出現特效（指定座標）
     private showPhantomSpawnEffectAt(phantomX: number, phantomY: number) {
         const screen = this.worldToScreen(phantomX, phantomY);
@@ -7190,6 +7372,11 @@ export default class MainScene extends Phaser.Scene {
         // 停止計時器
         phantom.skillTimer.destroy();
         phantom.dismissTimer.destroy();
+        phantom.tauntTimer.destroy();
+        phantom.chainRayTimer.destroy();
+
+        // 清除嘲諷目標
+        this.monsterManager.clearTauntTarget();
 
         // 消失特效
         const screen = this.worldToScreen(phantom.x, phantom.y);
@@ -7213,9 +7400,6 @@ export default class MainScene extends Phaser.Scene {
 
         // 從列表移除
         this.phantoms.splice(index, 1);
-
-        // 更新嘲諷目標
-        this.updatePhantomTauntTarget();
     }
 
     // 創建殘影效果
@@ -7315,12 +7499,7 @@ export default class MainScene extends Phaser.Scene {
             // 同步縮放
             phantom.sprite.setScale(this.character.scaleX, this.character.scaleY);
         }
-
-        // 更新嘲諷目標（使用第一個幻影）
-        if (this.phantoms.length > 0) {
-            const first = this.phantoms[0];
-            this.monsterManager.setTauntTarget(first.x, first.y, true);
-        }
+        // 嘲諷由各分身的 tauntTimer 週期性控制（每 5 秒啟動 2 秒）
     }
 
     // 取得分身位置（供怪物 AI 使用）- 返回第一個幻影位置
@@ -7556,8 +7735,9 @@ export default class MainScene extends Phaser.Scene {
 
             infoLines.push(`持續時間: ${duration} 秒 (Sk${level}/5+10)`);
             infoLines.push(`冷卻: ${finalCd}s`);
-            infoLines.push(`分身行為: 每0.5秒施放隨機進階技能`);
-            infoLines.push(`嘲諷: 怪物優先攻擊分身`);
+            infoLines.push(`分身行為: 每0.5秒施放隨機技能`);
+            infoLines.push(`可用技: 賽璐珞/美術/特效/彈射`);
+            infoLines.push(`嘲諷: 每5秒吸引怪物2秒`);
             if (canOverlap) {
                 infoLines.push(`狀態: 可多分身重疊！`);
             } else {
@@ -8710,6 +8890,14 @@ export default class MainScene extends Phaser.Scene {
         // 更新進階技能欄位顯示
         this.updateAdvancedSkillDisplay();
 
+        // 立即觸發一次技能（冷卻設為過去時間）
+        this.advancedSkillCooldownTime = 0;
+        if (equipped) {
+            this.activateAdvancedSkill(equipped);
+            // 設定冷卻開始時間為現在
+            this.advancedSkillCooldownTime = this.time.now;
+        }
+
         // 選中動畫
         const selectedOption = this.skillOptions[index];
         this.tweens.add({
@@ -9296,6 +9484,14 @@ export default class MainScene extends Phaser.Scene {
                 // 更新進階技能欄位顯示
                 this.updateAdvancedSkillDisplay();
 
+                // 立即觸發一次技能
+                this.advancedSkillCooldownTime = 0;
+                const equipped = this.skillManager.getEquippedAdvancedSkill();
+                if (equipped) {
+                    this.activateAdvancedSkill(equipped);
+                    this.advancedSkillCooldownTime = this.time.now;
+                }
+
                 // 顯示 CUT IN
                 this.showAdvancedSkillCutIn(advSkillDef, newLevel);
 
@@ -9857,6 +10053,73 @@ export default class MainScene extends Phaser.Scene {
         };
 
         updateEffect();
+    }
+
+    // 護盾特效（雙層逆轉設計）- 靈魂統領及相關組合技專用
+    private flashShieldEffect(
+        centerX: number, centerY: number,
+        radius: number,
+        color: number
+    ) {
+        // 外層
+        const outer = this.getSkillEffectSprite();
+        if (!outer) return;
+
+        // 內層
+        const inner = this.getSkillEffectSprite();
+        if (!inner) {
+            this.releaseSkillEffectSprite(outer);
+            return;
+        }
+
+        const scale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+        const targetScale = scale;
+        const rotations = Math.PI * 4; // 兩圈
+        const duration = 500; // 總動畫時間
+
+        // 設定外層
+        outer.setTexture(MainScene.TEXTURE_SHIELD);
+        outer.setPosition(centerX, centerY);
+        outer.setScale(scale * 0.1);
+        outer.setTint(color);
+        outer.setAlpha(0);
+        outer.setRotation(0);
+        outer.setDepth(200);
+
+        // 設定內層（1/2 大小，較亮顏色）
+        inner.setTexture(MainScene.TEXTURE_SHIELD);
+        inner.setPosition(centerX, centerY);
+        inner.setScale(scale * 0.05);
+        inner.setTint(0xffffff); // 白色高光
+        inner.setAlpha(0);
+        inner.setRotation(0);
+        inner.setDepth(201);
+
+        // 外層動畫：展開 + 順時針旋轉兩圈 + 淡出
+        this.tweens.add({
+            targets: outer,
+            alpha: { from: 0, to: 0.8 },
+            scale: { from: scale * 0.1, to: targetScale * 1.2 },
+            rotation: rotations, // 順時針兩圈
+            duration: duration,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                this.releaseSkillEffectSprite(outer);
+            }
+        });
+
+        // 內層動畫：展開 + 逆時針旋轉兩圈 + 淡出
+        this.tweens.add({
+            targets: inner,
+            alpha: { from: 0, to: 0.9 },
+            scale: { from: scale * 0.05, to: targetScale * 0.6 },
+            rotation: -rotations * 1.5, // 逆時針，稍快
+            duration: duration,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                this.releaseSkillEffectSprite(inner);
+            }
+        });
     }
 
     // 直線特效（使用物件池）

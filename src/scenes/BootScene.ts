@@ -18,6 +18,9 @@ export default class BootScene extends Phaser.Scene {
 
         // 載入衝擊波紋理（靈魂渲染穿透用）
         this.load.image('effect_soulwave', 'effects/soulwave.png');
+
+        // 載入護盾紋理（靈魂統領及相關組合技用）
+        this.load.image('effect_shield', 'effects/shield.png');
     }
 
     create() {

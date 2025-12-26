@@ -83,7 +83,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_absolute_defense',
         name: '絕對邏輯防禦',
         subtitle: '無懈可擊的系統架構',
-        description: '【靈魂統領＋同步率】\n有護盾時輪鋸繞身，滿盾6個，撞敵耗盾',
+        description: '【靈魂統領＋同步率】\n有護盾時輪鋸繞身，滿盾6個，撞敵耗盾並擊退',
         color: 0xffdd00,  // 金黃色（防禦感）
         flashColor: 0xffee66,
         cooldown: 100,  // 0.1 秒（持續效果，高頻更新）
@@ -122,7 +122,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_phantom_iteration',
         name: '幻影迭代模式',
         subtitle: '無限分身的創作者',
-        description: '【咒言幻象＋AI強化】\n召喚影分身，吸引砲火並施放特殊技',
+        description: '【咒言幻象＋AI強化】\n召喚影分身施放特殊技，每5秒嘲諷怪物2秒',
         color: 0x9966ff,  // 紫藍色（幻影感）
         flashColor: 0xbb88ff,
         cooldown: 20000,  // 20 秒
