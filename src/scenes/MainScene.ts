@@ -177,7 +177,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 護盾系統
     private currentShield: number = 0;
-    private maxShield: number = 0; // 護盾最大值（用於計算回血）
+    private maxShield: number = 0; // 護盾最大值（用於計算護盾比例）
     private shieldBarFlowOffset: number = 0; // 護盾流動效果偏移
     private shieldReflectDamage: number = 0; // 護盾反傷傷害值
     private shieldText!: Phaser.GameObjects.Text;
@@ -1895,14 +1895,14 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 架構師：產生護盾，護盾吸收傷害並反傷給攻擊者
+    // 架構師：產生護盾，護盾吸收傷害並反傷（含擊退）給攻擊者
     // 反傷傷害：1 單位 + 每級 1.5 單位（Lv.0=1單位，Lv.5=8.5單位）
-    // 護盾消失時恢復等值 HP
-    // MAX 額外能力：堅守 - 護盾覆蓋時有機率炸開並回血
+    // MAX 額外能力：堅守 - 護盾覆蓋時 100% 炸開並擊退敵人
     private activateArchitect(skill: PlayerSkill) {
-        // MAX 後額外能力：堅守 - 護盾覆蓋時炸開並回血
+        // MAX 後額外能力：堅守 - 護盾覆蓋時 100% 炸開並擊退
+        // 只要技能達到 MAX（explosionChance > 0），就 100% 觸發
         const explosionChance = this.skillManager.getArchitectExplosionChance(this.currentLevel);
-        if (explosionChance > 0 && this.currentShield > 0 && Math.random() < explosionChance) {
+        if (explosionChance > 0 && this.currentShield > 0) {
             this.triggerShieldExplosion(skill);
         }
 
@@ -1916,7 +1916,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 設定護盾值（不疊加，直接設定）
         this.currentShield = shieldAmount;
-        this.maxShield = shieldAmount; // 記錄護盾最大值用於回血計算
+        this.maxShield = shieldAmount; // 記錄護盾最大值用於護盾比例計算
 
         // 反傷傷害：1 單位 + 每級 1.5 單位（Lv.0=1單位，Lv.5=8.5單位）
         const reflectUnits = 1 + skill.level * 1.5;
@@ -1936,7 +1936,7 @@ export default class MainScene extends Phaser.Scene {
 
     }
 
-    // 護盾堅守效果：向外 3 單位圓形攻擊 + 觸發回血
+    // 護盾堅守效果：向外 3 單位圓形攻擊 + 擊退
     private triggerShieldExplosion(skill: PlayerSkill) {
         const unitSize = this.gameBounds.height * 0.1;
         const explosionRadius = unitSize * 3; // 3 單位範圍
@@ -1945,20 +1945,6 @@ export default class MainScene extends Phaser.Scene {
 
         // 傷害：使用當前護盾反傷值
         const damage = this.shieldReflectDamage;
-
-        // 觸發護盾消耗時的回血效果（與護盾被打破相同）
-        if (this.maxShield > 0) {
-            const healAmount = this.maxShield;
-            this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
-
-            // 更新 HP 顯示
-            this.drawHpBarFill();
-            this.updateHpText();
-            this.updateLowHpVignette();
-
-            // 顯示 HP 回復特效
-            this.showHpHealEffect(healAmount);
-        }
 
         // 繪製圓形邊緣線
         this.drawCircleEdge(explosionRadius, color);
@@ -1985,7 +1971,7 @@ export default class MainScene extends Phaser.Scene {
             }
         }
 
-        // 對命中的怪物造成傷害
+        // 對命中的怪物造成傷害並擊退
         if (hitMonsters.length > 0) {
             const hitPositions = monsters
                 .filter(m => hitMonsters.includes(m.id))
@@ -1995,6 +1981,10 @@ export default class MainScene extends Phaser.Scene {
             if (result.totalExp > 0) {
                 this.addExp(result.totalExp);
             }
+
+            // 擊退命中的怪物 1 單位距離
+            const knockbackDistance = this.gameBounds.height * 0.1; // 1 單位
+            this.monsterManager.knockbackMonsters(hitMonsters, this.characterX, this.characterY, knockbackDistance);
 
             this.flashWhiteCrossAtPositions(hitPositions);
             this.shakeScreen(hitMonsters.length);
@@ -3319,20 +3309,6 @@ export default class MainScene extends Phaser.Scene {
                 this.currentShield = 0;
             }
 
-            // 護盾剛被打破時，恢復護盾最大值等值的 HP
-            if (hadShield && this.currentShield === 0 && this.maxShield > 0) {
-                const healAmount = this.maxShield;
-                this.currentHp = Math.min(this.currentHp + healAmount, this.maxHp);
-
-                // 更新 HP 顯示
-                this.drawHpBarFill();
-                this.updateHpText();
-                this.updateLowHpVignette();
-
-                // 顯示 HP 回復特效
-                this.showHpHealEffect(healAmount);
-            }
-
             // 更新護盾條顯示
             this.drawShieldBarFill();
 
@@ -3351,6 +3327,10 @@ export default class MainScene extends Phaser.Scene {
                 if (reflectResult.totalExp > 0) {
                     this.addExp(reflectResult.totalExp);
                 }
+
+                // 擊退攻擊者 1 單位距離
+                const knockbackDistance = this.gameBounds.height * 0.1; // 1 單位
+                this.monsterManager.knockbackMonsters(monsterIds, this.characterX, this.characterY, knockbackDistance);
             }
         }
 
@@ -3725,12 +3705,9 @@ export default class MainScene extends Phaser.Scene {
                 .map(m => ({ x: m.x, y: m.y }));
 
             // 秒殺傷害（使用極大值）
+            // 注意：不死觸發時角色處於死亡狀態，暗影爆炸擊殺的敵人不給經驗
             const instantKillDamage = 999999;
-            const result = this.monsterManager.damageMonsters(hitMonsterIds, instantKillDamage);
-
-            if (result.totalExp > 0) {
-                this.addExp(result.totalExp);
-            }
+            this.monsterManager.damageMonsters(hitMonsterIds, instantKillDamage);
 
             // 顯示暗影打擊特效
             this.flashShadowCrossAtPositions(hitPositions);

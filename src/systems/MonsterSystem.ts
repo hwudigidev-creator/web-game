@@ -1003,6 +1003,35 @@ export class MonsterManager {
         }
     }
 
+    // 擊退怪物（從指定點推開指定距離）
+    knockbackMonsters(monsterIds: number[], fromX: number, fromY: number, distance: number) {
+        for (const id of monsterIds) {
+            const monster = this.monsters.find(m => m.id === id);
+            if (monster) {
+                // 計算擊退方向（從 from 點指向怪物）
+                const dx = monster.x - fromX;
+                const dy = monster.y - fromY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > 0) {
+                    // 單位向量
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    // 擊退後的新位置
+                    monster.x += nx * distance;
+                    monster.y += ny * distance;
+
+                    // 確保不超出地圖邊界
+                    const halfWidth = this.mapWidth / 2;
+                    const halfHeight = this.mapHeight / 2;
+                    monster.x = Math.max(-halfWidth, Math.min(halfWidth, monster.x));
+                    monster.y = Math.max(-halfHeight, Math.min(halfHeight, monster.y));
+                }
+            }
+        }
+    }
+
     // 檢查怪物是否暈眩中
     isMonsterStunned(monster: Monster): boolean {
         if (!monster.stunEndTime) return false;

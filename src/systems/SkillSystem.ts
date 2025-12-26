@@ -274,25 +274,25 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'active_architect',
         name: '靈魂統領',
         subtitle: '架構師',
-        description: '產生 30% HP 護盾（霸體）並反傷攻擊者，護盾消失時回復等值 HP',
+        description: '產生 30% HP 護盾（霸體），反傷並擊退攻擊者 1 單位',
         type: 'active',
         color: 0xffcc00, // 金色
         flashColor: 0xffdd44, // 閃金光
         cooldown: 10000, // 10 秒
         maxLevel: 5,
         levelUpMessages: [
-            '30% HP 護盾、1 反傷',
-            '30% HP 護盾、2.5 反傷',
-            '30% HP 護盾、4 反傷',
-            '30% HP 護盾、5.5 反傷',
-            '30% HP 護盾、7 反傷',
-            '30% HP 護盾、8.5 反傷，已達最大等級！'
+            '30% HP 護盾、1 反傷＋擊退',
+            '30% HP 護盾、2.5 反傷＋擊退',
+            '30% HP 護盾、4 反傷＋擊退',
+            '30% HP 護盾、5.5 反傷＋擊退',
+            '30% HP 護盾、7 反傷＋擊退',
+            '30% HP 護盾、8.5 反傷＋擊退，已達最大等級！'
         ],
         maxExtraAbility: {
             name: '堅守',
-            description: '護盾覆蓋時 {value} 機率炸開',
+            description: '護盾覆蓋時 100% 炸開並擊退敵人',
             baseValue: 0,
-            perLevel: 0.01, // 每級 +1%
+            perLevel: 0.01, // 每級 +1%（用於判斷 MAX 狀態）
             unit: '%',
             isPercentage: true
         }
@@ -875,7 +875,8 @@ export class SkillManager {
         return this.getMaxExtraAbilityValue('active_vfx', playerLevel);
     }
 
-    // 靈魂統領：堅守（護盾覆蓋時炸開機率）
+    // 靈魂統領：堅守（護盾覆蓋時炸開，MAX 時 100% 觸發）
+    // 返回值 > 0 表示已達 MAX 等級，可觸發堅守效果
     getArchitectExplosionChance(playerLevel: number): number {
         return this.getMaxExtraAbilityValue('active_architect', playerLevel);
     }
