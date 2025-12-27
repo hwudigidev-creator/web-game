@@ -7496,29 +7496,51 @@ export default class MainScene extends Phaser.Scene {
     // 分身出現特效（指定座標）
     private showPhantomSpawnEffectAt(phantomX: number, phantomY: number) {
         const screen = this.worldToScreen(phantomX, phantomY);
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-
         const unitSize = this.gameBounds.height / 10;
+        const targetSize = unitSize * 0.5; // 0.5 單位
 
-        // 擴散光圈
-        let radius = 0;
-        const maxRadius = unitSize * 1.5;
+        // 使用 LINE 紋理創建光點
+        const lineSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_LINE);
+        lineSprite.setOrigin(0.5, 1); // 底部中心對齊
+        lineSprite.setTint(0xbb88ff);
+        this.skillGridContainer.add(lineSprite);
+        lineSprite.setDepth(60);
 
-        const expand = () => {
-            graphics.clear();
-            radius += 8;
+        // 初始：小正方形（1:1）
+        const initialSize = 4;
+        const initialScaleX = initialSize / MainScene.EFFECT_TEXTURE_SIZE;
+        const initialScaleY = initialSize / MainScene.EFFECT_LINE_HEIGHT;
+        lineSprite.setScale(initialScaleX, initialScaleY);
+        lineSprite.setAlpha(1);
 
-            if (radius < maxRadius) {
-                const alpha = 1 - radius / maxRadius;
-                graphics.lineStyle(3, 0x9966ff, alpha);
-                graphics.strokeCircle(screen.x, screen.y, radius);
-            } else {
-                graphics.destroy();
+        // 階段 1：膨脹到 0.5 單位正方形
+        const expandScaleX = targetSize / MainScene.EFFECT_TEXTURE_SIZE;
+        const expandScaleY = targetSize / MainScene.EFFECT_LINE_HEIGHT;
+
+        this.tweens.add({
+            targets: lineSprite,
+            scaleX: expandScaleX,
+            scaleY: expandScaleY,
+            duration: 150,
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                // 階段 2：向上延展拉長、變細、淡出
+                const stretchHeight = targetSize * 3; // 拉長到 3 倍高度
+                const finalScaleY = stretchHeight / MainScene.EFFECT_LINE_HEIGHT;
+                const finalScaleX = expandScaleX * 0.1; // 變細到 10%
+
+                this.tweens.add({
+                    targets: lineSprite,
+                    scaleX: finalScaleX,
+                    scaleY: finalScaleY,
+                    alpha: 0,
+                    y: screen.y - stretchHeight * 0.5, // 向上移動
+                    duration: 250,
+                    ease: 'Power2.easeIn',
+                    onComplete: () => lineSprite.destroy()
+                });
             }
-        };
-
-        this.time.addEvent({ callback: expand, delay: 16, repeat: Math.floor(maxRadius / 8) });
+        });
     }
 
     // 分身施放特效（指定座標）
@@ -7563,28 +7585,58 @@ export default class MainScene extends Phaser.Scene {
             this.globalChainRayTimer = undefined;
         }
 
-        // 消失特效
+        // 消失特效（使用 LINE 紋理）
         const screen = this.worldToScreen(phantom.x, phantom.y);
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
+        const unitSize = this.gameBounds.height / 10;
+        const targetSize = unitSize * 0.5; // 0.5 單位
 
-        graphics.fillStyle(0x9966ff, 0.5);
-        graphics.fillCircle(screen.x, screen.y, 30);
+        const lineSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_LINE);
+        lineSprite.setOrigin(0.5, 1); // 底部中心對齊
+        lineSprite.setTint(0x9966ff); // 消失用較暗的紫色
+        this.skillGridContainer.add(lineSprite);
+        lineSprite.setDepth(60);
+
+        // 初始：小正方形
+        const initialSize = 4;
+        const initialScaleX = initialSize / MainScene.EFFECT_TEXTURE_SIZE;
+        const initialScaleY = initialSize / MainScene.EFFECT_LINE_HEIGHT;
+        lineSprite.setScale(initialScaleX, initialScaleY);
+        lineSprite.setAlpha(1);
+
+        // 階段 1：膨脹到 0.5 單位
+        const expandScaleX = targetSize / MainScene.EFFECT_TEXTURE_SIZE;
+        const expandScaleY = targetSize / MainScene.EFFECT_LINE_HEIGHT;
 
         this.tweens.add({
-            targets: graphics,
-            alpha: 0,
-            scaleX: 2,
-            scaleY: 2,
-            duration: 300,
-            onComplete: () => graphics.destroy()
+            targets: lineSprite,
+            scaleX: expandScaleX,
+            scaleY: expandScaleY,
+            duration: 150,
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                // 階段 2：向上延展拉長、變細、淡出
+                const stretchHeight = targetSize * 3;
+                const finalScaleY = stretchHeight / MainScene.EFFECT_LINE_HEIGHT;
+                const finalScaleX = expandScaleX * 0.1;
+
+                this.tweens.add({
+                    targets: lineSprite,
+                    scaleX: finalScaleX,
+                    scaleY: finalScaleY,
+                    alpha: 0,
+                    y: screen.y - stretchHeight * 0.5,
+                    duration: 250,
+                    ease: 'Power2.easeIn',
+                    onComplete: () => lineSprite.destroy()
+                });
+            }
         });
 
         // 銷毀分身圖像
         phantom.sprite.destroy();
 
-        // 從列表移除
-        this.phantoms.splice(index, 1);
+        // 清除輪鋸追蹤
+        this.phantomSawBladeActive.delete(phantomId);
     }
 
     // 創建殘影效果
