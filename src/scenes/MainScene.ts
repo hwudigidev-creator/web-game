@@ -122,7 +122,7 @@ export default class MainScene extends Phaser.Scene {
     private sawBladeRadius: number = 0; // 輪鋸半徑
 
     // 完美像素審判：井字線系統
-    private perfectPixelGraphics?: Phaser.GameObjects.Graphics; // 井字線圖形
+    private perfectPixelLineSprites: Phaser.GameObjects.Sprite[] = []; // 井字線 sprites
     private perfectPixelFocusIndex: number = 0; // 當前爆炸的焦點索引 (0-3)
     private perfectPixelLineAlpha: number = 0; // 井字線透明度（用於淡入淡出）
 
@@ -135,7 +135,8 @@ export default class MainScene extends Phaser.Scene {
         targetX: number;         // 鎖定位置 X（世界座標）
         targetY: number;         // 鎖定位置 Y（世界座標）
         lastDamageTime: number;  // 上次造成傷害的時間
-        graphics: Phaser.GameObjects.Graphics;
+        beamSprite: Phaser.GameObjects.Sprite; // 主光束（line 圖片）
+        pulseOffset: number;     // 射線角度偏移（±15°）
     }[] = []; // 最多 8 發光束
 
     // 幻影迭代模式：影分身系統（支援多個幻影）
@@ -150,11 +151,11 @@ export default class MainScene extends Phaser.Scene {
         skillTimer: Phaser.Time.TimerEvent;
         dismissTimer: Phaser.Time.TimerEvent;
         tauntTimer: Phaser.Time.TimerEvent; // 嘲諷週期計時器
-        chainRayTimer: Phaser.Time.TimerEvent; // 彈射射線計時器
         lastAfterimageTime: number; // 上次殘影時間
     }[] = [];
     private nextPhantomId: number = 0;
     private phantomSawBladeActive: Set<number> = new Set(); // 追蹤哪些分身已有輪鋸
+    private globalChainRayTimer?: Phaser.Time.TimerEvent; // 全局彈射射線計時器
 
     // 技能資訊窗格
     private skillInfoPanel!: Phaser.GameObjects.Container;
@@ -2413,15 +2414,15 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private confirmSkillSelection() {
-        // 防止重複點擊
-        if (this.isSkillSelecting) return;
-        this.isSkillSelecting = true;
-
-        // 處理混合技能選擇模式
+        // 處理混合技能選擇模式（有自己的 isSkillSelecting 檢查）
         if (this.mixedSkillTypes.length > 0) {
             this.confirmMixedSkillSelection();
             return;
         }
+
+        // 防止重複點擊（僅用於非混合模式）
+        if (this.isSkillSelecting) return;
+        this.isSkillSelecting = true;
 
         // 處理進階技能選擇
         if (this.isSelectingAdvancedSkill) {
@@ -4986,8 +4987,9 @@ export default class MainScene extends Phaser.Scene {
         const targetX = this.characterX + Math.cos(randomAngle) * randomDist;
         const targetY = this.characterY + Math.sin(randomAngle) * randomDist;
 
-        // 顯示光線落下特效
-        this.showLightBeamEffect(targetX, targetY, explosionRadius, 0x00ffcc);
+        // 顯示光線落下特效（藍紫色）
+        const techArtistColor = 0x9966ff; // 藍紫色
+        this.showLightBeamEffect(targetX, targetY, explosionRadius, techArtistColor);
 
         // 延遲 200ms 後造成傷害（光線落地）
         this.time.delayedCall(200, () => {
@@ -5030,124 +5032,147 @@ export default class MainScene extends Phaser.Scene {
                 this.shakeScreen(hitMonsters.length);
             }
 
-            // 顯示爆炸特效
-            this.showExplosionEffect(targetX, targetY, explosionRadius, 0x00ffcc);
+            // 顯示爆炸特效（藍紫色）
+            this.showExplosionEffect(targetX, targetY, explosionRadius, techArtistColor);
         });
     }
 
-    // 顯示光線落下特效（技術美術大神用）
+    // 顯示光線落下特效（使用 line 圖片瞬間射下，隨機角度）
     private showLightBeamEffect(worldX: number, worldY: number, radius: number, color: number) {
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(55);
-
-        const fallDuration = 100; // 光線落下時間（更快）
-        const lingerDuration = 350; // 殘影淡出時間
-        const totalDuration = fallDuration + lingerDuration;
-        const startTime = this.time.now;
-
-        // 落點螢幕座標
         const targetScreen = this.worldToScreen(worldX, worldY);
-        // 遊戲區頂端 Y 座標
-        const topY = 0;
-        // 從頂端到落點的完整高度
-        const fullHeight = targetScreen.y - topY;
+        const unitSize = this.gameBounds.height / 10;
 
-        const updateEffect = () => {
-            const elapsed = this.time.now - startTime;
+        // 隨機起點偏移（正上方螢幕邊緣 ±1 單位）
+        const offsetX = (Math.random() - 0.5) * 2 * unitSize;
+        const startX = targetScreen.x + offsetX;
+        const startY = -50; // 從畫面外開始
+        const endX = targetScreen.x;
+        const endY = targetScreen.y;
+
+        // 計算長度和角度
+        const dx = endX - startX;
+        const dy = endY - startY;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const beamAngle = Math.atan2(dy, dx);
+
+        // 建立光束 sprite
+        const beamSprite = this.add.sprite((startX + endX) / 2, (startY + endY) / 2, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(beamSprite);
+        beamSprite.setDepth(55);
+        beamSprite.setTint(color);
+        beamSprite.setRotation(beamAngle); // 對準目標角度
+
+        // 設定縮放
+        const beamWidth = 48; // 4倍粗線條
+        const scaleX = length / MainScene.EFFECT_TEXTURE_SIZE;
+        const scaleY = beamWidth / MainScene.EFFECT_LINE_HEIGHT;
+
+        // 瞬間出現，然後淡出
+        beamSprite.setScale(scaleX, scaleY * 0.3);
+        beamSprite.setAlpha(1);
+
+        // 快速展開 + 淡出動畫
+        this.tweens.add({
+            targets: beamSprite,
+            scaleY: { from: scaleY * 0.3, to: scaleY },
+            alpha: { from: 1, to: 0.9 },
+            duration: 50,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                // 停留後淡出
+                this.tweens.add({
+                    targets: beamSprite,
+                    alpha: 0,
+                    scaleY: scaleY * 0.2,
+                    duration: 300,
+                    ease: 'Quad.easeIn',
+                    onComplete: () => {
+                        beamSprite.destroy();
+                    }
+                });
+            }
+        });
+
+        // 落點光圈效果
+        const circleGraphics = this.add.graphics();
+        this.skillGridContainer.add(circleGraphics);
+        circleGraphics.setDepth(54);
+
+        const circleStartTime = this.time.now;
+        const circleDuration = 400;
+
+        const updateCircle = () => {
+            const elapsed = this.time.now - circleStartTime;
+            const progress = elapsed / circleDuration;
             const screen = this.worldToScreen(worldX, worldY);
 
-            graphics.clear();
+            circleGraphics.clear();
 
-            if (elapsed < fallDuration) {
-                // 階段 1：銳利光線從頂端快速落下
-                const fallProgress = elapsed / fallDuration;
-
-                // 光線頭部位置（從頂端往下移動）
-                const headY = topY + fullHeight * fallProgress;
-                // 光線尾部位置（稍微延遲跟隨）
-                const tailY = Math.max(topY, headY - fullHeight * 0.3);
-
-                // 銳利細線
-                graphics.lineStyle(2, 0xffffff, 1);
-                graphics.lineBetween(screen.x, tailY, screen.x, headY);
-
-                // 外層光暈
-                graphics.lineStyle(4, color, 0.6);
-                graphics.lineBetween(screen.x, tailY, screen.x, headY);
-
+            if (progress < 1) {
+                const alpha = 0.5 * (1 - progress);
+                circleGraphics.lineStyle(2, color, alpha);
+                circleGraphics.strokeCircle(screen.x, screen.y, radius * Math.min(progress * 2, 1));
             } else {
-                // 階段 2：殘影淡出（從落點往上的光柱）
-                const lingerProgress = (elapsed - fallDuration) / lingerDuration;
-                const alpha = 0.8 * (1 - lingerProgress);
-
-                // 殘影高度逐漸縮短
-                const lingerHeight = fullHeight * (1 - lingerProgress * 0.7);
-
-                // 外層淡光
-                graphics.lineStyle(3, color, alpha * 0.4);
-                graphics.lineBetween(screen.x, screen.y - lingerHeight, screen.x, screen.y);
-
-                // 核心線
-                graphics.lineStyle(1, 0xffffff, alpha * 0.6);
-                graphics.lineBetween(screen.x, screen.y - lingerHeight, screen.x, screen.y);
-
-                // 底部殘留光點
-                graphics.fillStyle(0xffffff, alpha);
-                graphics.fillCircle(screen.x, screen.y, 2 * (1 - lingerProgress));
-            }
-
-            // 預告圓圈
-            const circleProgress = Math.min(elapsed / fallDuration, 1);
-            graphics.lineStyle(1, color, 0.3 * (1 - elapsed / totalDuration));
-            graphics.strokeCircle(screen.x, screen.y, radius * circleProgress);
-
-            if (elapsed >= totalDuration) {
-                graphics.destroy();
+                circleGraphics.destroy();
             }
         };
 
-        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16 });
+        this.time.addEvent({ callback: updateCircle, loop: true, delay: 16 });
     }
 
     // 顯示爆炸特效（技術美術大神用）
     private showExplosionEffect(worldX: number, worldY: number, radius: number, color: number) {
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(55);
-
+        const screen = this.worldToScreen(worldX, worldY);
         const duration = 300; // 爆炸持續時間
-        const startTime = this.time.now;
 
-        const updateEffect = () => {
-            const elapsed = this.time.now - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const alpha = 0.8 * (1 - progress);
+        // 外圈：circle 紋理高速旋轉
+        const circleSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_CIRCLE);
+        this.skillGridContainer.add(circleSprite);
+        circleSprite.setDepth(55);
+        circleSprite.setTint(color);
+        const circleScale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+        circleSprite.setScale(circleScale);
+        circleSprite.setAlpha(0.8);
 
-            // 每幀重新計算螢幕座標
-            const screen = this.worldToScreen(worldX, worldY);
+        // 中心白點：CIRCLE 紋理
+        const centerSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_CIRCLE);
+        this.skillGridContainer.add(centerSprite);
+        centerSprite.setDepth(56);
+        centerSprite.setTint(0xffffff);
+        const centerScale = (radius * 0.4) / MainScene.EFFECT_TEXTURE_SIZE;
+        centerSprite.setScale(centerScale);
+        centerSprite.setAlpha(1);
 
-            graphics.clear();
-
-            // 爆炸圓形（從中心擴散）
-            const currentRadius = radius * (0.5 + progress * 0.5);
-            graphics.fillStyle(color, alpha * 0.4);
-            graphics.fillCircle(screen.x, screen.y, currentRadius);
-
-            // 爆炸邊緣
-            graphics.lineStyle(3, 0xffffff, alpha);
-            graphics.strokeCircle(screen.x, screen.y, currentRadius);
-
-            // 內圈閃光
-            graphics.fillStyle(0xffffff, alpha * 0.6);
-            graphics.fillCircle(screen.x, screen.y, currentRadius * 0.3 * (1 - progress));
-
-            if (progress >= 1) {
-                graphics.destroy();
+        // 高速旋轉動畫（外圈）
+        this.tweens.add({
+            targets: circleSprite,
+            rotation: Math.PI * 4, // 轉 2 圈
+            alpha: 0,
+            scale: circleScale * 1.5,
+            duration: duration,
+            ease: 'Power2',
+            onUpdate: () => {
+                // 更新位置（隨鏡頭移動）
+                const currentScreen = this.worldToScreen(worldX, worldY);
+                circleSprite.setPosition(currentScreen.x, currentScreen.y);
+                centerSprite.setPosition(currentScreen.x, currentScreen.y);
+            },
+            onComplete: () => {
+                circleSprite.destroy();
             }
-        };
+        });
 
-        this.time.addEvent({ callback: updateEffect, loop: true, delay: 16 });
+        // 中心白點淡出（稍慢）
+        this.tweens.add({
+            targets: centerSprite,
+            alpha: 0,
+            scale: centerScale * 0.5,
+            duration: duration * 0.8,
+            ease: 'Power2',
+            onComplete: () => {
+                centerSprite.destroy();
+            }
+        });
     }
 
     // 絕對邏輯防禦：有護盾時產生繞角色旋轉的輪鋸（最多6個，按護盾比例）
@@ -5267,8 +5292,8 @@ export default class MainScene extends Phaser.Scene {
             outer.setTint(0xffdd00); // 金色
             outer.setAlpha(0.7);
 
-            // 內層（1/2 大小，逆轉）
-            const inner = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+            // 內層（1/2 大小，逆轉）- 使用 CIRCLE
+            const inner = this.add.sprite(0, 0, MainScene.TEXTURE_CIRCLE);
             this.skillGridContainer.add(inner);
             inner.setDepth(57);
             inner.setTint(0xffee66); // 較亮金色
@@ -5338,7 +5363,8 @@ export default class MainScene extends Phaser.Scene {
         outer.setTint(0xffdd00);
         outer.setAlpha(0.7);
 
-        const inner = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
+        // 內層使用 CIRCLE
+        const inner = this.add.sprite(0, 0, MainScene.TEXTURE_CIRCLE);
         this.skillGridContainer.add(inner);
         inner.setDepth(101);
         inner.setTint(0xffee66);
@@ -5491,10 +5517,11 @@ export default class MainScene extends Phaser.Scene {
         // 重設輪鋸擊中記錄
         this.sawBladeLastHitTime.clear();
 
-        // 清除井字線圖形（完美像素審判）
-        if (this.perfectPixelGraphics) {
-            this.perfectPixelGraphics.clear();
+        // 清除井字線 sprites（完美像素審判）
+        for (const sprite of this.perfectPixelLineSprites) {
+            sprite.destroy();
         }
+        this.perfectPixelLineSprites = [];
         this.perfectPixelFocusIndex = 0;
         this.perfectPixelLineAlpha = 0;
     }
@@ -5590,106 +5617,139 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 繪製井字線
+    // 繪製井字線（使用 LINE 紋理）
     private drawPerfectPixelLines(x1: number, x2: number, y1: number, y2: number) {
-        if (!this.perfectPixelGraphics) {
-            this.perfectPixelGraphics = this.add.graphics();
-            this.uiContainer.add(this.perfectPixelGraphics);
-            this.perfectPixelGraphics.setDepth(1005);
+        const bounds = this.gameBounds;
+        const lineWidth = 16; // 線條粗度
+
+        // 如果 sprites 還沒建立，建立 4 條線
+        if (this.perfectPixelLineSprites.length === 0) {
+            // 垂直線 1 (x1)
+            const vLine1 = this.add.sprite(x1, bounds.y + bounds.height / 2, MainScene.TEXTURE_LINE);
+            this.uiContainer.add(vLine1);
+            vLine1.setDepth(1005);
+            vLine1.setTint(0xffffff);
+            vLine1.setRotation(Math.PI / 2); // 垂直
+            vLine1.setScale(bounds.height / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+            this.perfectPixelLineSprites.push(vLine1);
+
+            // 垂直線 2 (x2)
+            const vLine2 = this.add.sprite(x2, bounds.y + bounds.height / 2, MainScene.TEXTURE_LINE);
+            this.uiContainer.add(vLine2);
+            vLine2.setDepth(1005);
+            vLine2.setTint(0xffffff);
+            vLine2.setRotation(Math.PI / 2); // 垂直
+            vLine2.setScale(bounds.height / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+            this.perfectPixelLineSprites.push(vLine2);
+
+            // 水平線 1 (y1)
+            const hLine1 = this.add.sprite(bounds.x + bounds.width / 2, y1, MainScene.TEXTURE_LINE);
+            this.uiContainer.add(hLine1);
+            hLine1.setDepth(1005);
+            hLine1.setTint(0xffffff);
+            hLine1.setRotation(0); // 水平
+            hLine1.setScale(bounds.width / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+            this.perfectPixelLineSprites.push(hLine1);
+
+            // 水平線 2 (y2)
+            const hLine2 = this.add.sprite(bounds.x + bounds.width / 2, y2, MainScene.TEXTURE_LINE);
+            this.uiContainer.add(hLine2);
+            hLine2.setDepth(1005);
+            hLine2.setTint(0xffffff);
+            hLine2.setRotation(0); // 水平
+            hLine2.setScale(bounds.width / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+            this.perfectPixelLineSprites.push(hLine2);
         }
 
-        this.perfectPixelGraphics.clear();
-
-        if (this.perfectPixelLineAlpha <= 0) return;
-
-        const bounds = this.gameBounds;
-        const lineWidth = 2;
-
-        // 繪製兩條垂直線
-        this.perfectPixelGraphics.lineStyle(lineWidth, 0xffffff, this.perfectPixelLineAlpha * 0.8);
-        this.perfectPixelGraphics.beginPath();
-        this.perfectPixelGraphics.moveTo(x1, bounds.y);
-        this.perfectPixelGraphics.lineTo(x1, bounds.y + bounds.height);
-        this.perfectPixelGraphics.strokePath();
-
-        this.perfectPixelGraphics.beginPath();
-        this.perfectPixelGraphics.moveTo(x2, bounds.y);
-        this.perfectPixelGraphics.lineTo(x2, bounds.y + bounds.height);
-        this.perfectPixelGraphics.strokePath();
-
-        // 繪製兩條水平線
-        this.perfectPixelGraphics.beginPath();
-        this.perfectPixelGraphics.moveTo(bounds.x, y1);
-        this.perfectPixelGraphics.lineTo(bounds.x + bounds.width, y1);
-        this.perfectPixelGraphics.strokePath();
-
-        this.perfectPixelGraphics.beginPath();
-        this.perfectPixelGraphics.moveTo(bounds.x, y2);
-        this.perfectPixelGraphics.lineTo(bounds.x + bounds.width, y2);
-        this.perfectPixelGraphics.strokePath();
+        // 更新透明度
+        const alpha = this.perfectPixelLineAlpha * 0.8;
+        for (const sprite of this.perfectPixelLineSprites) {
+            sprite.setAlpha(alpha);
+        }
     }
 
-    // 顯示完美像素爆炸效果（極白色）
+    // 顯示完美像素爆炸效果（極白色）- 使用 LINE 和 CIRCLE 紋理
     private showPerfectPixelExplosion(x: number, y: number, radius: number, isCrit: boolean) {
-        const graphics = this.add.graphics();
-        this.uiContainer.add(graphics);
-        graphics.setDepth(1006);
-
-        // 爆炸核心（極白色）
-        const coreColor = isCrit ? 0xffff00 : 0xffffff;
-        graphics.fillStyle(coreColor, 1.0);
-        graphics.fillCircle(x, y, radius * 0.3);
-
-        // 爆炸光環
-        graphics.lineStyle(4, 0xffffff, 0.9);
-        graphics.strokeCircle(x, y, radius * 0.5);
-
-        // 外圈光暈
-        graphics.lineStyle(2, 0xffffee, 0.6);
-        graphics.strokeCircle(x, y, radius);
-
-        // 十字閃光
+        const allSprites: Phaser.GameObjects.Sprite[] = [];
+        const lineWidth = 24; // 線條粗度
         const flashLength = radius * 1.2;
-        graphics.lineStyle(3, 0xffffff, 0.8);
-        graphics.beginPath();
-        graphics.moveTo(x - flashLength, y);
-        graphics.lineTo(x + flashLength, y);
-        graphics.strokePath();
-        graphics.beginPath();
-        graphics.moveTo(x, y - flashLength);
-        graphics.lineTo(x, y + flashLength);
-        graphics.strokePath();
+
+        // 爆炸核心（極白色）- 使用 CIRCLE 紋理
+        const coreColor = isCrit ? 0xffff00 : 0xffffff;
+        const coreSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE);
+        this.uiContainer.add(coreSprite);
+        coreSprite.setDepth(1006);
+        coreSprite.setTint(coreColor);
+        coreSprite.setScale((radius * 0.6) / MainScene.EFFECT_TEXTURE_SIZE);
+        coreSprite.setAlpha(1.0);
+        allSprites.push(coreSprite);
+
+        // 爆炸光環 - 使用 CIRCLE 紋理
+        const ringSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE);
+        this.uiContainer.add(ringSprite);
+        ringSprite.setDepth(1005);
+        ringSprite.setTint(0xffffff);
+        ringSprite.setScale((radius * 1.0) / MainScene.EFFECT_TEXTURE_SIZE);
+        ringSprite.setAlpha(0.7);
+        allSprites.push(ringSprite);
+
+        // 外圈光暈 - 使用 CIRCLE 紋理
+        const outerSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE);
+        this.uiContainer.add(outerSprite);
+        outerSprite.setDepth(1004);
+        outerSprite.setTint(0xffffee);
+        outerSprite.setScale((radius * 2) / MainScene.EFFECT_TEXTURE_SIZE);
+        outerSprite.setAlpha(0.4);
+        allSprites.push(outerSprite);
+
+        // 十字閃光 - 水平線
+        const hLine = this.add.sprite(x, y, MainScene.TEXTURE_LINE);
+        this.uiContainer.add(hLine);
+        hLine.setDepth(1007);
+        hLine.setTint(0xffffff);
+        hLine.setRotation(0);
+        hLine.setScale((flashLength * 2) / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+        hLine.setAlpha(0.8);
+        allSprites.push(hLine);
+
+        // 十字閃光 - 垂直線
+        const vLine = this.add.sprite(x, y, MainScene.TEXTURE_LINE);
+        this.uiContainer.add(vLine);
+        vLine.setDepth(1007);
+        vLine.setTint(0xffffff);
+        vLine.setRotation(Math.PI / 2);
+        vLine.setScale((flashLength * 2) / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+        vLine.setAlpha(0.8);
+        allSprites.push(vLine);
 
         // 淡出動畫
+        for (const sprite of allSprites) {
+            this.tweens.add({
+                targets: sprite,
+                alpha: 0,
+                duration: 500,
+                ease: 'Power2',
+                onComplete: () => sprite.destroy()
+            });
+        }
+
+        // 擴散圓環動畫 - 使用 CIRCLE 紋理
+        const expandSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE);
+        this.uiContainer.add(expandSprite);
+        expandSprite.setDepth(1005);
+        expandSprite.setTint(0xffffff);
+        const startScale = (radius * 0.6) / MainScene.EFFECT_TEXTURE_SIZE;
+        const endScale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+        expandSprite.setScale(startScale);
+        expandSprite.setAlpha(1);
+
         this.tweens.add({
-            targets: graphics,
+            targets: expandSprite,
+            scale: endScale,
             alpha: 0,
-            duration: 500,
-            ease: 'Power2',
-            onComplete: () => {
-                graphics.destroy();
-            }
-        });
-
-        // 擴散動畫
-        const expandGraphics = this.add.graphics();
-        this.uiContainer.add(expandGraphics);
-        expandGraphics.setDepth(1005);
-
-        const expandTarget = { r: radius * 0.3 };
-        const expandTween = this.tweens.add({
-            targets: expandTarget,
-            r: radius,
             duration: 300,
             ease: 'Power2',
-            onUpdate: () => {
-                expandGraphics.clear();
-                expandGraphics.lineStyle(6, 0xffffff, 1 - (expandTarget.r / radius) * 0.7);
-                expandGraphics.strokeCircle(x, y, expandTarget.r);
-            },
-            onComplete: () => {
-                expandGraphics.destroy();
-            }
+            onComplete: () => expandSprite.destroy()
         });
     }
 
@@ -5740,48 +5800,28 @@ export default class MainScene extends Phaser.Scene {
         const unitSize = this.gameBounds.height / 10;  // 螢幕 1 單位
         const flyOutDist = this.gameBounds.height * 0.2;  // 飛出距離 2 單位（螢幕座標）
 
-        // 創建導彈圖形（加入 skillGridContainer，座標系統與 worldToScreen 一致）
-        const missile = this.add.graphics();
-        this.skillGridContainer.add(missile);
-        missile.setDepth(100);
-
         // 玩家螢幕位置（使用 worldToScreen 取得正確位置）
         const playerScreen = this.worldToScreen(this.characterX, this.characterY);
         const playerScreenX = playerScreen.x;
         const playerScreenY = playerScreen.y;
 
-        // 導彈狀態（螢幕座標）
-        const state = {
-            screenX: playerScreenX,
-            screenY: playerScreenY,
-            rotation: 0
-        };
+        // 創建導彈 sprite（使用 line 紋理）
+        const missile = this.add.sprite(playerScreenX, playerScreenY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(missile);
+        missile.setDepth(100);
+        missile.setTint(0xff6600); // 橘色
 
-        // 繪製函數（細矩形）
-        const missileWidth = unitSize * 0.06;
+        // 導彈尺寸（4倍寬度）
+        const missileWidth = 32; // 4倍粗
         let missileLength = unitSize * 0.3;  // 初始長度，俯衝時會拉長
 
-        const drawMissile = () => {
-            missile.clear();
-
-            // 用旋轉矩形繪製
-            missile.save();
-            missile.translateCanvas(state.screenX, state.screenY);
-            missile.rotateCanvas(state.rotation);
-
-            // 漸層矩形（尾部橘紅 → 頭部亮黃）
-            const halfLen = missileLength / 2;
-            const segments = 6;
-            const colors = [0xff4400, 0xff5500, 0xff7700, 0xff9900, 0xffcc00, 0xffff66];
-            const segmentLen = missileLength / segments;
-
-            for (let i = 0; i < segments; i++) {
-                missile.fillStyle(colors[i], 1);
-                missile.fillRect(-halfLen + i * segmentLen, -missileWidth / 2, segmentLen + 1, missileWidth);
-            }
-
-            missile.restore();
+        // 設定初始縮放
+        const updateMissileScale = () => {
+            const scaleX = missileLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const scaleY = missileWidth / MainScene.EFFECT_LINE_HEIGHT;
+            missile.setScale(scaleX, scaleY);
         };
+        updateMissileScale();
 
         // 記錄目標
         const monsters = this.monsterManager.getMonsters();
@@ -5793,39 +5833,36 @@ export default class MainScene extends Phaser.Scene {
 
         // 階段1：隨機方向飛出 2 單位（400ms）
         const randomAngle = Math.random() * Math.PI * 2;
-        state.rotation = randomAngle;
-        const flyOutScreenX = state.screenX + Math.cos(randomAngle) * flyOutDist;
-        const flyOutScreenY = state.screenY + Math.sin(randomAngle) * flyOutDist;
-
-        drawMissile();
+        missile.setRotation(randomAngle);
+        const flyOutScreenX = playerScreenX + Math.cos(randomAngle) * flyOutDist;
+        const flyOutScreenY = playerScreenY + Math.sin(randomAngle) * flyOutDist;
 
         this.tweens.add({
-            targets: state,
-            screenX: flyOutScreenX,
-            screenY: flyOutScreenY,
+            targets: missile,
+            x: flyOutScreenX,
+            y: flyOutScreenY,
             duration: 400,
             ease: 'Quad.easeOut',
-            onUpdate: drawMissile,
             onComplete: () => {
                 // 取得目標當前螢幕位置
                 const targetScreen = this.worldToScreen(target.x, target.y);
 
                 // 計算俯衝方向
-                const dx = targetScreen.x - state.screenX;
-                const dy = targetScreen.y - state.screenY;
-                state.rotation = Math.atan2(dy, dx);
+                const dx = targetScreen.x - missile.x;
+                const dy = targetScreen.y - missile.y;
+                missile.setRotation(Math.atan2(dy, dx));
 
-                // 俯衝時拉長導彈（3倍）
+                // 俯衝時拉長導彈（8倍）
                 missileLength = unitSize * 2.4;
+                updateMissileScale();
 
                 // 階段2：直衝目標（500ms）
                 this.tweens.add({
-                    targets: state,
-                    screenX: targetScreen.x,
-                    screenY: targetScreen.y,
+                    targets: missile,
+                    x: targetScreen.x,
+                    y: targetScreen.y,
                     duration: 500,
                     ease: 'Linear',
-                    onUpdate: drawMissile,
                     onComplete: () => {
                         const currentMonsters = this.monsterManager.getMonsters();
                         const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
@@ -5842,8 +5879,8 @@ export default class MainScene extends Phaser.Scene {
                         const hitMonsterIds: number[] = [];
                         for (const monster of currentMonsters) {
                             const monsterScreen = this.worldToScreen(monster.x, monster.y);
-                            const dx = monsterScreen.x - state.screenX;
-                            const dy = monsterScreen.y - state.screenY;
+                            const dx = monsterScreen.x - missile.x;
+                            const dy = monsterScreen.y - missile.y;
                             const dist = Math.sqrt(dx * dx + dy * dy);
                             if (dist <= explosionRadius * unitSize) {
                                 hitMonsterIds.push(monster.id);
@@ -5856,7 +5893,7 @@ export default class MainScene extends Phaser.Scene {
                         }
 
                         // 3 單位爆炸效果
-                        this.showMissileExplosion(state.screenX, state.screenY, isCrit);
+                        this.showMissileExplosion(missile.x, missile.y, isCrit);
 
                         missile.destroy();
                     }
@@ -5867,33 +5904,86 @@ export default class MainScene extends Phaser.Scene {
 
     // 導彈爆炸效果（3 單位大小）
     private showMissileExplosion(x: number, y: number, _isCrit: boolean) {
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(101);
-
         const unitSize = this.gameBounds.height / 10;
         const radius = unitSize * 3;  // 3 單位
 
-        // 爆炸核心
-        graphics.fillStyle(0xff6600, 0.8);
-        graphics.fillCircle(x, y, radius * 0.3);
+        // 爆炸核心：CIRCLE 紋理（橘色）
+        const coreSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE);
+        this.skillGridContainer.add(coreSprite);
+        coreSprite.setDepth(101);
+        coreSprite.setTint(0xff6600);
+        const coreScale = (radius * 0.6) / MainScene.EFFECT_TEXTURE_SIZE;
+        coreSprite.setScale(coreScale);
+        coreSprite.setAlpha(0.9);
 
-        // 爆炸光環
-        graphics.lineStyle(4, 0xff4400, 0.9);
-        graphics.strokeCircle(x, y, radius * 0.6);
+        // 外圈：CIRCLE 紋理（黃色）
+        const outerSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE);
+        this.skillGridContainer.add(outerSprite);
+        outerSprite.setDepth(100);
+        outerSprite.setTint(0xffcc00);
+        const outerScale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
+        outerSprite.setScale(outerScale);
+        outerSprite.setAlpha(0.5);
 
-        // 外圈
-        graphics.lineStyle(2, 0xffcc00, 0.7);
-        graphics.strokeCircle(x, y, radius);
+        // 飛散線條：使用 line 紋理，8條向外射出
+        const lineCount = 8;
+        const lineSprites: Phaser.GameObjects.Sprite[] = [];
+        const lineLength = unitSize * 1.5;
+        const lineWidth = 32; // 4倍粗
+        // 漸層色：從橘紅到亮黃
+        const lineColors = [0xff4400, 0xff5500, 0xff7700, 0xff9900, 0xffbb00, 0xffcc00, 0xffdd00, 0xffff66];
 
-        // 淡出動畫
+        for (let i = 0; i < lineCount; i++) {
+            const angle = (i / lineCount) * Math.PI * 2 + Math.random() * 0.3;
+            const lineSprite = this.add.sprite(x, y, MainScene.TEXTURE_LINE);
+            this.skillGridContainer.add(lineSprite);
+            lineSprite.setDepth(102);
+            lineSprite.setTint(lineColors[i]);
+            lineSprite.setRotation(angle);
+            const scaleX = lineLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const scaleY = lineWidth / MainScene.EFFECT_LINE_HEIGHT;
+            lineSprite.setScale(scaleX, scaleY);
+            lineSprite.setAlpha(1);
+            lineSprites.push(lineSprite);
+
+            // 線條向外飛散動畫
+            const endX = x + Math.cos(angle) * radius * 1.2;
+            const endY = y + Math.sin(angle) * radius * 1.2;
+            this.tweens.add({
+                targets: lineSprite,
+                x: endX,
+                y: endY,
+                alpha: 0,
+                scaleX: scaleX * 0.3,
+                duration: 300,
+                ease: 'Power2',
+                onComplete: () => {
+                    lineSprite.destroy();
+                }
+            });
+        }
+
+        // 核心擴散淡出
         this.tweens.add({
-            targets: graphics,
+            targets: coreSprite,
             alpha: 0,
+            scale: coreScale * 1.5,
             duration: 250,
             ease: 'Power2',
             onComplete: () => {
-                graphics.destroy();
+                coreSprite.destroy();
+            }
+        });
+
+        // 外圈擴散淡出
+        this.tweens.add({
+            targets: outerSprite,
+            alpha: 0,
+            scale: outerScale * 1.3,
+            duration: 300,
+            ease: 'Power2',
+            onComplete: () => {
+                outerSprite.destroy();
             }
         });
     }
@@ -5908,7 +5998,7 @@ export default class MainScene extends Phaser.Scene {
             this.zeroTrustSprite = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
             this.skillGridContainer.add(this.zeroTrustSprite);
             this.zeroTrustSprite.setDepth(49);
-            this.zeroTrustSprite.setAlpha(0.3);
+            this.zeroTrustSprite.setAlpha(0.15); // 透明度降低
         }
     }
 
@@ -5932,9 +6022,9 @@ export default class MainScene extends Phaser.Scene {
             const scale = (radiusPx * 2) / MainScene.EFFECT_TEXTURE_SIZE;
             this.zeroTrustSprite.setScale(scale);
             this.zeroTrustSprite.setTint(beamColor);
-            this.zeroTrustSprite.setAlpha(0.3);
-            // 慢慢旋轉（每秒約 18 度）
-            this.zeroTrustSprite.rotation += 0.005;
+            this.zeroTrustSprite.setAlpha(0.15); // 透明度降低
+            // 加快旋轉（每秒約 54 度）
+            this.zeroTrustSprite.rotation += 0.015;
         }
 
         // 傷害計算
@@ -5974,9 +6064,11 @@ export default class MainScene extends Phaser.Scene {
                     beam.targetMonsterId = availableMonster.id;
                     beam.targetX = availableMonster.x;
                     beam.targetY = availableMonster.y;
+                    // 新目標給新的隨機起點偏移（±1 單位）
+                    beam.pulseOffset = (Math.random() - 0.5) * 2 * unitSize;
                 } else {
                     // 沒有可轉移的目標，移除光束
-                    beam.graphics.destroy();
+                    beam.beamSprite.destroy();
                     this.zeroTrustBeams.splice(i, 1);
                     this.zeroTrustTrackedMonsters.delete(beam.targetMonsterId);
                 }
@@ -5991,19 +6083,54 @@ export default class MainScene extends Phaser.Scene {
             if (this.zeroTrustBeams.length >= maxBeams) break; // 已達上限
             if (this.zeroTrustTrackedMonsters.has(monster.id)) continue; // 已鎖定
 
-            // 新怪物進入範圍，建立光束
+            // 新怪物進入範圍，建立光束（使用 line 圖片）
             this.zeroTrustTrackedMonsters.add(monster.id);
 
-            const graphics = this.add.graphics();
-            this.skillGridContainer.add(graphics);
-            graphics.setDepth(55);
+            // 主光束（持續顯示）
+            const beamSprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
+            this.skillGridContainer.add(beamSprite);
+            beamSprite.setDepth(55);
+            beamSprite.setTint(beamColor); // 金黃色
+            beamSprite.setAlpha(0); // 一開始隱藏
+
+            // 計算射線（正上方直下）
+            const targetScreen = this.worldToScreen(monster.x, monster.y);
+            const startY = -50; // 螢幕上方外
+            const beamLength = targetScreen.y - startY;
+
+            // 瞬間射下的閃光效果
+            const flashSprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
+            this.skillGridContainer.add(flashSprite);
+            flashSprite.setDepth(57);
+            flashSprite.setTint(0xffffff); // 白色閃光
+            flashSprite.setRotation(Math.PI / 2); // 垂直向下
+            const flashScaleX = beamLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const flashScaleY = 40 / MainScene.EFFECT_LINE_HEIGHT; // 4倍粗
+            flashSprite.setScale(flashScaleX, flashScaleY);
+            flashSprite.setPosition(targetScreen.x, (startY + targetScreen.y) / 2);
+            flashSprite.setAlpha(1);
+
+            // 閃光淡出後顯示持續光束
+            this.tweens.add({
+                targets: flashSprite,
+                alpha: 0,
+                scaleY: flashScaleY * 0.3,
+                duration: 150,
+                ease: 'Quad.easeOut',
+                onComplete: () => {
+                    flashSprite.destroy();
+                    // 顯示持續光束
+                    beamSprite.setAlpha(0.6);
+                }
+            });
 
             this.zeroTrustBeams.push({
                 targetMonsterId: monster.id,
                 targetX: monster.x,
                 targetY: monster.y,
                 lastDamageTime: 0,
-                graphics: graphics
+                beamSprite: beamSprite,
+                pulseOffset: 0 // 不再需要偏移
             });
         }
 
@@ -6016,28 +6143,20 @@ export default class MainScene extends Phaser.Scene {
                 beam.targetY = targetMonster.y;
             }
 
-            // 繪製光束（從遊戲區頂端到目標點）
-            beam.graphics.clear();
+            // 計算射線起點和終點（正上方直下）
             const beamScreen = this.worldToScreen(beam.targetX, beam.targetY);
-            const topY = 0;
+            const startY = -50; // 螢幕上方外
+            const beamLength = beamScreen.y - startY;
 
-            // 外層光暈
-            beam.graphics.lineStyle(4, beamColor, 0.6);
-            beam.graphics.beginPath();
-            beam.graphics.moveTo(beamScreen.x, topY);
-            beam.graphics.lineTo(beamScreen.x, beamScreen.y);
-            beam.graphics.strokePath();
+            // 設定主光束 sprite 位置和旋轉（垂直向下）
+            beam.beamSprite.setPosition(beamScreen.x, (startY + beamScreen.y) / 2);
+            beam.beamSprite.setRotation(Math.PI / 2);
 
-            // 核心光線
-            beam.graphics.lineStyle(2, 0xffffff, 1);
-            beam.graphics.beginPath();
-            beam.graphics.moveTo(beamScreen.x, topY);
-            beam.graphics.lineTo(beamScreen.x, beamScreen.y);
-            beam.graphics.strokePath();
-
-            // 底部光點
-            beam.graphics.fillStyle(0xffffff, 1);
-            beam.graphics.fillCircle(beamScreen.x, beamScreen.y, 4);
+            // 設定縮放（紋理尺寸 256x64）
+            const beamWidth = 16; // 4倍粗光束寬度
+            const scaleX = beamLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const scaleY = beamWidth / MainScene.EFFECT_LINE_HEIGHT;
+            beam.beamSprite.setScale(scaleX, scaleY);
 
             // 每 0.2 秒造成範圍傷害
             if (now - beam.lastDamageTime >= damageInterval) {
@@ -6072,10 +6191,13 @@ export default class MainScene extends Phaser.Scene {
         const unitSize = this.gameBounds.height / 10;
 
         const color = isCrit ? 0xff6600 : 0xffcc00;
-        const maxSize = unitSize * 3; // 3 單位大小（3倍）
+        const maxSize = unitSize * 2; // 2 單位大小
         const targetScale = (maxSize * 2) / MainScene.EFFECT_TEXTURE_SIZE;
         const rotations = Math.PI * 4; // 兩圈
         const duration = 300;
+
+        // 隨機起始角度
+        const randomAngle = Math.random() * Math.PI * 2;
 
         // 外層
         const outer = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
@@ -6084,6 +6206,7 @@ export default class MainScene extends Phaser.Scene {
         outer.setTint(color);
         outer.setScale(0.1);
         outer.setAlpha(0.8);
+        outer.setRotation(randomAngle); // 隨機角度
 
         // 內層
         const inner = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
@@ -6092,12 +6215,13 @@ export default class MainScene extends Phaser.Scene {
         inner.setTint(0xffffff);
         inner.setScale(0.05);
         inner.setAlpha(0.9);
+        inner.setRotation(-randomAngle); // 反向隨機角度
 
         // 外層動畫：擴散 + 順時針旋轉 + 淡出
         this.tweens.add({
             targets: outer,
             scale: targetScale,
-            rotation: rotations,
+            rotation: randomAngle + rotations,
             alpha: 0,
             duration: duration,
             ease: 'Quad.easeOut',
@@ -6110,7 +6234,7 @@ export default class MainScene extends Phaser.Scene {
         this.tweens.add({
             targets: inner,
             scale: targetScale * 0.5,
-            rotation: -rotations * 1.5,
+            rotation: -randomAngle - rotations * 1.5,
             alpha: 0,
             duration: duration,
             ease: 'Quad.easeOut',
@@ -6126,7 +6250,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 清理光束
         for (const beam of this.zeroTrustBeams) {
-            beam.graphics.destroy();
+            beam.beamSprite.destroy();
         }
         this.zeroTrustBeams = [];
         this.zeroTrustTrackedMonsters.clear();
@@ -6245,43 +6369,54 @@ export default class MainScene extends Phaser.Scene {
         const screenStart = this.worldToScreen(startX, startY);
         const screenEnd = this.worldToScreen(endX, endY);
 
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(60);
+        // 計算長度
+        const dx = screenEnd.x - screenStart.x;
+        const dy = screenEnd.y - screenStart.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const centerX = (screenStart.x + screenEnd.x) / 2;
+        const centerY = (screenStart.y + screenEnd.y) / 2;
 
-        // 連鎖斬擊用青色
+        // 連鎖斬擊用青色，6倍粗度
         const slashColor = 0x00ffff;
+        const lineWidth = 48; // 6倍（基準8）
 
         // 外層光暈
-        graphics.lineStyle(10, slashColor, 0.3);
-        graphics.beginPath();
-        graphics.moveTo(screenStart.x, screenStart.y);
-        graphics.lineTo(screenEnd.x, screenEnd.y);
-        graphics.strokePath();
+        const outer = this.add.sprite(centerX, centerY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(outer);
+        outer.setDepth(60);
+        outer.setTint(slashColor);
+        outer.setRotation(angle);
+        outer.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, (lineWidth * 1.5) / MainScene.EFFECT_LINE_HEIGHT);
+        outer.setAlpha(0.3);
 
         // 中層
-        graphics.lineStyle(5, slashColor, 0.6);
-        graphics.beginPath();
-        graphics.moveTo(screenStart.x, screenStart.y);
-        graphics.lineTo(screenEnd.x, screenEnd.y);
-        graphics.strokePath();
+        const middle = this.add.sprite(centerX, centerY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(middle);
+        middle.setDepth(61);
+        middle.setTint(slashColor);
+        middle.setRotation(angle);
+        middle.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+        middle.setAlpha(0.6);
 
         // 核心線
-        graphics.lineStyle(2, 0xffffff, 0.9);
-        graphics.beginPath();
-        graphics.moveTo(screenStart.x, screenStart.y);
-        graphics.lineTo(screenEnd.x, screenEnd.y);
-        graphics.strokePath();
+        const core = this.add.sprite(centerX, centerY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(core);
+        core.setDepth(62);
+        core.setTint(0xffffff);
+        core.setRotation(angle);
+        core.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, (lineWidth * 0.3) / MainScene.EFFECT_LINE_HEIGHT);
+        core.setAlpha(0.9);
 
         // 淡出效果
-        this.tweens.add({
-            targets: graphics,
-            alpha: 0,
-            duration: 150,
-            onComplete: () => {
-                graphics.destroy();
-            }
-        });
+        const sprites = [outer, middle, core];
+        for (const sprite of sprites) {
+            this.tweens.add({
+                targets: sprite,
+                alpha: 0,
+                duration: 150,
+                onComplete: () => sprite.destroy()
+            });
+        }
 
         // 連鎖起點閃光
         const originScreen = this.worldToScreen(originX, originY);
@@ -6354,43 +6489,54 @@ export default class MainScene extends Phaser.Scene {
         const screenStart = this.worldToScreen(startX, startY);
         const screenEnd = this.worldToScreen(endX, endY);
 
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-        graphics.setDepth(60);
+        // 計算長度
+        const dx = screenEnd.x - screenStart.x;
+        const dy = screenEnd.y - screenStart.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const centerX = (screenStart.x + screenEnd.x) / 2;
+        const centerY = (screenStart.y + screenEnd.y) / 2;
 
-        // 斬擊線（多層疊加）
+        // 斬擊線（多層疊加），6倍粗度
         const slashColor = 0xff3366;
+        const lineWidth = 48; // 6倍（基準8）
 
         // 外層光暈
-        graphics.lineStyle(12, slashColor, 0.3);
-        graphics.beginPath();
-        graphics.moveTo(screenStart.x, screenStart.y);
-        graphics.lineTo(screenEnd.x, screenEnd.y);
-        graphics.strokePath();
+        const outer = this.add.sprite(centerX, centerY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(outer);
+        outer.setDepth(60);
+        outer.setTint(slashColor);
+        outer.setRotation(angle);
+        outer.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, (lineWidth * 1.5) / MainScene.EFFECT_LINE_HEIGHT);
+        outer.setAlpha(0.3);
 
         // 中層
-        graphics.lineStyle(6, slashColor, 0.6);
-        graphics.beginPath();
-        graphics.moveTo(screenStart.x, screenStart.y);
-        graphics.lineTo(screenEnd.x, screenEnd.y);
-        graphics.strokePath();
+        const middle = this.add.sprite(centerX, centerY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(middle);
+        middle.setDepth(61);
+        middle.setTint(slashColor);
+        middle.setRotation(angle);
+        middle.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+        middle.setAlpha(0.6);
 
         // 核心線
-        graphics.lineStyle(2, 0xffffff, 0.9);
-        graphics.beginPath();
-        graphics.moveTo(screenStart.x, screenStart.y);
-        graphics.lineTo(screenEnd.x, screenEnd.y);
-        graphics.strokePath();
+        const core = this.add.sprite(centerX, centerY, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(core);
+        core.setDepth(62);
+        core.setTint(0xffffff);
+        core.setRotation(angle);
+        core.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, (lineWidth * 0.3) / MainScene.EFFECT_LINE_HEIGHT);
+        core.setAlpha(0.9);
 
         // 淡出效果
-        this.tweens.add({
-            targets: graphics,
-            alpha: 0,
-            duration: 150,
-            onComplete: () => {
-                graphics.destroy();
-            }
-        });
+        const sprites = [outer, middle, core];
+        for (const sprite of sprites) {
+            this.tweens.add({
+                targets: sprite,
+                alpha: 0,
+                duration: 150,
+                onComplete: () => sprite.destroy()
+            });
+        }
 
         // 斬擊起點閃光效果
         const charScreen = this.worldToScreen(this.characterX, this.characterY);
@@ -6466,6 +6612,7 @@ export default class MainScene extends Phaser.Scene {
             delay: skillInterval,
             repeat: repeatCount,
             callback: () => {
+                if (this.isPaused) return; // 暫停時不執行
                 const phantom = this.phantoms.find(p => p.id === phantomId);
                 if (!phantom) return;
 
@@ -6490,6 +6637,7 @@ export default class MainScene extends Phaser.Scene {
             delay: tauntCycle,
             repeat: Math.floor(totalDuration / tauntCycle),
             callback: () => {
+                if (this.isPaused) return; // 暫停時不執行
                 const phantom = this.phantoms.find(p => p.id === phantomId);
                 if (!phantom) return;
 
@@ -6498,6 +6646,7 @@ export default class MainScene extends Phaser.Scene {
 
                 // 2 秒後關閉嘲諷
                 this.time.delayedCall(tauntDuration, () => {
+                    if (this.isPaused) return; // 暫停時不執行
                     // 只有當這個分身還存在時才清除嘲諷
                     const stillExists = this.phantoms.find(p => p.id === phantomId);
                     if (stillExists) {
@@ -6507,26 +6656,7 @@ export default class MainScene extends Phaser.Scene {
             }
         });
 
-        // 彈射射線計時器：每 0.5 秒觸發一次
-        const chainRayInterval = 500;
-        const chainRayTimer = this.time.addEvent({
-            delay: chainRayInterval,
-            repeat: Math.floor(totalDuration / chainRayInterval),
-            callback: () => {
-                const p = this.phantoms.find(ph => ph.id === phantomId);
-                if (!p) return;
-
-                // 計算傷害
-                const equipped = this.skillManager.getEquippedAdvancedSkill();
-                const level = equipped ? equipped.level : skillLevel;
-                const damageUnits = this.currentLevel + level;
-                const damage = MainScene.DAMAGE_UNIT * damageUnits;
-
-                this.phantomCastChainRay(damage, p.x, p.y);
-            }
-        });
-
-        // 加入幻影列表
+        // 加入幻影列表（先加入，再啟動全局計時器）
         const phantom = {
             id: phantomId,
             x: startX,
@@ -6538,10 +6668,30 @@ export default class MainScene extends Phaser.Scene {
             skillTimer: skillTimer,
             dismissTimer: dismissTimer,
             tauntTimer: tauntTimer,
-            chainRayTimer: chainRayTimer,
             lastAfterimageTime: 0
         };
         this.phantoms.push(phantom);
+
+        // 全局彈射射線計時器：只在第一個分身出現時啟動
+        if (!this.globalChainRayTimer) {
+            this.globalChainRayTimer = this.time.addEvent({
+                delay: 500, // 0.5 秒
+                loop: true,
+                callback: () => {
+                    if (this.isPaused) return;
+                    if (this.phantoms.length === 0) return;
+
+                    // 計算傷害
+                    const equipped = this.skillManager.getEquippedAdvancedSkill();
+                    const level = equipped ? equipped.level : skillLevel;
+                    const damageUnits = this.currentLevel + level;
+                    const damage = MainScene.DAMAGE_UNIT * damageUnits;
+
+                    // 從本尊位置發射
+                    this.phantomCastChainRay(damage, this.characterX, this.characterY);
+                }
+            });
+        }
 
         // 分身出現特效
         this.showPhantomSpawnEffectAt(startX, startY);
@@ -7211,14 +7361,14 @@ export default class MainScene extends Phaser.Scene {
         const monsters = this.monsterManager.getMonsters();
         const hitMonsterIds = new Set<number>();
 
-        // 繪製射線並檢測碰撞
-        const graphics = this.add.graphics();
-        this.skillGridContainer.add(graphics);
-
-        // 射線寬度（用於碰撞檢測）
+        // 射線寬度（用於碰撞檢測和視覺）
         const rayWidth = this.gameBounds.height * 0.02; // 0.2 單位寬
+        const lineWidth = 24; // 線條粗度（像素）
 
-        // 依序繪製每段射線
+        // 用於收集所有 sprites 以便統一淡出
+        const allSprites: Phaser.GameObjects.Sprite[] = [];
+
+        // 依序繪製每段射線（使用 LINE 紋理）
         for (let i = 0; i < chainOrder.length - 1; i++) {
             const p1 = points[chainOrder[i]];
             const p2 = points[chainOrder[i + 1]];
@@ -7226,19 +7376,31 @@ export default class MainScene extends Phaser.Scene {
             const screen1 = this.worldToScreen(p1.x, p1.y);
             const screen2 = this.worldToScreen(p2.x, p2.y);
 
-            // 繪製紫色射線
-            graphics.lineStyle(4, 0xbb66ff, 0.9);
-            graphics.beginPath();
-            graphics.moveTo(screen1.x, screen1.y);
-            graphics.lineTo(screen2.x, screen2.y);
-            graphics.strokePath();
+            // 計算長度和角度
+            const dx = screen2.x - screen1.x;
+            const dy = screen2.y - screen1.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx);
 
-            // 繪製內部亮線
-            graphics.lineStyle(2, 0xeeccff, 1);
-            graphics.beginPath();
-            graphics.moveTo(screen1.x, screen1.y);
-            graphics.lineTo(screen2.x, screen2.y);
-            graphics.strokePath();
+            // 外層紫色射線
+            const outerLine = this.add.sprite((screen1.x + screen2.x) / 2, (screen1.y + screen2.y) / 2, MainScene.TEXTURE_LINE);
+            this.skillGridContainer.add(outerLine);
+            outerLine.setDepth(58);
+            outerLine.setTint(0xbb66ff);
+            outerLine.setRotation(angle);
+            outerLine.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+            outerLine.setAlpha(0.9);
+            allSprites.push(outerLine);
+
+            // 內層亮線
+            const innerLine = this.add.sprite((screen1.x + screen2.x) / 2, (screen1.y + screen2.y) / 2, MainScene.TEXTURE_LINE);
+            this.skillGridContainer.add(innerLine);
+            innerLine.setDepth(59);
+            innerLine.setTint(0xeeccff);
+            innerLine.setRotation(angle);
+            innerLine.setScale(length / MainScene.EFFECT_TEXTURE_SIZE, (lineWidth * 0.5) / MainScene.EFFECT_LINE_HEIGHT);
+            innerLine.setAlpha(1);
+            allSprites.push(innerLine);
 
             // 檢測這段射線經過的怪物
             for (const monster of monsters) {
@@ -7259,13 +7421,26 @@ export default class MainScene extends Phaser.Scene {
             }
         }
 
-        // 在每個節點繪製光點
+        // 在每個節點繪製光點（使用 CIRCLE）
         for (let i = 0; i < points.length; i++) {
             const screen = this.worldToScreen(points[i].x, points[i].y);
-            graphics.fillStyle(0xeeccff, 1);
-            graphics.fillCircle(screen.x, screen.y, 8);
-            graphics.fillStyle(0xffffff, 0.8);
-            graphics.fillCircle(screen.x, screen.y, 4);
+
+            // 外圈光點
+            const outerDot = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_CIRCLE);
+            this.skillGridContainer.add(outerDot);
+            outerDot.setDepth(60);
+            outerDot.setTint(0xeeccff);
+            outerDot.setScale(16 / MainScene.EFFECT_TEXTURE_SIZE);
+            allSprites.push(outerDot);
+
+            // 內圈白點
+            const innerDot = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_CIRCLE);
+            this.skillGridContainer.add(innerDot);
+            innerDot.setDepth(61);
+            innerDot.setTint(0xffffff);
+            innerDot.setScale(8 / MainScene.EFFECT_TEXTURE_SIZE);
+            innerDot.setAlpha(0.8);
+            allSprites.push(innerDot);
         }
 
         // 對命中的怪物造成傷害
@@ -7284,13 +7459,15 @@ export default class MainScene extends Phaser.Scene {
             this.shakeScreen(Math.min(hitMonsterIds.size, 3));
         }
 
-        // 射線淡出動畫
-        this.tweens.add({
-            targets: graphics,
-            alpha: 0,
-            duration: 300,
-            onComplete: () => graphics.destroy()
-        });
+        // 所有 sprites 統一淡出動畫
+        for (const sprite of allSprites) {
+            this.tweens.add({
+                targets: sprite,
+                alpha: 0,
+                duration: 300,
+                onComplete: () => sprite.destroy()
+            });
+        }
     }
 
     // 計算點到線段的最短距離
@@ -7373,10 +7550,18 @@ export default class MainScene extends Phaser.Scene {
         phantom.skillTimer.destroy();
         phantom.dismissTimer.destroy();
         phantom.tauntTimer.destroy();
-        phantom.chainRayTimer.destroy();
 
         // 清除嘲諷目標
         this.monsterManager.clearTauntTarget();
+
+        // 從列表移除（先移除再檢查是否要停止全局計時器）
+        this.phantoms.splice(index, 1);
+
+        // 如果沒有分身了，停止全局彈射射線計時器
+        if (this.phantoms.length === 0 && this.globalChainRayTimer) {
+            this.globalChainRayTimer.destroy();
+            this.globalChainRayTimer = undefined;
+        }
 
         // 消失特效
         const screen = this.worldToScreen(phantom.x, phantom.y);
@@ -7427,6 +7612,8 @@ export default class MainScene extends Phaser.Scene {
 
     // 零信任防禦協定：視覺更新（在 update 中呼叫）
     private updateZeroTrustVisual(delta: number) {
+        if (this.isPaused) return; // 暫停時不更新
+
         // 檢查是否裝備了零信任防禦協定
         const equipped = this.skillManager.getEquippedAdvancedSkill();
         if (!equipped || equipped.definition.id !== 'advanced_zero_trust') {
@@ -7448,6 +7635,8 @@ export default class MainScene extends Phaser.Scene {
 
     // 每幀更新所有分身視覺與移動
     private updatePhantomVisual(delta: number) {
+        if (this.isPaused) return; // 暫停時不更新
+
         const now = this.time.now;
 
         for (const phantom of this.phantoms) {
@@ -8346,8 +8535,7 @@ export default class MainScene extends Phaser.Scene {
                         onComplete: () => {
                             this.skillCutInContainer.setVisible(false);
                             this.skillCutInContainer.setX(0);
-                            // CutIn 動畫結束，恢復遊戲
-                            this.isPaused = false;
+                            // CutIn 動畫結束
                             this.isSkillSelecting = false;
                         }
                     });
@@ -8809,14 +8997,16 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private hideSkillPanel() {
-        // 淡出動畫（不在這裡取消暫停，等 CutIn 結束後才恢復）
+        // 選完技能卡後立即恢復遊戲（CUT IN 期間不暫停）
+        this.isPaused = false;
+
+        // 淡出動畫
         this.tweens.add({
             targets: this.skillPanelContainer,
             alpha: 0,
             duration: 200,
             onComplete: () => {
                 this.skillPanelContainer.setVisible(false);
-                // 注意：isPaused 會在 CutIn 動畫結束後才設為 false
             }
         });
     }
@@ -8866,8 +9056,15 @@ export default class MainScene extends Phaser.Scene {
     private selectAdvancedSkill(index: number, skillId: string) {
         const advSkillDef = this.currentAdvancedSkillChoices[index];
 
-        // 清除舊進階技能的視覺效果（例如輪鋸）
-        this.clearAdvancedSkillEffects();
+        // 檢查是否為升級同一技能還是切換到不同技能
+        const currentEquipped = this.skillManager.getEquippedAdvancedSkill();
+        const isSameSkill = currentEquipped?.definition.id === skillId;
+        const isFirstTime = !currentEquipped; // 首次取得進階技能
+
+        // 只有切換到不同技能時才清除舊效果
+        if (!isSameSkill && !isFirstTime) {
+            this.clearAdvancedSkillEffects();
+        }
 
         // 設定為裝備的進階技能
         const success = this.skillManager.setEquippedAdvancedSkill(skillId);
@@ -8890,13 +9087,17 @@ export default class MainScene extends Phaser.Scene {
         // 更新進階技能欄位顯示
         this.updateAdvancedSkillDisplay();
 
-        // 立即觸發一次技能（冷卻設為過去時間）
-        this.advancedSkillCooldownTime = 0;
-        if (equipped) {
+        // 首次取得或切換技能時：重置冷卻並立即觸發
+        // 升級同一技能時：保持現有冷卻，不觸發
+        if (equipped && (isFirstTime || (!isSameSkill && newLevel === 1))) {
+            this.advancedSkillCooldownTime = 0;
             this.activateAdvancedSkill(equipped);
-            // 設定冷卻開始時間為現在
+            this.advancedSkillCooldownTime = this.time.now;
+        } else if (!isSameSkill) {
+            // 切換到已升級過的技能：重置冷卻但不立即觸發
             this.advancedSkillCooldownTime = this.time.now;
         }
+        // 升級同一技能：冷卻保持不變
 
         // 選中動畫
         const selectedOption = this.skillOptions[index];
@@ -9196,7 +9397,7 @@ export default class MainScene extends Phaser.Scene {
                     }
                 }
 
-                // 技能名稱
+                // 技能名稱（固定位置）
                 const nameY = cardHeight * 0.06;
                 const nameText = this.add.text(0, nameY, skillDef.name, {
                     fontFamily: '"Noto Sans TC", sans-serif',
@@ -9469,8 +9670,15 @@ export default class MainScene extends Phaser.Scene {
             if (advIndex >= 0 && advIndex < this.currentAdvancedSkillChoices.length) {
                 const advSkillDef = this.currentAdvancedSkillChoices[advIndex];
 
-                // 清除舊進階技能的視覺效果（例如輪鋸）
-                this.clearAdvancedSkillEffects();
+                // 檢查是否為升級同一技能還是切換到不同技能
+                const currentEquipped = this.skillManager.getEquippedAdvancedSkill();
+                const isSameSkill = currentEquipped?.definition.id === advSkillDef.id;
+                const isFirstTime = !currentEquipped; // 首次取得進階技能
+
+                // 只有切換到不同技能時才清除舊效果
+                if (!isSameSkill && !isFirstTime) {
+                    this.clearAdvancedSkillEffects();
+                }
 
                 // 裝備並升級進階技能
                 this.skillManager.setEquippedAdvancedSkill(advSkillDef.id);
@@ -9484,13 +9692,18 @@ export default class MainScene extends Phaser.Scene {
                 // 更新進階技能欄位顯示
                 this.updateAdvancedSkillDisplay();
 
-                // 立即觸發一次技能
-                this.advancedSkillCooldownTime = 0;
+                // 首次取得或切換技能時：重置冷卻並立即觸發
+                // 升級同一技能時：保持現有冷卻，不觸發
                 const equipped = this.skillManager.getEquippedAdvancedSkill();
-                if (equipped) {
+                if (equipped && (isFirstTime || (!isSameSkill && newLevel === 1))) {
+                    this.advancedSkillCooldownTime = 0;
                     this.activateAdvancedSkill(equipped);
                     this.advancedSkillCooldownTime = this.time.now;
+                } else if (!isSameSkill) {
+                    // 切換到已升級過的技能：重置冷卻但不立即觸發
+                    this.advancedSkillCooldownTime = this.time.now;
                 }
+                // 升級同一技能：冷卻保持不變
 
                 // 顯示 CUT IN
                 this.showAdvancedSkillCutIn(advSkillDef, newLevel);
@@ -9678,8 +9891,7 @@ export default class MainScene extends Phaser.Scene {
                         ease: 'Power2.easeIn',
                         onComplete: () => {
                             this.skillCutInContainer.setVisible(false);
-                            // CutIn 動畫結束，恢復遊戲
-                            this.isPaused = false;
+                            // CutIn 動畫結束
                             this.isSkillSelecting = false;
                         }
                     });

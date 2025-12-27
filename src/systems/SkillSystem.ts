@@ -16,7 +16,7 @@ export interface MaxExtraAbility {
 export interface SkillDefinition {
     id: string;
     name: string;
-    subtitle?: string; // 副標題（小字顯示在名稱下方）
+    subtitle?: string; // 卡片顯示的簡短名稱（如動畫大師、超級肝）
     description: string;
     type: SkillType;
     color: number; // 技能顏色
@@ -71,8 +71,8 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         name: '技術美術大神',
         subtitle: '一人成軍的遊戲開發者',
         description: '【咒言幻象＋視網膜】\n周圍5單位射下光線，敵人癱瘓0.5秒',
-        color: 0x00ffcc,  // 青色（科技感）
-        flashColor: 0x66ffdd,
+        color: 0x9966ff,  // 藍紫色
+        flashColor: 0xbb99ff,
         cooldown: 1000,  // 1 秒
         maxLevel: -1,  // 無上限
         iconPrefix: 'X02',
@@ -125,7 +125,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         description: '【咒言幻象＋AI強化】\n召喚影分身施放特殊技，每5秒嘲諷怪物2秒',
         color: 0x9966ff,  // 紫藍色（幻影感）
         flashColor: 0xbb88ff,
-        cooldown: 20000,  // 20 秒
+        cooldown: 15000,  // 15 秒
         maxLevel: -1,  // 無上限
         iconPrefix: 'X06',
         requiredSkills: ['active_coder', 'passive_ai_enhancement'],  // 咒言幻象（遊戲先知）+ AI 賦能強化
@@ -301,6 +301,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_titanium_liver',
         name: '鈦金屬賽博肝臟',
+        subtitle: '超級肝',
         description: '提升 10% HP 總量並每 15 秒回復 1% 最大 HP，每級再 +10% HP、回復間隔 -1 秒',
         type: 'passive',
         color: 0xaabbcc, // 銀灰色
@@ -315,11 +316,11 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+60% HP、每 10 秒回血，已達最大等級！'
         ],
         levelUpQuotes: [
-            '', // LV0
-            '', // LV1
-            '', // LV2
-            '', // LV3
-            '', // LV4
+            '驚人無懈可擊的耐力，你的工作時長不斷提升', // LV0
+            '驚人無懈可擊的耐力，你的工作時長不斷提升', // LV1
+            '驚人無懈可擊的耐力，你的工作時長不斷提升', // LV2
+            '驚人無懈可擊的耐力，你的工作時長不斷提升', // LV3
+            '驚人無懈可擊的耐力，你的工作時長不斷提升', // LV4
             '千錘百鍊的鈦金肝再也不怕熬夜', // LV5/MAX
         ],
         maxExtraAbility: {
@@ -335,6 +336,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_sync_rate',
         name: '精神同步率強化',
+        subtitle: '零的領域',
         description: '提升 10% 移速、減少 8% 冷卻，每級再疊加',
         type: 'passive',
         color: 0xdd8844, // 暗橘色
@@ -349,11 +351,11 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+60% 移速、-48% 冷卻，已達最大等級！'
         ],
         levelUpQuotes: [
-            '', // LV0
-            '', // LV1
-            '', // LV2
-            '', // LV3
-            '', // LV4
+            '進入到心流狀態，專注力提升且變的敏捷', // LV0
+            '進入到心流狀態，專注力提升且變的敏捷', // LV1
+            '進入到心流狀態，專注力提升且變的敏捷', // LV2
+            '進入到心流狀態，專注力提升且變的敏捷', // LV3
+            '進入到心流狀態，專注力提升且變的敏捷', // LV4
             '你已進入無限心流狀態，感覺身手異常敏捷迅速', // LV5/MAX
         ],
         maxExtraAbility: {
@@ -368,6 +370,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_retina_module',
         name: '視網膜增強模組',
+        subtitle: '血輪眼',
         description: '提升 30% 經驗取得，每級再 +30%',
         type: 'passive',
         color: 0x992233, // 暗紅色
@@ -382,11 +385,11 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+180% 經驗，已達最大等級！'
         ],
         levelUpQuotes: [
-            '', // LV0
-            '', // LV1
-            '', // LV2
-            '', // LV3
-            '', // LV4
+            '敏銳的觀察力，提高獲取經驗的速度', // LV0
+            '敏銳的觀察力，提高獲取經驗的速度', // LV1
+            '敏銳的觀察力，提高獲取經驗的速度', // LV2
+            '敏銳的觀察力，提高獲取經驗的速度', // LV3
+            '敏銳的觀察力，提高獲取經驗的速度', // LV4
             '千錘百鍊的敏銳觀察，再沒什麼看不穿、看不清', // LV5/MAX
         ],
         maxExtraAbility: {
@@ -401,6 +404,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
     {
         id: 'passive_ai_enhancement',
         name: 'AI賦能強化',
+        subtitle: '智能輔助',
         description: '提升 25% 攻擊、15% 防禦，每級再疊加',
         type: 'passive',
         color: 0x6688aa, // 灰藍色
@@ -415,11 +419,11 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '+150% 攻擊、+90% 防禦，已達最大等級！'
         ],
         levelUpQuotes: [
-            '', // LV0
-            '', // LV1
-            '', // LV2
-            '', // LV3
-            '', // LV4
+            '攻守兼備，各方面能力全面提升', // LV0
+            '攻守兼備，各方面能力全面提升', // LV1
+            '攻守兼備，各方面能力全面提升', // LV2
+            '攻守兼備，各方面能力全面提升', // LV3
+            '攻守兼備，各方面能力全面提升', // LV4
             '熟練的AI操作，讓你無論做任何事情效率提高數十倍', // LV5/MAX
         ],
         maxExtraAbility: {
