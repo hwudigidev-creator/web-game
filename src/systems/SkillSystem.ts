@@ -206,16 +206,16 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         type: 'active',
         color: 0xaa66ff, // 紫色
         flashColor: 0xcc88ff, // 閃紫光
-        cooldown: 1500, // 1.5 秒
+        cooldown: 2000, // 2 秒
         maxLevel: 5,
         iconPrefix: 'C', // C00.png ~ C05.png
         levelUpMessages: [
-            '2 單位範圍、1 傷害',
-            '2.5 單位範圍、2 傷害',
-            '3 單位範圍、3 傷害',
-            '3.5 單位範圍、4 傷害',
-            '4 單位範圍、5 傷害',
-            '4.5 單位範圍、6 傷害，已達最大等級！'
+            '2 單位範圍、2 傷害',
+            '2.5 單位範圍、4 傷害',
+            '3 單位範圍、6 傷害',
+            '3.5 單位範圍、8 傷害',
+            '4 單位範圍、10 傷害',
+            '4.5 單位範圍、12 傷害，已達最大等級！'
         ],
         levelUpQuotes: [
             '你參透了互動設計的原理，同時了解遊戲企劃架構', // LV0
@@ -262,8 +262,8 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '你成為了超級導演，解鎖了進階技能組合', // LV5/MAX
         ],
         maxExtraAbility: {
-            name: '連鎖',
-            description: '擊中時 {value} 機率產生 X 型射線',
+            name: '精準連鎖',
+            description: '擊中時 {value} 機率發射 3 條鎖定超粗射線',
             baseValue: 0,
             perLevel: 0.0005, // 每級 +0.05%
             unit: '%',

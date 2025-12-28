@@ -46,6 +46,15 @@ export default class MainScene extends Phaser.Scene {
 
     // 地板格子
     private floorGrid!: Phaser.GameObjects.Graphics;
+    private floorHexContainer!: Phaser.GameObjects.Container; // 地板字元容器（在 floorGrid 之上）
+
+    // 地板隨機字元（空間定位用）
+    private floorHexChars: { text: Phaser.GameObjects.Text; gridKey: string; spawnTime: number }[] = [];
+    private floorHexUsedPositions: Set<string> = new Set();
+    private floorHexPool: Phaser.GameObjects.Text[] = []; // 物件池
+    private static readonly FLOOR_HEX_MAX = 150; // 最多 150 個字
+    private static readonly FLOOR_HEX_LIFETIME = 2000; // 2 秒消失
+    private static readonly HEX_CHARS = '0123456789ABCDEF';
 
     // 遊戲世界容器（會隨鏡頭移動的內容）
     private worldContainer!: Phaser.GameObjects.Container;
@@ -377,6 +386,10 @@ export default class MainScene extends Phaser.Scene {
         this.drawFloorGrid();
         this.worldContainer.add(this.floorGrid);
 
+        // 建立地板字元容器（在 floorGrid 之上）
+        this.floorHexContainer = this.add.container(0, 0);
+        this.worldContainer.add(this.floorHexContainer);
+
         // 建立角色動畫
         this.createCharacterAnimations();
 
@@ -545,6 +558,7 @@ export default class MainScene extends Phaser.Scene {
         this.updateAdvancedSkillCooldown(delta);
         this.updatePhantomVisual(delta);
         this.updateZeroTrustVisual(delta);
+        this.updateFloorHexChars();
 
         // 更新遊戲計時器（只在非暫停時累加）
         this.gameTimer += delta;
@@ -1018,7 +1032,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 編碼者：對周圍敵人造成傷害
     // 起始範圍 2 單位，每級 +0.5 單位（Lv.0=2單位，Lv.5=4.5單位）
-    // 起始傷害 1 單位，每級 +1 單位（Lv.0=1單位，Lv.5=6單位）
+    // 起始傷害 2 單位，每級 +2 單位（Lv.0=2單位，Lv.5=12單位）- 傷害 x2、冷卻 2 秒
     private activateCoder(skill: PlayerSkill) {
         const monsters = this.monsterManager.getMonsters();
         if (monsters.length === 0) return;
@@ -1030,8 +1044,8 @@ export default class MainScene extends Phaser.Scene {
         const rangeUnits = 2 + skill.level * 0.5;
         const range = unitSize * rangeUnits;
 
-        // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
-        const damageUnits = 1 + skill.level;
+        // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
+        const damageUnits = (1 + skill.level) * 2;
         const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
         const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
@@ -1152,13 +1166,21 @@ export default class MainScene extends Phaser.Scene {
 
             // 對命中的怪物造成傷害
             if (hitMonsters.length > 0) {
-                const hitPositions = monsters
-                    .filter(m => hitMonsters.includes(m.id))
-                    .map(m => ({ x: m.x, y: m.y }));
+                // 取得命中怪物的資料（在造成傷害前）
+                const hitMonstersData = monsters.filter(m => hitMonsters.includes(m.id));
 
                 const result = this.monsterManager.damageMonsters(hitMonsters, damage);
                 if (result.totalExp > 0) {
                     this.addExp(result.totalExp);
+                }
+
+                // 擊中多隻觸發畫面震動
+                this.shakeScreen(hitMonsters.length);
+
+                // 打擊火花（藍色，方向性反彈）
+                for (const m of hitMonstersData) {
+                    const hitDir = Math.atan2(m.y - originY, m.x - originX);
+                    this.showHitSparkEffect(m.x, m.y, 0x6699ff, hitDir, 3);
                 }
             }
         };
@@ -1370,12 +1392,20 @@ export default class MainScene extends Phaser.Scene {
         const monsters = this.monsterManager.getMonsters();
         if (monsters.length === 0) return;
 
-        // 光束數量 = 技能等級 + 1（Lv.0=1道，Lv.5=6道）
-        const beamCount = skill.level + 1;
+        // 檢查是否 MAX 等級
+        const isMax = skill.level >= skill.definition.maxLevel;
+
+        // MAX 時：3 條精準鎖定射線，10 倍粗
+        // 非 MAX：光束數量 = 技能等級 + 1（Lv.0=1道，Lv.4=5道）
+        const beamCount = isMax ? 3 : skill.level + 1;
 
         // 光束參數
-        const range = this.gameBounds.height * 1.0; // 10 個單位（畫面高度 10% * 10）
-        const beamWidth = this.gameBounds.height * 0.05; // 光束寬度（0.5 單位）
+        const range = isMax
+            ? this.gameBounds.height * 1.5  // MAX：15 單位射程
+            : this.gameBounds.height * 1.0; // 普通：10 單位
+        const beamWidth = isMax
+            ? this.gameBounds.height * 0.5  // MAX：5 單位寬（10 倍粗）
+            : this.gameBounds.height * 0.05; // 普通：0.5 單位
 
         // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
         const damageUnits = 1 + skill.level;
@@ -1384,67 +1414,74 @@ export default class MainScene extends Phaser.Scene {
 
         // 收集所有被命中的怪物（使用 Set 避免重複）
         const allHitMonsters = new Set<number>();
-
-        // 隨機選擇不重複的目標怪物
-        const availableIndices = monsters.map((_, i) => i);
         const targetAngles: number[] = [];
 
-        for (let beam = 0; beam < beamCount; beam++) {
-            let targetAngle: number;
+        if (isMax) {
+            // MAX 模式：精準鎖定最近的 3 隻怪物
+            const monstersWithDist = monsters.map(monster => {
+                const dx = monster.x - this.characterX;
+                const dy = monster.y - this.characterY;
+                return { monster, dist: Math.sqrt(dx * dx + dy * dy) };
+            });
+            monstersWithDist.sort((a, b) => a.dist - b.dist);
 
-            if (availableIndices.length > 0) {
-                // 從可用的怪物中隨機選一個
-                const pickIndex = Math.floor(Math.random() * availableIndices.length);
-                const monsterIndex = availableIndices[pickIndex];
-                availableIndices.splice(pickIndex, 1); // 移除已選的索引
-
-                const targetMonster = monsters[monsterIndex];
-                targetAngle = Math.atan2(
-                    targetMonster.y - this.characterY,
-                    targetMonster.x - this.characterX
+            const targetCount = Math.min(beamCount, monstersWithDist.length);
+            for (let i = 0; i < targetCount; i++) {
+                const target = monstersWithDist[i].monster;
+                const targetAngle = Math.atan2(
+                    target.y - this.characterY,
+                    target.x - this.characterX
                 );
-            } else {
-                // 怪物不夠時，隨機角度
-                targetAngle = Math.random() * Math.PI * 2;
+                targetAngles.push(targetAngle);
             }
+        } else {
+            // 普通模式：隨機選擇不重複的目標怪物
+            const availableIndices = monsters.map((_, i) => i);
+            for (let beam = 0; beam < beamCount; beam++) {
+                let targetAngle: number;
+                if (availableIndices.length > 0) {
+                    const pickIndex = Math.floor(Math.random() * availableIndices.length);
+                    const monsterIndex = availableIndices[pickIndex];
+                    availableIndices.splice(pickIndex, 1);
+                    const targetMonster = monsters[monsterIndex];
+                    targetAngle = Math.atan2(
+                        targetMonster.y - this.characterY,
+                        targetMonster.x - this.characterX
+                    );
+                } else {
+                    targetAngle = Math.random() * Math.PI * 2;
+                }
+                targetAngles.push(targetAngle);
+            }
+        }
 
-            targetAngles.push(targetAngle);
-
+        // 發射光束
+        for (const targetAngle of targetAngles) {
             // 檢查哪些怪物在這道光束範圍內
             for (const monster of monsters) {
-                // 計算怪物碰撞半徑（體型的一半）
                 const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-
                 const dx = monster.x - this.characterX;
                 const dy = monster.y - this.characterY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // 檢查距離（扣除怪物半徑）
                 if (dist - monsterRadius > range) continue;
 
-                // 計算怪物到光束中心線的垂直距離
                 const dirX = Math.cos(targetAngle);
                 const dirY = Math.sin(targetAngle);
-
-                // 投影長度
                 const projLength = dx * dirX + dy * dirY;
 
-                // 只考慮在角色前方的怪物（扣除怪物半徑）
                 if (projLength < -monsterRadius) continue;
 
-                // 垂直距離
                 const perpDist = Math.abs(dx * dirY - dy * dirX);
-
-                // 檢查是否在光束寬度內（加上怪物半徑）
                 if (perpDist <= beamWidth / 2 + monsterRadius) {
                     allHitMonsters.add(monster.id);
                 }
             }
 
-            // 繪製光束邊緣線（60% 透明度）
+            // 繪製光束邊緣線
             this.drawBeamEdge(targetAngle, range, beamWidth, skill.definition.color);
 
-            // 繪製光束特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
+            // 繪製光束特效
             const endX = this.characterX + Math.cos(targetAngle) * range;
             const endY = this.characterY + Math.sin(targetAngle) * range;
             const beamFlashColor = skill.definition.flashColor || skill.definition.color;
@@ -1464,7 +1501,6 @@ export default class MainScene extends Phaser.Scene {
         // 對命中的怪物造成傷害
         const hitMonsterIds = Array.from(allHitMonsters);
         if (hitMonsterIds.length > 0) {
-            // 取得命中怪物的位置（在造成傷害前）
             const hitMonstersData = monsters.filter(m => hitMonsterIds.includes(m.id));
             const hitPositions = hitMonstersData.map(m => ({ x: m.x, y: m.y }));
 
@@ -1473,7 +1509,6 @@ export default class MainScene extends Phaser.Scene {
                 this.addExp(result.totalExp);
             }
 
-            // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsterIds.length);
 
             // 打擊火花（綠色，5 條，光束方向）
@@ -1482,7 +1517,7 @@ export default class MainScene extends Phaser.Scene {
                 this.showHitSparkEffect(m.x, m.y, 0x66ff66, hitDir, 5);
             }
 
-            // MAX 後額外能力：連鎖（從擊中位置再發射）
+            // MAX 後額外能力：連鎖（再發射一次）
             const chainChance = this.skillManager.getVfxChainChance(this.currentLevel);
             if (chainChance > 0 && hitPositions.length > 0) {
                 this.triggerVfxChain(hitPositions, finalDamage, chainChance, skill);
@@ -1490,82 +1525,96 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 超級導演連鎖效果：從擊中位置產生 X 型射線（4 條，長度為原本一半）
+    // 疾光狙擊 MAX 連鎖效果：3 條鎖定最近敵人的超粗射線
     private triggerVfxChain(
-        hitPositions: { x: number; y: number }[],
+        _hitPositions: { x: number; y: number }[],
         damage: number,
         chainChance: number,
         skill: PlayerSkill
     ) {
+        // 機率判定（只判定一次）
+        if (Math.random() >= chainChance) return;
+
         const monsters = this.monsterManager.getMonsters();
         if (monsters.length === 0) return;
 
-        const range = this.gameBounds.height * 0.5; // 長度減半
-        const beamWidth = this.gameBounds.height * 0.05;
+        const range = this.gameBounds.height * 1.5; // 加長射程（15 單位）
+        const beamWidth = this.gameBounds.height * 0.5; // 10 倍粗（5 單位寬）
         const chainFlashColor = skill.definition.flashColor || skill.definition.color;
 
-        // X 型的 4 個角度（45°、135°、225°、315°）
-        const xAngles = [
-            Math.PI / 4,        // 45° 右上
-            Math.PI * 3 / 4,    // 135° 左上
-            Math.PI * 5 / 4,    // 225° 左下
-            Math.PI * 7 / 4     // 315° 右下
-        ];
+        // 找出最近的 3 隻怪物
+        const monstersWithDist = monsters.map(monster => {
+            const dx = monster.x - this.characterX;
+            const dy = monster.y - this.characterY;
+            return { monster, dist: Math.sqrt(dx * dx + dy * dy) };
+        });
+        monstersWithDist.sort((a, b) => a.dist - b.dist);
 
-        for (const pos of hitPositions) {
-            // 每個擊中位置獨立判定機率
-            if (Math.random() >= chainChance) continue;
+        const targetCount = Math.min(3, monstersWithDist.length);
+        const chainHitMonsters: Set<number> = new Set();
 
-            // 收集所有 X 型射線命中的怪物
-            const chainHitMonsters: Set<number> = new Set();
+        // 對最近的 3 隻怪物各發射一條超粗射線
+        for (let i = 0; i < targetCount; i++) {
+            const target = monstersWithDist[i].monster;
 
-            for (const angle of xAngles) {
-                // 檢測這條射線命中的怪物
-                for (const monster of monsters) {
-                    const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-                    const dx = monster.x - pos.x;
-                    const dy = monster.y - pos.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
+            // 計算射線角度（精準鎖定目標）
+            const angle = Math.atan2(
+                target.y - this.characterY,
+                target.x - this.characterX
+            );
 
-                    if (dist - monsterRadius > range) continue;
+            // 檢測這條超粗射線命中的所有怪物
+            for (const monster of monsters) {
+                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+                const dx = monster.x - this.characterX;
+                const dy = monster.y - this.characterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
 
-                    const dirX = Math.cos(angle);
-                    const dirY = Math.sin(angle);
-                    const projLength = dx * dirX + dy * dirY;
+                if (dist - monsterRadius > range) continue;
 
-                    // 只檢測射線方向（不檢測反方向）
-                    if (projLength < -monsterRadius || projLength > range + monsterRadius) continue;
+                const dirX = Math.cos(angle);
+                const dirY = Math.sin(angle);
+                const projLength = dx * dirX + dy * dirY;
 
-                    const perpDist = Math.abs(dx * dirY - dy * dirX);
-                    if (perpDist <= beamWidth / 2 + monsterRadius) {
-                        chainHitMonsters.add(monster.id);
-                    }
-                }
+                // 只檢測射線方向
+                if (projLength < -monsterRadius) continue;
 
-                // 繪製連鎖光束邊緣線
-                this.drawBeamEdge(angle, range, beamWidth, skill.definition.color, pos.x, pos.y);
-
-                // 繪製連鎖光束特效
-                const endX = pos.x + Math.cos(angle) * range;
-                const endY = pos.y + Math.sin(angle) * range;
-                if (this.showGridSkillEffects) {
-                    this.flashSkillAreaLine(pos.x, pos.y, endX, endY, beamWidth, chainFlashColor);
-                } else {
-                    this.flashSkillEffectLine(pos.x, pos.y, endX, endY, beamWidth, chainFlashColor);
+                const perpDist = Math.abs(dx * dirY - dy * dirX);
+                if (perpDist <= beamWidth / 2 + monsterRadius) {
+                    chainHitMonsters.add(monster.id);
                 }
             }
 
-            // 對連鎖命中的怪物造成傷害
-            const hitMonsterIds = Array.from(chainHitMonsters);
-            if (hitMonsterIds.length > 0) {
-                const chainHitPositions = monsters
-                    .filter(m => chainHitMonsters.has(m.id))
-                    .map(m => ({ x: m.x, y: m.y }));
+            // 繪製超粗光束邊緣線
+            this.drawBeamEdge(angle, range, beamWidth, skill.definition.color);
 
-                const chainResult = this.monsterManager.damageMonsters(hitMonsterIds, damage);
-                if (chainResult.totalExp > 0) {
-                    this.addExp(chainResult.totalExp);
-                }
+            // 繪製超粗光束特效
+            const endX = this.characterX + Math.cos(angle) * range;
+            const endY = this.characterY + Math.sin(angle) * range;
+            if (this.showGridSkillEffects) {
+                this.flashSkillAreaLine(this.characterX, this.characterY, endX, endY, beamWidth, chainFlashColor);
+            } else {
+                this.flashSkillEffectLine(this.characterX, this.characterY, endX, endY, beamWidth, chainFlashColor);
+            }
+        }
+
+        // 對連鎖命中的怪物造成傷害
+        const hitMonsterIds = Array.from(chainHitMonsters);
+        if (hitMonsterIds.length > 0) {
+            const hitMonstersData = monsters.filter(m => chainHitMonsters.has(m.id));
+
+            const chainResult = this.monsterManager.damageMonsters(hitMonsterIds, damage);
+            if (chainResult.totalExp > 0) {
+                this.addExp(chainResult.totalExp);
+            }
+
+            // 擊中震動
+            this.shakeScreen(hitMonsterIds.length);
+
+            // 打擊火花（綠色）
+            for (const m of hitMonstersData) {
+                const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
+                this.showHitSparkEffect(m.x, m.y, 0x66ff66, hitDir, 5);
             }
         }
     }
@@ -3977,60 +4026,132 @@ export default class MainScene extends Phaser.Scene {
     private drawFloorGrid() {
         this.floorGrid.clear();
 
-        // 格子大小（根據視窗大小調整）
-        const gridSize = this.gameBounds.height / 10;
-
-        // 計算格子數量
-        const cols = Math.ceil(this.mapWidth / gridSize);
-        const rows = Math.ceil(this.mapHeight / gridSize);
-
-        // 繪製格子
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < cols; col++) {
-                const x = col * gridSize;
-                const y = row * gridSize;
-
-                // 交錯顏色（棋盤格）
-                if ((row + col) % 2 === 0) {
-                    this.floorGrid.fillStyle(0x333333, 1);
-                } else {
-                    this.floorGrid.fillStyle(0x444444, 1);
-                }
-
-                this.floorGrid.fillRect(x, y, gridSize, gridSize);
-
-                // 繪製格線
-                this.floorGrid.lineStyle(1, 0x555555, 0.5);
-                this.floorGrid.strokeRect(x, y, gridSize, gridSize);
-            }
-        }
+        // 純色背景（深灰色 #111111）
+        this.floorGrid.fillStyle(0x111111, 1);
+        this.floorGrid.fillRect(0, 0, this.mapWidth, this.mapHeight);
 
         // 繪製地圖邊界（紅色框線）
         this.floorGrid.lineStyle(4, 0xff4444, 1);
         this.floorGrid.strokeRect(0, 0, this.mapWidth, this.mapHeight);
+    }
 
-        // 繪製中心標記（方便測試）
-        this.floorGrid.lineStyle(2, 0xffff00, 1);
-        const centerX = this.mapWidth / 2;
-        const centerY = this.mapHeight / 2;
-        const markerSize = gridSize;
-        this.floorGrid.strokeRect(
-            centerX - markerSize / 2,
-            centerY - markerSize / 2,
-            markerSize,
-            markerSize
-        );
+    // 從物件池取得或建立 hex text
+    private getFloorHexText(char: string, fontSize: number): Phaser.GameObjects.Text {
+        let text = this.floorHexPool.pop();
+        if (!text) {
+            text = this.add.text(0, 0, char, {
+                fontFamily: 'Consolas, "Courier New", monospace',
+                fontSize: `${fontSize}px`,
+                color: '#2a8a2a',
+                fontStyle: 'italic' // 斜體模擬傾斜
+            });
+        } else {
+            text.setText(char);
+            text.setFontSize(fontSize);
+            text.setVisible(true);
+            text.setActive(true);
+        }
+        return text;
+    }
 
-        // 繪製座標標記（每 5 格標記一次）
-        for (let row = 0; row < rows; row += 5) {
-            for (let col = 0; col < cols; col += 5) {
-                const x = col * gridSize + gridSize / 2;
-                const y = row * gridSize + gridSize / 2;
+    // 釋放 hex text 回物件池
+    private releaseFloorHexText(text: Phaser.GameObjects.Text) {
+        text.setVisible(false);
+        text.setActive(false);
+        this.floorHexPool.push(text);
+    }
 
-                // 繪製小圓點標記
-                this.floorGrid.fillStyle(0x666666, 1);
-                this.floorGrid.fillCircle(x, y, 4);
+    // 生成地板隨機字元（空間定位用，只在可見區域附近生成）
+    private spawnFloorHexChar() {
+        if (this.floorHexChars.length >= MainScene.FLOOR_HEX_MAX) return;
+
+        // 格子大小：4% 畫面高度
+        const gridSize = this.gameBounds.height * 0.04;
+
+        // 只在角色周圍 2 倍螢幕範圍內生成
+        const viewWidth = this.gameBounds.width * 2;
+        const viewHeight = this.gameBounds.height * 2;
+        const minX = Math.max(0, this.characterX - viewWidth / 2);
+        const minY = Math.max(0, this.characterY - viewHeight / 2);
+        const maxX = Math.min(this.mapWidth, this.characterX + viewWidth / 2);
+        const maxY = Math.min(this.mapHeight, this.characterY + viewHeight / 2);
+
+        // 嘗試找一個未使用的位置
+        let attempts = 0;
+        while (attempts < 20) {
+            const x = minX + Math.random() * (maxX - minX);
+            const y = minY + Math.random() * (maxY - minY);
+            const col = Math.floor(x / gridSize);
+            const row = Math.floor(y / gridSize);
+            const gridKey = `${col},${row}`;
+
+            if (!this.floorHexUsedPositions.has(gridKey)) {
+                // 找到空位，生成字元
+                const char = MainScene.HEX_CHARS[Math.floor(Math.random() * MainScene.HEX_CHARS.length)];
+                const centerX = col * gridSize + gridSize / 2;
+                const centerY = row * gridSize + gridSize / 2;
+                const fontSize = Math.floor(gridSize * 0.8);
+
+                // 使用斜體文字
+                const text = this.getFloorHexText(char, fontSize);
+                text.setPosition(centerX, centerY);
+                text.setOrigin(0.5);
+                text.setAlpha(0); // 從 0 開始淡入
+                this.floorHexContainer.add(text);
+
+                this.floorHexChars.push({
+                    text,
+                    gridKey,
+                    spawnTime: this.time.now
+                });
+                this.floorHexUsedPositions.add(gridKey);
+                return;
             }
+            attempts++;
+        }
+    }
+
+    // 更新地板字元（淡入淡出）
+    private updateFloorHexChars() {
+        const now = this.time.now;
+        const fadeTime = MainScene.FLOOR_HEX_LIFETIME * 0.2; // 前後 20% 時間淡入淡出
+        const maxDist = this.gameBounds.width * 1.5; // 超出 1.5 倍螢幕寬度就移除
+
+        for (let i = this.floorHexChars.length - 1; i >= 0; i--) {
+            const hex = this.floorHexChars[i];
+            const age = now - hex.spawnTime;
+
+            // 計算距離角色的距離
+            const textX = hex.text.x;
+            const textY = hex.text.y;
+            const dist = Math.sqrt(
+                Math.pow(textX - this.characterX, 2) +
+                Math.pow(textY - this.characterY, 2)
+            );
+
+            if (age >= MainScene.FLOOR_HEX_LIFETIME || dist > maxDist) {
+                // 時間到或太遠，回收到物件池
+                this.releaseFloorHexText(hex.text);
+                this.floorHexUsedPositions.delete(hex.gridKey);
+                this.floorHexChars.splice(i, 1);
+            } else if (age < fadeTime) {
+                // 淡入（前 20%）
+                const fadeInProgress = age / fadeTime;
+                hex.text.setAlpha(0.7 * fadeInProgress);
+            } else if (age > MainScene.FLOOR_HEX_LIFETIME - fadeTime) {
+                // 淡出（後 20%）
+                const fadeOutProgress = (MainScene.FLOOR_HEX_LIFETIME - age) / fadeTime;
+                hex.text.setAlpha(0.7 * fadeOutProgress);
+            } else {
+                hex.text.setAlpha(0.7);
+            }
+        }
+
+        // 每幀生成多個字元，快速填滿到目標數量
+        const targetCount = MainScene.FLOOR_HEX_MAX;
+        const spawnPerFrame = Math.min(10, targetCount - this.floorHexChars.length);
+        for (let i = 0; i < spawnPerFrame; i++) {
+            this.spawnFloorHexChar();
         }
     }
 
