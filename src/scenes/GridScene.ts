@@ -485,10 +485,11 @@ export default class GridScene extends Phaser.Scene {
 
         // 預載入技能特效紋理
         this.load.image('effect_circle', 'effects/circle.png');
+        this.load.image('effect_circle_line', 'effects/circle_line.png');
         this.load.image('effect_line', 'effects/line.png');
         this.load.image('effect_soulwave', 'effects/soulwave.png');
         this.load.image('effect_shield', 'effects/shield.png');
-        const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160];
+        const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 360];
         for (const angle of sectorAngles) {
             this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
         }
