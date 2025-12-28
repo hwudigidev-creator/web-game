@@ -5041,6 +5041,12 @@ export default class MainScene extends Phaser.Scene {
                     this.flashWhiteCrossAtPositions(hitPositions);
                 }
 
+                // 被炸到的怪物噴出爆炸火花（紫色）
+                for (const pos of hitPositions) {
+                    const screenPos = this.worldToScreen(pos.x, pos.y);
+                    this.showExplosionSparkEffect(screenPos.x, screenPos.y, 0x9966ff, 1.0);
+                }
+
                 // 震動效果
                 this.shakeScreen(hitMonsters.length);
             }
@@ -5638,6 +5644,16 @@ export default class MainScene extends Phaser.Scene {
 
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                    // 被炸到的怪物噴出爆炸火花（青綠色）
+                    const monsters = this.monsterManager.getMonsters();
+                    for (const monsterId of hitMonsters) {
+                        const monster = monsters.find(m => m.id === monsterId);
+                        if (monster) {
+                            const screenPos = this.worldToScreen(monster.x, monster.y);
+                            this.showExplosionSparkEffect(screenPos.x, screenPos.y, 0x66ffcc, 1.0);
+                        }
+                    }
                 }
 
                 // 顯示爆炸視覺效果（極白色爆炸）
@@ -5932,6 +5948,15 @@ export default class MainScene extends Phaser.Scene {
                         if (hitMonsterIds.length > 0) {
                             const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
                             if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                            // 被炸到的怪物噴出爆炸火花（橘色）
+                            for (const monsterId of hitMonsterIds) {
+                                const monster = currentMonsters.find(m => m.id === monsterId);
+                                if (monster) {
+                                    const screenPos = this.worldToScreen(monster.x, monster.y);
+                                    this.showExplosionSparkEffect(screenPos.x, screenPos.y, 0xff6600, 1.0);
+                                }
+                            }
                         }
 
                         // 3 單位爆炸效果
@@ -5967,43 +5992,8 @@ export default class MainScene extends Phaser.Scene {
         outerSprite.setScale(outerScale);
         outerSprite.setAlpha(0.7);
 
-        // 飛散線條：使用 line 紋理，8條向外射出
-        const lineCount = 8;
-        const lineSprites: Phaser.GameObjects.Sprite[] = [];
-        const lineLength = unitSize * 1.5;
-        const lineWidth = 32; // 4倍粗
-        // 漸層色：從橘紅到亮黃
-        const lineColors = [0xff4400, 0xff5500, 0xff7700, 0xff9900, 0xffbb00, 0xffcc00, 0xffdd00, 0xffff66];
-
-        for (let i = 0; i < lineCount; i++) {
-            const angle = (i / lineCount) * Math.PI * 2 + Math.random() * 0.3;
-            const lineSprite = this.add.sprite(x, y, MainScene.TEXTURE_LINE);
-            this.skillGridContainer.add(lineSprite);
-            lineSprite.setDepth(102);
-            lineSprite.setTint(lineColors[i]);
-            lineSprite.setRotation(angle);
-            const scaleX = lineLength / MainScene.EFFECT_TEXTURE_SIZE;
-            const scaleY = lineWidth / MainScene.EFFECT_LINE_HEIGHT;
-            lineSprite.setScale(scaleX, scaleY);
-            lineSprite.setAlpha(1);
-            lineSprites.push(lineSprite);
-
-            // 線條向外飛散動畫
-            const endX = x + Math.cos(angle) * radius * 1.2;
-            const endY = y + Math.sin(angle) * radius * 1.2;
-            this.tweens.add({
-                targets: lineSprite,
-                x: endX,
-                y: endY,
-                alpha: 0,
-                scaleX: scaleX * 0.3,
-                duration: 300,
-                ease: 'Power2',
-                onComplete: () => {
-                    lineSprite.destroy();
-                }
-            });
-        }
+        // 飛散線條：使用標準化爆炸火花效果（橘色，3 單位）
+        this.showExplosionSparkEffect(x, y, 0xff6600, 3);
 
         // 核心擴散淡出
         this.tweens.add({
@@ -10332,8 +10322,7 @@ export default class MainScene extends Phaser.Scene {
         const sparkCount = 8;
         const sparkLength = unitSize * 1.8;
         const sparkWidth = 36;
-        const spreadAngle = 30 * (Math.PI / 180);
-        const startOffset = hitDirection !== undefined ? unitSize * 0.5 : unitSize * 0.3;
+        const spreadAngle = 40 * (Math.PI / 180); // 總散射角度 80 度
 
         // 根據主色生成漸層
         const r = (color >> 16) & 0xff;
@@ -10354,33 +10343,47 @@ export default class MainScene extends Phaser.Scene {
             let angle: number;
             let startX: number, startY: number;
 
+            // 每條線的長度和寬度隨機變化
+            const lengthRandom = 0.6 + Math.random() * 0.8; // 0.6~1.4 倍
+            const widthRandom = 0.7 + Math.random() * 0.6;  // 0.7~1.3 倍
+            const thisSparkLength = sparkLength * lengthRandom;
+            const thisSparkWidth = sparkWidth * widthRandom;
+
             if (hitDirection !== undefined) {
                 // 反彈模式：往打擊方向的反向噴發
                 const reboundDir = hitDirection + Math.PI;
-                const angleOffset = (Math.random() - 0.5) * 2 * spreadAngle;
-                angle = reboundDir + angleOffset;
+                // 均勻分布在扇形內，加較大隨機抖動
+                const baseOffset = ((i / (sparkCount - 1)) - 0.5) * 2 * spreadAngle;
+                const randomJitter = (Math.random() - 0.5) * 0.5; // 加大到 ±0.25 弧度（約 14°）
+                angle = reboundDir + baseOffset + randomJitter;
 
-                // 起點往攻擊方向退後
-                const lateralOffset = (Math.random() - 0.5) * unitSize * 0.4;
-                startX = screen.x + Math.cos(hitDirection) * startOffset + Math.cos(hitDirection + Math.PI/2) * lateralOffset;
-                startY = screen.y + Math.sin(hitDirection) * startOffset + Math.sin(hitDirection + Math.PI/2) * lateralOffset;
+                // 起點沿著垂直於反彈方向的線分散（橫向排列）+ 隨機偏移
+                const perpDir = reboundDir + Math.PI / 2; // 垂直方向
+                const lateralSpread = ((i / (sparkCount - 1)) - 0.5) * unitSize * 0.8;
+                const lateralRandom = (Math.random() - 0.5) * unitSize * 0.3; // 額外隨機橫向偏移
+                // 往飛行方向前進半個線條長度，讓線條尾端對齊撞擊點
+                const tailOffset = thisSparkLength * 0.5;
+                startX = screen.x + Math.cos(perpDir) * (lateralSpread + lateralRandom) + Math.cos(angle) * tailOffset;
+                startY = screen.y + Math.sin(perpDir) * (lateralSpread + lateralRandom) + Math.sin(angle) * tailOffset;
             } else {
                 // 隨機方向模式
                 angle = Math.random() * Math.PI * 2;
-                startX = screen.x + Math.cos(angle + Math.PI) * startOffset + (Math.random() - 0.5) * unitSize * 0.3;
-                startY = screen.y + Math.sin(angle + Math.PI) * startOffset + (Math.random() - 0.5) * unitSize * 0.3;
+                // 往飛行方向前進半個線條長度，讓線條尾端對齊中心
+                const tailOffset = thisSparkLength * 0.5;
+                startX = screen.x + Math.cos(angle) * tailOffset + (Math.random() - 0.5) * unitSize * 0.3;
+                startY = screen.y + Math.sin(angle) * tailOffset + (Math.random() - 0.5) * unitSize * 0.3;
             }
 
             const lineSprite = this.getLineEffectSprite();
             lineSprite.setPosition(startX, startY);
             lineSprite.setTint(sparkColors[i % sparkColors.length]);
             lineSprite.setRotation(angle);
-            const scaleX = sparkLength / MainScene.EFFECT_TEXTURE_SIZE;
-            const scaleY = sparkWidth / MainScene.EFFECT_LINE_HEIGHT;
+            const scaleX = thisSparkLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const scaleY = thisSparkWidth / MainScene.EFFECT_LINE_HEIGHT;
             lineSprite.setScale(scaleX, scaleY);
             lineSprite.setAlpha(1);
 
-            const flyDist = unitSize * (1.5 + Math.random() * 1.0);
+            const flyDist = unitSize * (1.2 + Math.random() * 1.3); // 1.2~2.5 單位
             const endX = startX + Math.cos(angle) * flyDist;
             const endY = startY + Math.sin(angle) * flyDist;
 
@@ -10391,7 +10394,81 @@ export default class MainScene extends Phaser.Scene {
                 alpha: 0,
                 scaleX: scaleX * 0.2,
                 scaleY: scaleY * 0.4,
-                duration: 350,
+                duration: 280 + Math.random() * 140, // 280~420ms 隨機
+                ease: 'Power2',
+                onComplete: () => {
+                    this.releaseLineEffectSprite(lineSprite);
+                }
+            });
+        }
+    }
+
+    /**
+     * 標準化爆炸火花效果（360度向外發散，使用物件池）
+     * @param screenX 螢幕座標 X
+     * @param screenY 螢幕座標 Y
+     * @param color 主色調
+     * @param radiusUnits 爆炸半徑（單位）
+     */
+    private showExplosionSparkEffect(screenX: number, screenY: number, color: number, radiusUnits: number = 1.5) {
+        const unitSize = this.gameBounds.height / 10;
+
+        const sparkCount = 8;
+        const sparkLength = unitSize * 1.5;
+        const sparkWidth = 32;
+        const radius = unitSize * radiusUnits;
+
+        // 根據主色生成漸層（從深到亮）
+        const r = (color >> 16) & 0xff;
+        const g = (color >> 8) & 0xff;
+        const b = color & 0xff;
+        const sparkColors = [
+            ((Math.max(0, r - 40) << 16) | (Math.max(0, g - 40) << 8) | Math.max(0, b - 40)),
+            ((Math.max(0, r - 20) << 16) | (Math.max(0, g - 20) << 8) | Math.max(0, b - 20)),
+            color,
+            ((Math.min(255, r + 30) << 16) | (Math.min(255, g + 30) << 8) | Math.min(255, b + 30)),
+            ((Math.min(255, r + 60) << 16) | (Math.min(255, g + 60) << 8) | Math.min(255, b + 60)),
+            ((Math.min(255, r + 90) << 16) | (Math.min(255, g + 90) << 8) | Math.min(255, b + 90)),
+            0xffffff,
+            ((Math.min(255, r + 50) << 16) | (Math.min(255, g + 50) << 8) | Math.min(255, b + 50))
+        ];
+
+        for (let i = 0; i < sparkCount; i++) {
+            // 每條線的長度和寬度隨機變化
+            const lengthRandom = 0.6 + Math.random() * 0.8; // 0.6~1.4 倍
+            const widthRandom = 0.7 + Math.random() * 0.6;  // 0.7~1.3 倍
+            const thisSparkLength = sparkLength * lengthRandom;
+            const thisSparkWidth = sparkWidth * widthRandom;
+
+            // 均勻分布在 360 度，加較大隨機抖動
+            const angle = (i / sparkCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+
+            // 往飛行方向前進半個線條長度，讓線條尾端從中心開始
+            const tailOffset = thisSparkLength * 0.5;
+            const startX = screenX + Math.cos(angle) * tailOffset;
+            const startY = screenY + Math.sin(angle) * tailOffset;
+
+            const lineSprite = this.getLineEffectSprite();
+            lineSprite.setPosition(startX, startY);
+            lineSprite.setTint(sparkColors[i % sparkColors.length]);
+            lineSprite.setRotation(angle);
+            const scaleX = thisSparkLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const scaleY = thisSparkWidth / MainScene.EFFECT_LINE_HEIGHT;
+            lineSprite.setScale(scaleX, scaleY);
+            lineSprite.setAlpha(1);
+
+            // 線條向外飛散（隨機距離）
+            const flyDist = radius * (0.9 + Math.random() * 0.5); // 0.9~1.4 倍
+            const endX = screenX + Math.cos(angle) * flyDist;
+            const endY = screenY + Math.sin(angle) * flyDist;
+
+            this.tweens.add({
+                targets: lineSprite,
+                x: endX,
+                y: endY,
+                alpha: 0,
+                scaleX: scaleX * 0.3,
+                duration: 250 + Math.random() * 100, // 250~350ms 隨機
                 ease: 'Power2',
                 onComplete: () => {
                     this.releaseLineEffectSprite(lineSprite);
