@@ -275,6 +275,10 @@ export default class MainScene extends Phaser.Scene {
     private skillEffectPool: Phaser.GameObjects.Sprite[] = []; // 可用的 Sprite 池
     private activeSkillEffects: Phaser.GameObjects.Sprite[] = []; // 正在使用的 Sprite
     private static readonly SKILL_EFFECT_POOL_SIZE = 50; // 物件池初始大小
+    // LINE 紋理物件池（用於打擊火花效果）
+    private lineEffectPool: Phaser.GameObjects.Sprite[] = [];
+    private activeLineEffects: Phaser.GameObjects.Sprite[] = [];
+    private static readonly LINE_EFFECT_POOL_SIZE = 80; // LINE 物件池大小
     // 紋理 key（對應 BootScene 載入的圖片）
     private static readonly TEXTURE_SECTOR_PREFIX = 'effect_sector_'; // 扇形紋理前綴 (後綴為角度)
     private static readonly TEXTURE_SECTOR_360 = 'effect_sector_360'; // 360度扇形（爆炸內圈用）
@@ -419,6 +423,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 初始化技能特效物件池（紋理由 BootScene 預載）
         this.initSkillEffectPool();
+        this.initLineEffectPool(); // LINE 紋理池（打擊火花用）
 
         // 監聯網格倍率變更事件
         window.addEventListener('gridscalechange', ((e: CustomEvent) => {
@@ -4885,6 +4890,11 @@ export default class MainScene extends Phaser.Scene {
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
 
+                    // 打擊火花（藍色，靈魂渲染系）
+                    for (const pos of hitPositions) {
+                        this.showHitSparkEffect(pos.x, pos.y, 0x4488ff, currentAngle);
+                    }
+
                     // 命中回饋
                     if (isCrit) {
                         this.flashCritCrossAtPositions(hitPositions);
@@ -4980,10 +4990,11 @@ export default class MainScene extends Phaser.Scene {
         const targetX = this.characterX + Math.cos(randomAngle) * randomDist;
         const targetY = this.characterY + Math.sin(randomAngle) * randomDist;
 
-        // 計算光束角度（用於爆炸線條方向）
+        // 計算光束角度（用於爆炸線條方向）- 反彈效果：與攻擊方向相反
         const beamOffsetX = (Math.random() - 0.5) * 2 * unitSize;
         const targetScreen = this.worldToScreen(targetX, targetY);
-        const beamAngle = Math.atan2(targetScreen.y - (-50), targetScreen.x - (targetScreen.x + beamOffsetX));
+        // 光束從上方落下，噴發往上（反彈）：基準 -π/2 + 偏移修正
+        const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
 
         // 顯示光線落下特效（藍紫色）
         const techArtistColor = 0x9966ff; // 藍紫色
@@ -5146,47 +5157,11 @@ export default class MainScene extends Phaser.Scene {
         centerSprite.setScale(centerScale);
         centerSprite.setAlpha(1);
 
-        // 線條噴發：限制在射擊線左右 20 度內
+        // 線條噴發：使用標準化打擊火花（紫色，技美大神系）
         if (beamAngle !== undefined) {
-            const lineCount = 6;
-            const lineLength = unitSize * 1.5;
-            const lineWidth = 32;
-            const spreadAngle = 20 * (Math.PI / 180); // 20 度轉弧度
-            // 漸層色：從亮紫到淡紫白
-            const lineColors = [0xcc99ff, 0xbb88ff, 0xaa77ff, 0x9966ff, 0xddaaff, 0xeeccff];
-
-            for (let i = 0; i < lineCount; i++) {
-                // 在 beamAngle ±20 度內隨機分布
-                const angleOffset = (Math.random() - 0.5) * 2 * spreadAngle;
-                const angle = beamAngle + angleOffset;
-
-                const lineSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_LINE);
-                this.skillGridContainer.add(lineSprite);
-                lineSprite.setDepth(57);
-                lineSprite.setTint(lineColors[i % lineColors.length]);
-                lineSprite.setRotation(angle);
-                const scaleX = lineLength / MainScene.EFFECT_TEXTURE_SIZE;
-                const scaleY = lineWidth / MainScene.EFFECT_LINE_HEIGHT;
-                lineSprite.setScale(scaleX, scaleY);
-                lineSprite.setAlpha(1);
-
-                // 線條向外飛散動畫
-                const flyDist = radius * 1.5;
-                const endX = screen.x + Math.cos(angle) * flyDist;
-                const endY = screen.y + Math.sin(angle) * flyDist;
-                this.tweens.add({
-                    targets: lineSprite,
-                    x: endX,
-                    y: endY,
-                    alpha: 0,
-                    scaleX: scaleX * 0.3,
-                    duration: 300,
-                    ease: 'Power2',
-                    onComplete: () => {
-                        lineSprite.destroy();
-                    }
-                });
-            }
+            // beamAngle 已經是反彈方向，需要轉換回攻擊方向給 showHitSparkEffect
+            const attackDir = beamAngle + Math.PI;
+            this.showHitSparkEffect(worldX, worldY, 0x9966ff, attackDir);
         }
 
         // 高速旋轉動畫（外圈）
@@ -5322,7 +5297,7 @@ export default class MainScene extends Phaser.Scene {
 
             // 輪鋸火花效果（金色）
             for (const pos of hitPositions) {
-                this.showSawBladeSparkEffect(pos.x, pos.y);
+                this.showHitSparkEffect(pos.x, pos.y, 0xffcc00);
             }
 
             // 命中回饋
@@ -5384,50 +5359,6 @@ export default class MainScene extends Phaser.Scene {
             inner.setVisible(true);
             inner.setScale(outerScale * 0.5);
             inner.setRotation(-this.sawBladeSpinAngle * 1.5); // 反方向且稍快
-        }
-    }
-
-    // 輪鋸火花效果（金色線條噴發）
-    private showSawBladeSparkEffect(worldX: number, worldY: number) {
-        const screen = this.worldToScreen(worldX, worldY);
-        const unitSize = this.gameBounds.height / 10;
-
-        const sparkCount = 5;
-        const sparkLength = unitSize * 0.4;
-        const sparkWidth = 16;
-        // 金色漸層
-        const sparkColors = [0xffee00, 0xffdd00, 0xffcc00, 0xffbb00, 0xffaa00];
-
-        for (let i = 0; i < sparkCount; i++) {
-            // 隨機方向噴發
-            const angle = Math.random() * Math.PI * 2;
-            const sparkSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_LINE);
-            this.skillGridContainer.add(sparkSprite);
-            sparkSprite.setDepth(58);
-            sparkSprite.setTint(sparkColors[i % sparkColors.length]);
-            sparkSprite.setRotation(angle);
-            const scaleX = sparkLength / MainScene.EFFECT_TEXTURE_SIZE;
-            const scaleY = sparkWidth / MainScene.EFFECT_LINE_HEIGHT;
-            sparkSprite.setScale(scaleX, scaleY);
-            sparkSprite.setAlpha(1);
-
-            // 火花向外飛散動畫
-            const flyDist = unitSize * (0.5 + Math.random() * 0.5);
-            const endX = screen.x + Math.cos(angle) * flyDist;
-            const endY = screen.y + Math.sin(angle) * flyDist;
-            this.tweens.add({
-                targets: sparkSprite,
-                x: endX,
-                y: endY,
-                alpha: 0,
-                scaleX: scaleX * 0.2,
-                scaleY: scaleY * 0.5,
-                duration: 200,
-                ease: 'Power2',
-                onComplete: () => {
-                    sparkSprite.destroy();
-                }
-            });
         }
     }
 
@@ -5552,7 +5483,7 @@ export default class MainScene extends Phaser.Scene {
                         this.monsterManager.knockbackMonsters([monster.id], this.characterX, this.characterY, 1);
 
                         // 輪鋸火花效果（金色）
-                        this.showSawBladeSparkEffect(monster.x, monster.y);
+                        this.showHitSparkEffect(monster.x, monster.y, 0xffcc00);
 
                         // 命中特效
                         if (isCrit) {
@@ -6302,7 +6233,7 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 零信任防禦協定：命中 8 角形擴散效果（雙層逆轉設計）
+    // 零信任防禦協定：命中 8 角形擴散效果（雙層逆轉設計）+ 線條噴發
     private showZeroTrustHitEffect(worldX: number, worldY: number, isCrit: boolean) {
         const screen = this.worldToScreen(worldX, worldY);
         const unitSize = this.gameBounds.height / 10;
@@ -6315,6 +6246,10 @@ export default class MainScene extends Phaser.Scene {
 
         // 隨機起始角度
         const randomAngle = Math.random() * Math.PI * 2;
+
+        // 線條噴發：光束從上方落下，打擊方向是向下
+        const hitDirection = Math.PI / 2; // 向下（攻擊方向）
+        this.showHitSparkEffect(worldX, worldY, color, hitDirection);
 
         // 外層
         const outer = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
@@ -6455,6 +6390,11 @@ export default class MainScene extends Phaser.Scene {
             const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) this.addExp(result.totalExp);
+
+            // 打擊火花（紅色，次元向量系）
+            for (const pos of hitPositions) {
+                this.showHitSparkEffect(pos.x, pos.y, 0xff4466, angle);
+            }
 
             // 命中回饋
             if (isCrit) {
@@ -6931,10 +6871,10 @@ export default class MainScene extends Phaser.Scene {
                 const targetX = phantomX + Math.cos(angle) * dist;
                 const targetY = phantomY + Math.sin(angle) * dist;
 
-                // 計算光束角度（用於爆炸線條方向）
+                // 計算光束角度（用於爆炸線條方向）- 反彈效果：與攻擊方向相反
                 const beamOffsetX = (Math.random() - 0.5) * 2 * unitSize;
                 const targetScreen = this.worldToScreen(targetX, targetY);
-                const beamAngle = Math.atan2(targetScreen.y - (-50), targetScreen.x - (targetScreen.x + beamOffsetX));
+                const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
 
                 // 光線效果
                 this.showLightBeamEffect(targetX, targetY, explosionRadius, 0x9966ff, beamOffsetX);
@@ -7279,7 +7219,7 @@ export default class MainScene extends Phaser.Scene {
 
                 // 輪鋸火花效果（金色）
                 for (const pos of hitPositions) {
-                    this.showSawBladeSparkEffect(pos.x, pos.y);
+                    this.showHitSparkEffect(pos.x, pos.y, 0xffcc00);
                 }
 
                 // 擊中特效
@@ -10335,6 +10275,129 @@ export default class MainScene extends Phaser.Scene {
 
         // 放回池中
         this.skillEffectPool.push(sprite);
+    }
+
+    // 初始化 LINE 物件池
+    private initLineEffectPool() {
+        for (let i = 0; i < MainScene.LINE_EFFECT_POOL_SIZE; i++) {
+            const sprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
+            sprite.setVisible(false);
+            sprite.setActive(false);
+            sprite.setDepth(58);
+            this.skillGridContainer.add(sprite);
+            this.lineEffectPool.push(sprite);
+        }
+    }
+
+    // 從 LINE 池取得 Sprite
+    private getLineEffectSprite(): Phaser.GameObjects.Sprite {
+        let sprite = this.lineEffectPool.pop();
+        if (!sprite) {
+            sprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
+            sprite.setDepth(58);
+            this.skillGridContainer.add(sprite);
+        }
+        sprite.setVisible(true);
+        sprite.setActive(true);
+        this.activeLineEffects.push(sprite);
+        return sprite;
+    }
+
+    // 歸還 LINE Sprite 到物件池
+    private releaseLineEffectSprite(sprite: Phaser.GameObjects.Sprite) {
+        sprite.setVisible(false);
+        sprite.setActive(false);
+        sprite.setScale(1);
+        sprite.setRotation(0);
+        sprite.setAlpha(1);
+        sprite.setTint(0xffffff);
+        const index = this.activeLineEffects.indexOf(sprite);
+        if (index > -1) {
+            this.activeLineEffects.splice(index, 1);
+        }
+        this.lineEffectPool.push(sprite);
+    }
+
+    /**
+     * 標準化打擊火花效果（使用物件池）
+     * @param worldX 世界座標 X
+     * @param worldY 世界座標 Y
+     * @param color 主色調
+     * @param hitDirection 打擊方向（弧度），火花會往反方向噴發；undefined 則隨機方向
+     */
+    private showHitSparkEffect(worldX: number, worldY: number, color: number, hitDirection?: number) {
+        const screen = this.worldToScreen(worldX, worldY);
+        const unitSize = this.gameBounds.height / 10;
+
+        const sparkCount = 8;
+        const sparkLength = unitSize * 1.8;
+        const sparkWidth = 36;
+        const spreadAngle = 30 * (Math.PI / 180);
+        const startOffset = hitDirection !== undefined ? unitSize * 0.5 : unitSize * 0.3;
+
+        // 根據主色生成漸層
+        const r = (color >> 16) & 0xff;
+        const g = (color >> 8) & 0xff;
+        const b = color & 0xff;
+        const sparkColors = [
+            color,
+            ((Math.min(255, r + 30) << 16) | (Math.min(255, g + 30) << 8) | Math.min(255, b + 30)),
+            ((Math.min(255, r + 60) << 16) | (Math.min(255, g + 60) << 8) | Math.min(255, b + 60)),
+            0xffffff,
+            ((Math.min(255, r + 40) << 16) | (Math.min(255, g + 40) << 8) | Math.min(255, b + 40)),
+            color,
+            ((Math.min(255, r + 20) << 16) | (Math.min(255, g + 20) << 8) | Math.min(255, b + 20)),
+            0xffffff
+        ];
+
+        for (let i = 0; i < sparkCount; i++) {
+            let angle: number;
+            let startX: number, startY: number;
+
+            if (hitDirection !== undefined) {
+                // 反彈模式：往打擊方向的反向噴發
+                const reboundDir = hitDirection + Math.PI;
+                const angleOffset = (Math.random() - 0.5) * 2 * spreadAngle;
+                angle = reboundDir + angleOffset;
+
+                // 起點往攻擊方向退後
+                const lateralOffset = (Math.random() - 0.5) * unitSize * 0.4;
+                startX = screen.x + Math.cos(hitDirection) * startOffset + Math.cos(hitDirection + Math.PI/2) * lateralOffset;
+                startY = screen.y + Math.sin(hitDirection) * startOffset + Math.sin(hitDirection + Math.PI/2) * lateralOffset;
+            } else {
+                // 隨機方向模式
+                angle = Math.random() * Math.PI * 2;
+                startX = screen.x + Math.cos(angle + Math.PI) * startOffset + (Math.random() - 0.5) * unitSize * 0.3;
+                startY = screen.y + Math.sin(angle + Math.PI) * startOffset + (Math.random() - 0.5) * unitSize * 0.3;
+            }
+
+            const lineSprite = this.getLineEffectSprite();
+            lineSprite.setPosition(startX, startY);
+            lineSprite.setTint(sparkColors[i % sparkColors.length]);
+            lineSprite.setRotation(angle);
+            const scaleX = sparkLength / MainScene.EFFECT_TEXTURE_SIZE;
+            const scaleY = sparkWidth / MainScene.EFFECT_LINE_HEIGHT;
+            lineSprite.setScale(scaleX, scaleY);
+            lineSprite.setAlpha(1);
+
+            const flyDist = unitSize * (1.5 + Math.random() * 1.0);
+            const endX = startX + Math.cos(angle) * flyDist;
+            const endY = startY + Math.sin(angle) * flyDist;
+
+            this.tweens.add({
+                targets: lineSprite,
+                x: endX,
+                y: endY,
+                alpha: 0,
+                scaleX: scaleX * 0.2,
+                scaleY: scaleY * 0.4,
+                duration: 350,
+                ease: 'Power2',
+                onComplete: () => {
+                    this.releaseLineEffectSprite(lineSprite);
+                }
+            });
+        }
     }
 
     // 取得最接近的預生成扇形紋理 key
