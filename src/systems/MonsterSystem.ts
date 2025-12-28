@@ -128,6 +128,15 @@ export class MonsterManager {
     private screenGridCols: number = 0;
     private screenGridRows: number = 0;
 
+    // 減速區域（零信任防禦協定用）
+    private slowZone: {
+        active: boolean;
+        centerX: number;
+        centerY: number;
+        radius: number;      // 世界座標單位
+        multiplier: number;  // 速度倍率（0.5 = 減速 50%）
+    } = { active: false, centerX: 0, centerY: 0, radius: 0, multiplier: 1 };
+
     constructor(
         scene: Phaser.Scene,
         gameBounds: { x: number; y: number; width: number; height: number },
@@ -290,17 +299,25 @@ export class MonsterManager {
         this.createMonsterGrid();
     }
 
-    // 計算怪物血量（根據玩家等級）
-    private calculateMonsterHp(baseHp: number): number {
-        return Math.floor(baseHp * Math.pow(MonsterManager.HP_GROWTH_RATE, this.playerLevel));
+    // 計算 70 級後的強化倍率（每 5 級 +10%）
+    private getHighLevelMultiplier(): number {
+        if (this.playerLevel <= 70) return 1;
+        const extraTiers = Math.floor((this.playerLevel - 70) / 5);
+        return 1 + 0.1 * extraTiers;
     }
 
-    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率）
+    // 計算怪物血量（根據玩家等級，70 級後額外強化）
+    private calculateMonsterHp(baseHp: number): number {
+        const baseScaled = baseHp * Math.pow(MonsterManager.HP_GROWTH_RATE, this.playerLevel);
+        return Math.floor(baseScaled * this.getHighLevelMultiplier());
+    }
+
+    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，70 級後額外強化）
     private calculateMonsterDamage(monster: Monster): number {
         const damageUnits = Math.max(1, this.playerLevel);
         const baseDamage = MonsterManager.DAMAGE_UNIT * damageUnits;
-        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）
-        return baseDamage * monster.definition.damage;
+        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 70 級後強化
+        return baseDamage * monster.definition.damage * this.getHighLevelMultiplier();
     }
 
     // 計算怪物經驗值（每 5 級翻倍）
@@ -335,8 +352,10 @@ export class MonsterManager {
 
         // 檢查是否需要生成新怪物
         if (this.isSpawning && now - this.lastSpawnTime >= this.spawnInterval) {
-            // 每5級多生成1隻怪物（等級0-4生成1隻，5-9生成2隻，10-14生成3隻...）
-            const spawnCount = 1 + Math.floor(this.playerLevel / 5);
+            // 每5級多生成1隻怪物，70級後不再增加（最多15隻）
+            // 70級後改為強化怪物血量和傷害
+            const effectiveLevel = Math.min(this.playerLevel, 70);
+            const spawnCount = 1 + Math.floor(effectiveLevel / 5);
             for (let i = 0; i < spawnCount; i++) {
                 this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
             }
@@ -363,8 +382,10 @@ export class MonsterManager {
             if (monster.isBat && monster.directionX !== undefined && monster.directionY !== undefined) {
                 // 暈眩中不移動
                 if (!isStunned) {
+                    // 計算減速倍率（零信任防禦協定）
+                    const slowMult = this.getSlowMultiplier(monster.x, monster.y);
                     // 速度單位轉換：單位/秒 → 像素/秒
-                    const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
+                    const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1 * slowMult;
                     const moveDistance = (speedInPixels * delta) / 1000;
 
                     // 沿固定方向移動（始終保持同一方向）
@@ -411,7 +432,9 @@ export class MonsterManager {
                     const distance = Math.sqrt(dx * dx + dy * dy);
 
                     if (distance > collisionRange) {
-                        const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1;
+                        // 計算減速倍率（零信任防禦協定）
+                        const slowMult = this.getSlowMultiplier(monster.x, monster.y);
+                        const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1 * slowMult;
                         const moveDistance = (speedInPixels * delta) / 1000;
                         const ratio = moveDistance / distance;
                         monster.x += dx * ratio;
@@ -429,14 +452,19 @@ export class MonsterManager {
                 }
             }
 
-            // 更新 Q 彈動畫相位
-            monster.bouncePhase += (monster.bounceSpeed * delta) / 1000;
-            if (monster.bouncePhase > Math.PI * 2) {
-                monster.bouncePhase -= Math.PI * 2;
+            // 更新 Q 彈動畫相位（暈眩中暫停動畫）
+            if (!isStunned) {
+                monster.bouncePhase += (monster.bounceSpeed * delta) / 1000;
+                if (monster.bouncePhase > Math.PI * 2) {
+                    monster.bouncePhase -= Math.PI * 2;
+                }
+                // 計算壓扁/拉伸比例（sin 波形：0.92 ~ 1.08）
+                const squashAmount = 0.08;
+                monster.squashStretch = 1 + Math.sin(monster.bouncePhase) * squashAmount;
+            } else {
+                // 暈眩時固定為正常形狀
+                monster.squashStretch = 1;
             }
-            // 計算壓扁/拉伸比例（sin 波形：0.92 ~ 1.08）
-            const squashAmount = 0.08;
-            monster.squashStretch = 1 + Math.sin(monster.bouncePhase) * squashAmount;
         });
 
         // 移除離開畫面的蝙蝠
@@ -692,6 +720,21 @@ export class MonsterManager {
                 } else {
                     monster.flashStartTime = 0;
                 }
+            }
+
+            // 暈眩效果：灰白色變色
+            const isStunned = this.isMonsterStunned(monster);
+            if (isStunned && !isFlashing) {
+                // 將顏色去飽和度（偏灰白）
+                const grey = Math.floor((r + g + b) / 3);
+                // 混合原色與灰色（70% 灰色 + 30% 原色）
+                r = Math.floor(grey * 0.7 + r * 0.3);
+                g = Math.floor(grey * 0.7 + g * 0.3);
+                b = Math.floor(grey * 0.7 + b * 0.3);
+                // 整體提亮
+                r = Math.min(255, r + 60);
+                g = Math.min(255, g + 60);
+                b = Math.min(255, b + 60);
             }
 
             // 蝙蝠使用特殊造型（翅膀形狀）
@@ -1046,6 +1089,31 @@ export class MonsterManager {
     // 清除嘲諷目標
     clearTauntTarget() {
         this.tauntTarget.active = false;
+    }
+
+    // 設定減速區域（零信任防禦協定用）
+    setSlowZone(centerX: number, centerY: number, radius: number, multiplier: number) {
+        this.slowZone = { active: true, centerX, centerY, radius, multiplier };
+    }
+
+    // 清除減速區域
+    clearSlowZone() {
+        this.slowZone.active = false;
+    }
+
+    // 計算怪物在指定位置的減速倍率
+    private getSlowMultiplier(x: number, y: number): number {
+        if (!this.slowZone.active) return 1;
+
+        const dx = x - this.slowZone.centerX;
+        const dy = y - this.slowZone.centerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const radiusPx = this.slowZone.radius * this.gameBounds.height * 0.1;
+
+        if (dist <= radiusPx) {
+            return this.slowZone.multiplier;
+        }
+        return 1;
     }
 
     // 取得嘲諷目標

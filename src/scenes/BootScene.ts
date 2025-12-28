@@ -8,6 +8,7 @@ export default class BootScene extends Phaser.Scene {
     preload() {
         // 載入技能特效紋理
         this.load.image('effect_circle', 'effects/circle.png');
+        this.load.image('effect_circle_line', 'effects/circle_line.png');
         this.load.image('effect_line', 'effects/line.png');
 
         // 載入各角度扇形紋理
