@@ -746,26 +746,21 @@ export default class MainScene extends Phaser.Scene {
         // 對命中的怪物造成傷害
         if (hitMonsters.length > 0) {
             // 取得命中怪物的位置（在造成傷害前）
-            const hitPositions = monsters
-                .filter(m => hitMonsters.includes(m.id))
-                .map(m => ({ x: m.x, y: m.y }));
+            const hitMonstersData = monsters.filter(m => hitMonsters.includes(m.id));
 
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) {
                 this.addExp(result.totalExp);
             }
 
-            // 命中回饋：白色十字高光（暴擊時使用橙色）
-            if (isCrit) {
-                this.flashCritCrossAtPositions(hitPositions);
-            } else {
-                this.flashWhiteCrossAtPositions(hitPositions);
-            }
-
-
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
-            const critText = isCrit ? ' [CRIT!]' : '';
+
+            // 打擊火花（藍色，4 條，方向性反彈）
+            for (const m of hitMonstersData) {
+                const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
+                this.showHitSparkEffect(m.x, m.y, 0x6699ff, hitDir, 4);
+            }
         }
 
         // MAX 後額外能力：衝擊波（從扇形末端發射持續前進的扇形波）
@@ -1090,26 +1085,21 @@ export default class MainScene extends Phaser.Scene {
         // 對命中的怪物造成傷害
         if (hitMonsters.length > 0) {
             // 取得命中怪物的位置（在造成傷害前）
-            const hitPositions = monsters
-                .filter(m => hitMonsters.includes(m.id))
-                .map(m => ({ x: m.x, y: m.y }));
+            const hitMonstersData = monsters.filter(m => hitMonsters.includes(m.id));
 
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) {
                 this.addExp(result.totalExp);
             }
 
-            // 命中回饋：白色十字高光（暴擊時使用橙色）
-            if (isCrit) {
-                this.flashCritCrossAtPositions(hitPositions);
-            } else {
-                this.flashWhiteCrossAtPositions(hitPositions);
-            }
-
-
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
-            const critText = isCrit ? ' [CRIT!]' : '';
+
+            // 爆炸火花（紫色，圓形擴散效果）
+            for (const m of hitMonstersData) {
+                const screenPos = this.worldToScreen(m.x, m.y);
+                this.showExplosionSparkEffect(screenPos.x, screenPos.y, 0xaa66ff, 0.8);
+            }
 
             // MAX 後額外能力：爆發（從擊殺位置再次發動）
             const burstChance = this.skillManager.getCoderBurstChance(this.currentLevel);
@@ -1190,8 +1180,6 @@ export default class MainScene extends Phaser.Scene {
                 if (result.totalExp > 0) {
                     this.addExp(result.totalExp);
                 }
-
-                this.flashWhiteCrossAtPositions(hitPositions);
             }
         };
 
@@ -1391,8 +1379,6 @@ export default class MainScene extends Phaser.Scene {
                 if (burstResult.totalExp > 0) {
                     this.addExp(burstResult.totalExp);
                 }
-
-                this.flashWhiteCrossAtPositions(burstHitPositions);
             }
         }
     }
@@ -1499,25 +1485,22 @@ export default class MainScene extends Phaser.Scene {
         const hitMonsterIds = Array.from(allHitMonsters);
         if (hitMonsterIds.length > 0) {
             // 取得命中怪物的位置（在造成傷害前）
-            const hitMonsters = monsters.filter(m => hitMonsterIds.includes(m.id));
-            const hitPositions = hitMonsters.map(m => ({ x: m.x, y: m.y }));
+            const hitMonstersData = monsters.filter(m => hitMonsterIds.includes(m.id));
+            const hitPositions = hitMonstersData.map(m => ({ x: m.x, y: m.y }));
 
             const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
             if (result.totalExp > 0) {
                 this.addExp(result.totalExp);
             }
 
-            // 命中回饋：白色十字高光（暴擊時使用橙色）
-            if (isCrit) {
-                this.flashCritCrossAtPositions(hitPositions);
-            } else {
-                this.flashWhiteCrossAtPositions(hitPositions);
-            }
-
-
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsterIds.length);
-            const critText = isCrit ? ' [CRIT!]' : '';
+
+            // 打擊火花（綠色，5 條，光束方向）
+            for (const m of hitMonstersData) {
+                const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
+                this.showHitSparkEffect(m.x, m.y, 0x66ff66, hitDir, 5);
+            }
 
             // MAX 後額外能力：連鎖（從擊中位置再發射）
             const chainChance = this.skillManager.getVfxChainChance(this.currentLevel);
@@ -1603,8 +1586,6 @@ export default class MainScene extends Phaser.Scene {
                 if (chainResult.totalExp > 0) {
                     this.addExp(chainResult.totalExp);
                 }
-
-                this.flashWhiteCrossAtPositions(chainHitPositions);
             }
         }
     }
@@ -1966,9 +1947,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 對命中的怪物造成傷害並擊退
         if (hitMonsters.length > 0) {
-            const hitPositions = monsters
-                .filter(m => hitMonsters.includes(m.id))
-                .map(m => ({ x: m.x, y: m.y }));
+            const hitMonstersData = monsters.filter(m => hitMonsters.includes(m.id));
 
             const result = this.monsterManager.damageMonsters(hitMonsters, damage);
             if (result.totalExp > 0) {
@@ -1979,8 +1958,12 @@ export default class MainScene extends Phaser.Scene {
             const knockbackDistance = this.gameBounds.height * 0.1; // 1 單位
             this.monsterManager.knockbackMonsters(hitMonsters, this.characterX, this.characterY, knockbackDistance);
 
-            this.flashWhiteCrossAtPositions(hitPositions);
             this.shakeScreen(hitMonsters.length);
+
+            // 打擊火花（金色，類似輪鋸效果）
+            for (const m of hitMonstersData) {
+                this.showHitSparkEffect(m.x, m.y, 0xffcc00);
+            }
         }
     }
 
@@ -4895,12 +4878,6 @@ export default class MainScene extends Phaser.Scene {
                         this.showHitSparkEffect(pos.x, pos.y, 0x4488ff, currentAngle);
                     }
 
-                    // 命中回饋
-                    if (isCrit) {
-                        this.flashCritCrossAtPositions(hitPositions);
-                    } else {
-                        this.flashWhiteCrossAtPositions(hitPositions);
-                    }
                 }
 
                 // 顯示旋轉扇形特效（使用和分身相同的圖片特效）
@@ -5033,13 +5010,6 @@ export default class MainScene extends Phaser.Scene {
                 // 造成傷害
                 const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                 if (result.totalExp > 0) this.addExp(result.totalExp);
-
-                // 命中回饋
-                if (isCrit) {
-                    this.flashCritCrossAtPositions(hitPositions);
-                } else {
-                    this.flashWhiteCrossAtPositions(hitPositions);
-                }
 
                 // 被炸到的怪物噴出爆炸火花（紫色）
                 for (const pos of hitPositions) {
@@ -5306,12 +5276,6 @@ export default class MainScene extends Phaser.Scene {
                 this.showHitSparkEffect(pos.x, pos.y, 0xffcc00);
             }
 
-            // 命中回饋
-            if (isCrit) {
-                this.flashCritCrossAtPositions(hitPositions);
-            } else {
-                this.flashWhiteCrossAtPositions(hitPositions);
-            }
         }
 
         // 繪製 3 個輪鋸視覺效果
@@ -5492,11 +5456,6 @@ export default class MainScene extends Phaser.Scene {
                         this.showHitSparkEffect(monster.x, monster.y, 0xffcc00);
 
                         // 命中特效
-                        if (isCrit) {
-                            this.flashCritCrossAtPositions([{ x: monster.x, y: monster.y }]);
-                        } else {
-                            this.flashWhiteCrossAtPositions([{ x: monster.x, y: monster.y }]);
-                        }
                     }
                 }
             },
@@ -6386,13 +6345,6 @@ export default class MainScene extends Phaser.Scene {
                 this.showHitSparkEffect(pos.x, pos.y, 0xff4466, angle);
             }
 
-            // 命中回饋
-            if (isCrit) {
-                this.flashCritCrossAtPositions(hitPositions);
-            } else {
-                this.flashWhiteCrossAtPositions(hitPositions);
-            }
-
             // 連鎖斬擊機率：每級 1%（只有主斬擊能觸發連鎖，連鎖不再觸發連鎖）
             if (!isChain) {
                 const chainChance = skillLevel * 0.01;
@@ -7211,13 +7163,6 @@ export default class MainScene extends Phaser.Scene {
                 for (const pos of hitPositions) {
                     this.showHitSparkEffect(pos.x, pos.y, 0xffcc00);
                 }
-
-                // 擊中特效
-                if (isCrit) {
-                    this.flashCritCrossAtPositions(hitPositions);
-                } else {
-                    this.flashWhiteCrossAtPositions(hitPositions);
-                }
             }
 
             drawBlades(phantomPos);
@@ -7291,12 +7236,6 @@ export default class MainScene extends Phaser.Scene {
             const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) this.addExp(result.totalExp);
-
-            if (isCrit) {
-                this.flashCritCrossAtPositions(hitPositions);
-            } else {
-                this.flashWhiteCrossAtPositions(hitPositions);
-            }
         }
     }
 
@@ -7535,7 +7474,6 @@ export default class MainScene extends Phaser.Scene {
                 this.addExp(result.totalExp);
             }
 
-            this.flashWhiteCrossAtPositions(hitPositions);
             this.shakeScreen(Math.min(hitMonsterIds.size, 3));
         }
 
@@ -10314,12 +10252,13 @@ export default class MainScene extends Phaser.Scene {
      * @param worldY 世界座標 Y
      * @param color 主色調
      * @param hitDirection 打擊方向（弧度），火花會往反方向噴發；undefined 則隨機方向
+     * @param count 火花數量（預設 8，一般技能建議 4-5）
      */
-    private showHitSparkEffect(worldX: number, worldY: number, color: number, hitDirection?: number) {
+    private showHitSparkEffect(worldX: number, worldY: number, color: number, hitDirection?: number, count: number = 8) {
         const screen = this.worldToScreen(worldX, worldY);
         const unitSize = this.gameBounds.height / 10;
 
-        const sparkCount = 8;
+        const sparkCount = count;
         const sparkLength = unitSize * 1.8;
         const sparkWidth = 36;
         const spreadAngle = 40 * (Math.PI / 180); // 總散射角度 80 度
@@ -11108,273 +11047,6 @@ export default class MainScene extends Phaser.Scene {
     flashGridAtPositions(positions: { x: number, y: number }[], color: number, radius: number = 1) {
         positions.forEach(pos => {
             this.flashGridAt(pos.x, pos.y, color, radius);
-        });
-    }
-
-    // 在擊中位置顯示白色十字高光（邊擴散邊旋轉）
-    flashWhiteCrossAt(worldX: number, worldY: number) {
-        const screen = this.worldToScreen(worldX, worldY);
-        const gap = MainScene.SKILL_GRID_GAP;
-        const cellTotal = this.skillGridCellSize + gap;
-
-        const centerCol = Math.floor(screen.x / cellTotal);
-        const centerRow = Math.floor(screen.y / cellTotal);
-        const centerX = centerCol * cellTotal + this.skillGridCellSize / 2;
-        const centerY = centerRow * cellTotal + this.skillGridCellSize / 2;
-
-        const crossLength = 3; // 十字臂長度（格子數）
-        const duration = 300; // 總時長 300ms
-        const startTime = this.time.now;
-
-        // 隨機旋轉方向和角度（20~50度）
-        const rotateDirection = Math.random() < 0.5 ? 1 : -1;
-        const rotateAngle = (Math.PI / 9 + Math.random() * Math.PI / 6) * rotateDirection; // 20~50度
-
-        // 收集十字形狀的格子（中心 + 四個方向），記錄相對中心的偏移
-        const crossCells: { offsetX: number, offsetY: number, dist: number }[] = [];
-
-        // 中心格子
-        crossCells.push({ offsetX: 0, offsetY: 0, dist: 0 });
-
-        // 四個方向
-        const directions = [
-            { dc: 1, dr: 0 },  // 右
-            { dc: -1, dr: 0 }, // 左
-            { dc: 0, dr: 1 },  // 下
-            { dc: 0, dr: -1 }  // 上
-        ];
-
-        for (const { dc, dr } of directions) {
-            for (let i = 1; i <= crossLength; i++) {
-                crossCells.push({
-                    offsetX: dc * i * cellTotal,
-                    offsetY: dr * i * cellTotal,
-                    dist: i
-                });
-            }
-        }
-
-        if (crossCells.length === 0) return;
-
-        // 建立十字格子
-        const flashCells: Phaser.GameObjects.Rectangle[] = [];
-        for (let i = 0; i < crossCells.length; i++) {
-            const cell = this.add.rectangle(centerX, centerY, this.skillGridCellSize, this.skillGridCellSize, 0xffffff, 0);
-            cell.setVisible(false);
-            this.skillGridContainer.add(cell);
-            flashCells.push(cell);
-        }
-
-        const updateEffect = () => {
-            const elapsed = this.time.now - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            // 當前旋轉角度
-            const currentAngle = rotateAngle * progress;
-            const cos = Math.cos(currentAngle);
-            const sin = Math.sin(currentAngle);
-
-            // 從中心往外淡出
-            const fadeDistance = crossLength * progress;
-
-            for (let i = 0; i < crossCells.length; i++) {
-                const { offsetX, offsetY, dist } = crossCells[i];
-                const cell = flashCells[i];
-                if (!cell) continue;
-
-                // 旋轉後的位置
-                const rotatedX = centerX + offsetX * cos - offsetY * sin;
-                const rotatedY = centerY + offsetX * sin + offsetY * cos;
-                cell.setPosition(rotatedX, rotatedY);
-
-                if (dist >= fadeDistance) {
-                    // 距離越遠透明度越低
-                    const distRatio = dist / crossLength;
-                    const baseAlpha = 1 - distRatio * 0.5; // 中心 100%，邊緣 50%
-
-                    // 接近淡出邊緣時漸變透明
-                    let edgeFade = 1;
-                    if (fadeDistance > 0 && dist < fadeDistance + 1) {
-                        edgeFade = (dist - fadeDistance);
-                    }
-
-                    const currentAlpha = baseAlpha * Math.max(0, edgeFade);
-
-                    if (currentAlpha > 0.01) {
-                        cell.setFillStyle(0xffffff, currentAlpha);
-                        cell.setVisible(true);
-                    } else {
-                        cell.setVisible(false);
-                    }
-                } else {
-                    cell.setVisible(false);
-                }
-            }
-
-            // 動畫結束時清理
-            if (progress >= 1) {
-                for (const cell of flashCells) {
-                    cell.destroy();
-                }
-            }
-        };
-
-        updateEffect();
-
-        const timerEvent = this.time.addEvent({
-            delay: 16,
-            callback: updateEffect,
-            callbackScope: this,
-            repeat: Math.ceil(duration / 16)
-        });
-
-        this.time.delayedCall(duration + 50, () => {
-            timerEvent.remove();
-            for (const cell of flashCells) {
-                if (cell.active) cell.destroy();
-            }
-        });
-    }
-
-    // 在擊中位置顯示暴擊十字高光（橙色，更大更亮）
-    flashCritCrossAt(worldX: number, worldY: number) {
-        const screen = this.worldToScreen(worldX, worldY);
-        const gap = MainScene.SKILL_GRID_GAP;
-        const cellTotal = this.skillGridCellSize + gap;
-
-        const centerCol = Math.floor(screen.x / cellTotal);
-        const centerRow = Math.floor(screen.y / cellTotal);
-        const centerX = centerCol * cellTotal + this.skillGridCellSize / 2;
-        const centerY = centerRow * cellTotal + this.skillGridCellSize / 2;
-
-        const crossLength = 4; // 十字臂長度（比普通攻擊長）
-        const duration = 400; // 總時長 400ms（比普通攻擊長）
-        const startTime = this.time.now;
-
-        // 隨機旋轉方向和角度（30~60度）
-        const rotateDirection = Math.random() < 0.5 ? 1 : -1;
-        const rotateAngle = (Math.PI / 6 + Math.random() * Math.PI / 6) * rotateDirection; // 30~60度
-
-        // 收集十字形狀的格子（中心 + 四個方向），記錄相對中心的偏移
-        const crossCells: { offsetX: number, offsetY: number, dist: number }[] = [];
-
-        // 中心格子
-        crossCells.push({ offsetX: 0, offsetY: 0, dist: 0 });
-
-        // 四個方向
-        const directions = [
-            { dc: 1, dr: 0 },  // 右
-            { dc: -1, dr: 0 }, // 左
-            { dc: 0, dr: 1 },  // 下
-            { dc: 0, dr: -1 }  // 上
-        ];
-
-        for (const { dc, dr } of directions) {
-            for (let i = 1; i <= crossLength; i++) {
-                crossCells.push({
-                    offsetX: dc * i * cellTotal,
-                    offsetY: dr * i * cellTotal,
-                    dist: i
-                });
-            }
-        }
-
-        if (crossCells.length === 0) return;
-
-        // 暴擊顏色（橙色）
-        const critColor = 0xff8800;
-
-        // 建立十字格子
-        const flashCells: Phaser.GameObjects.Rectangle[] = [];
-        for (let i = 0; i < crossCells.length; i++) {
-            const cell = this.add.rectangle(centerX, centerY, this.skillGridCellSize, this.skillGridCellSize, critColor, 0);
-            cell.setVisible(false);
-            this.skillGridContainer.add(cell);
-            flashCells.push(cell);
-        }
-
-        const updateEffect = () => {
-            const elapsed = this.time.now - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            // 當前旋轉角度
-            const currentAngle = rotateAngle * progress;
-            const cos = Math.cos(currentAngle);
-            const sin = Math.sin(currentAngle);
-
-            // 從中心往外淡出
-            const fadeDistance = crossLength * progress;
-
-            for (let i = 0; i < crossCells.length; i++) {
-                const { offsetX, offsetY, dist } = crossCells[i];
-                const cell = flashCells[i];
-                if (!cell) continue;
-
-                // 旋轉後的位置
-                const rotatedX = centerX + offsetX * cos - offsetY * sin;
-                const rotatedY = centerY + offsetX * sin + offsetY * cos;
-                cell.setPosition(rotatedX, rotatedY);
-
-                if (dist >= fadeDistance) {
-                    // 距離越遠透明度越低
-                    const distRatio = dist / crossLength;
-                    const baseAlpha = 1 - distRatio * 0.3; // 中心 100%，邊緣 70%（比普通更亮）
-
-                    // 接近淡出邊緣時漸變透明
-                    let edgeFade = 1;
-                    if (fadeDistance > 0 && dist < fadeDistance + 1) {
-                        edgeFade = (dist - fadeDistance);
-                    }
-
-                    const currentAlpha = baseAlpha * Math.max(0, edgeFade);
-
-                    if (currentAlpha > 0.01) {
-                        cell.setFillStyle(critColor, currentAlpha);
-                        cell.setVisible(true);
-                    } else {
-                        cell.setVisible(false);
-                    }
-                } else {
-                    cell.setVisible(false);
-                }
-            }
-
-            // 動畫結束時清理
-            if (progress >= 1) {
-                for (const cell of flashCells) {
-                    cell.destroy();
-                }
-            }
-        };
-
-        updateEffect();
-
-        const timerEvent = this.time.addEvent({
-            delay: 16,
-            callback: updateEffect,
-            callbackScope: this,
-            repeat: Math.ceil(duration / 16)
-        });
-
-        this.time.delayedCall(duration + 50, () => {
-            timerEvent.remove();
-            for (const cell of flashCells) {
-                if (cell.active) cell.destroy();
-            }
-        });
-    }
-
-    // 批量顯示白色十字高光
-    flashWhiteCrossAtPositions(positions: { x: number, y: number }[]) {
-        positions.forEach(pos => {
-            this.flashWhiteCrossAt(pos.x, pos.y);
-        });
-    }
-
-    // 批量顯示暴擊十字高光（橙色）
-    flashCritCrossAtPositions(positions: { x: number, y: number }[]) {
-        positions.forEach(pos => {
-            this.flashCritCrossAt(pos.x, pos.y);
         });
     }
 
