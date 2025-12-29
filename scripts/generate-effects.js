@@ -101,4 +101,38 @@ for (const angle of sectorAngles) {
 // 生成直線
 generateLine();
 
+// 生成 hex 字元紋理（0-9, A-F）
+generateHexChars();
+
 console.log('\nDone! Files saved to:', OUTPUT_DIR);
+
+// 生成 hex 字元紋理
+function generateHexChars() {
+    const chars = '0123456789ABCDEF';
+    const size = 64;
+    const fontSize = 52;
+    const color = '#2a8a2a'; // 駭客綠
+
+    for (const char of chars) {
+        const canvas = createCanvas(size, size);
+        const ctx = canvas.getContext('2d');
+
+        // 透明背景
+        ctx.clearRect(0, 0, size, size);
+
+        // 設定字型
+        ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // 繪製字元
+        ctx.fillText(char, size / 2, size / 2);
+
+        // 儲存 PNG
+        const buffer = canvas.toBuffer('image/png');
+        const filename = `hex_${char}.png`;
+        fs.writeFileSync(path.join(OUTPUT_DIR, filename), buffer);
+        console.log(`Generated: ${filename}`);
+    }
+}

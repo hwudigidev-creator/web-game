@@ -4043,7 +4043,7 @@ export default class MainScene extends Phaser.Scene {
                 fontFamily: 'Consolas, "Courier New", monospace',
                 fontSize: `${fontSize}px`,
                 color: '#2a8a2a',
-                fontStyle: 'italic' // 斜體模擬傾斜
+                fontStyle: 'italic'
             });
         } else {
             text.setText(char);
@@ -4092,7 +4092,7 @@ export default class MainScene extends Phaser.Scene {
                 const centerY = row * gridSize + gridSize / 2;
                 const fontSize = Math.floor(gridSize * 0.8);
 
-                // 使用斜體文字
+                // 使用 text 物件
                 const text = this.getFloorHexText(char, fontSize);
                 text.setPosition(centerX, centerY);
                 text.setOrigin(0.5);
@@ -8012,16 +8012,18 @@ export default class MainScene extends Phaser.Scene {
                 const baseCd = skill.definition.cooldown || 1000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
                 lines.push(`扇形角度: ${angle}°`);
+                lines.push(`射程: 3 單位`);
                 lines.push(`傷害: ${finalDamage}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
             }
             case 'active_coder': {
                 const rangeUnits = 2 + level * 0.5;
-                const damageUnits = 1 + level;
+                // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
+                const damageUnits = (1 + level) * 2;
                 const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
                 const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
-                const baseCd = skill.definition.cooldown || 1500;
+                const baseCd = skill.definition.cooldown || 2000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
                 lines.push(`範圍: ${rangeUnits} 單位`);
                 lines.push(`傷害: ${finalDamage}`);
@@ -8029,13 +8031,20 @@ export default class MainScene extends Phaser.Scene {
                 break;
             }
             case 'active_vfx': {
-                const beamCount = level + 1;
+                const isMax = level >= skill.definition.maxLevel;
                 const damageUnits = 1 + level;
                 const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
                 const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
                 const baseCd = skill.definition.cooldown || 2500;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
-                lines.push(`光束數: ${beamCount} 道`);
+                if (isMax) {
+                    // MAX 模式：3 條精準鎖定超粗射線，15 單位射程
+                    lines.push(`精準鎖定: 3 道超粗射線`);
+                    lines.push(`射程: 15 單位`);
+                } else {
+                    lines.push(`光束數: ${level + 1} 道`);
+                    lines.push(`射程: 10 單位`);
+                }
                 lines.push(`傷害: ${finalDamage}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
@@ -8048,8 +8057,8 @@ export default class MainScene extends Phaser.Scene {
                 const baseCd = skill.definition.cooldown || 10000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
                 lines.push(`護盾: ${shieldAmount} (霸體)`);
-                lines.push(`反傷: ${reflectDamage}`);
-                lines.push(`回血: ${shieldAmount}`);
+                lines.push(`反傷: ${reflectDamage} + 擊退 1 單位`);
+                lines.push(`護盾消失回血: ${shieldAmount}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
             }

@@ -251,7 +251,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '3 道光束、3 傷害',
             '4 道光束、4 傷害',
             '5 道光束、5 傷害',
-            '6 道光束、6 傷害，已達最大等級！'
+            '3 道精準鎖定超粗射線、6 傷害、15 單位射程，已達最大等級！'
         ],
         levelUpQuotes: [
             '你研究了影像美學，劇本編導的能力提升了', // LV0
@@ -262,12 +262,12 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '你成為了超級導演，解鎖了進階技能組合', // LV5/MAX
         ],
         maxExtraAbility: {
-            name: '精準連鎖',
-            description: '擊中時 {value} 機率發射 3 條鎖定超粗射線',
+            name: '精準',
+            description: '改為 3 條精準鎖定超粗射線，射程 15 單位',
             baseValue: 0,
-            perLevel: 0.0005, // 每級 +0.05%
-            unit: '%',
-            isPercentage: true
+            perLevel: 0,
+            unit: '',
+            isPercentage: false
         }
     },
     {
