@@ -1075,4 +1075,9 @@ export class SkillManager {
         }
         return learned;
     }
+
+    // 停止所有技能（遊戲結束時）
+    stopAllSkills() {
+        // 標記遊戲結束狀態（由 MainScene 處理實際停止邏輯）
+    }
 }

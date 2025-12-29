@@ -141,6 +141,90 @@ export default class MainScene extends Phaser.Scene {
     private static readonly RADIUS_WAVE_INTERVAL = 5000; // 每5秒觸發
     private static readonly RADIUS_WAVE_POINTS = 5;      // 每次5個起點
 
+    // GAME OVER 點陣字系統
+    private gameOverActive: boolean = false;
+    private gameOverSprites: Phaser.GameObjects.Sprite[] = [];
+    // 7x9 點陣字模板（2格粗筆畫，1=有點，0=無點）
+    private static readonly DOT_MATRIX_FONT: { [key: string]: number[][] } = {
+        'G': [
+            [0,0,1,1,1,1,0],
+            [0,1,1,1,1,1,1],
+            [1,1,0,0,0,0,0],
+            [1,1,0,0,0,0,0],
+            [1,1,0,0,1,1,1],
+            [1,1,0,0,1,1,1],
+            [1,1,0,0,0,1,1],
+            [0,1,1,1,1,1,1],
+            [0,0,1,1,1,1,0]
+        ],
+        'A': [
+            [0,0,1,1,1,0,0],
+            [0,1,1,1,1,1,0],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1]
+        ],
+        'M': [
+            [1,1,0,0,0,1,1],
+            [1,1,1,0,1,1,1],
+            [1,1,1,1,1,1,1],
+            [1,1,0,1,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1]
+        ],
+        'E': [
+            [1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1],
+            [1,1,0,0,0,0,0],
+            [1,1,0,0,0,0,0],
+            [1,1,1,1,1,1,0],
+            [1,1,1,1,1,1,0],
+            [1,1,0,0,0,0,0],
+            [1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1]
+        ],
+        'O': [
+            [0,0,1,1,1,0,0],
+            [0,1,1,1,1,1,0],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [0,1,1,1,1,1,0],
+            [0,0,1,1,1,0,0]
+        ],
+        'V': [
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [0,1,1,0,1,1,0],
+            [0,1,1,0,1,1,0],
+            [0,0,1,1,1,0,0],
+            [0,0,1,1,1,0,0],
+            [0,0,0,1,0,0,0]
+        ],
+        'R': [
+            [1,1,1,1,1,1,0],
+            [1,1,1,1,1,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,0,0,0,1,1],
+            [1,1,1,1,1,1,0],
+            [1,1,1,1,1,0,0],
+            [1,1,0,1,1,0,0],
+            [1,1,0,0,1,1,0],
+            [1,1,0,0,0,1,1]
+        ]
+    };
+
     // 遊戲世界容器（會隨鏡頭移動的內容）
     private worldContainer!: Phaser.GameObjects.Container;
 
@@ -2251,11 +2335,10 @@ export default class MainScene extends Phaser.Scene {
         // 計算新的最大經驗值（成長曲線）
         this.maxExp = Math.floor(MainScene.BASE_EXP * Math.pow(MainScene.EXP_GROWTH_RATE, this.currentLevel));
 
-        // 計算新的最大 HP（套用被動技能加成）
+        // 計算新的最大 HP（套用被動技能加成），並增加多出來的 HP
         this.recalculateMaxHp();
-        // 升級時回滿 HP
-        this.currentHp = this.maxHp;
-        this.displayedHp = this.maxHp; // 同步顯示 HP
+        // 同步顯示 HP（不再回滿，只加增量）
+        this.displayedHp = this.currentHp;
 
         // 更新怪物管理器的玩家等級（影響新生成怪物的血量）
         const shouldSpawnBoss = this.monsterManager.setPlayerLevel(this.currentLevel);
@@ -2271,7 +2354,7 @@ export default class MainScene extends Phaser.Scene {
         this.drawHpBarFill();
         this.updateHpText();
 
-        // 更新低血量紅暈效果（回滿血後應消失）
+        // 更新低血量紅暈效果
         this.updateLowHpVignette();
 
         // 顯示技能選擇面板
@@ -2290,10 +2373,10 @@ export default class MainScene extends Phaser.Scene {
         const oldMaxHp = this.maxHp;
         this.maxHp = this.skillManager.calculateFinalMaxHp(baseMaxHp);
 
-        // 如果最大 HP 增加，按比例增加當前 HP
+        // 如果最大 HP 增加，增加多出來的 HP（不是回滿）
         if (this.maxHp > oldMaxHp && oldMaxHp > 0) {
-            const hpRatio = this.currentHp / oldMaxHp;
-            this.currentHp = Math.floor(this.maxHp * hpRatio);
+            const hpIncrease = this.maxHp - oldMaxHp;
+            this.currentHp += hpIncrease;
         }
 
         // 確保當前 HP 不超過最大值
@@ -3385,9 +3468,28 @@ export default class MainScene extends Phaser.Scene {
                     );
                 }
             } else {
-                // TODO: 遊戲結束處理
+                // 遊戲結束處理
+                this.triggerGameOver();
             }
         }
+    }
+
+    // 觸發遊戲結束
+    private triggerGameOver() {
+        if (this.gameOverActive) return; // 防止重複觸發
+
+        // 停止怪物生成和移動
+        this.monsterManager.stopSpawning();
+
+        // 角色變灰並停止動畫
+        this.character.setTint(0x666666);
+        this.character.stop();
+
+        // 顯示 GAME OVER 點陣字
+        this.showGameOver();
+
+        // 停止所有技能冷卻計時
+        this.skillCooldowns.clear();
     }
 
     // 護盾被擊中時的金色擴散光圈網格特效
@@ -4537,6 +4639,159 @@ export default class MainScene extends Phaser.Scene {
 
         // 更新橫向掃光
         this.updateScanLine();
+
+        // 更新 GAME OVER 點陣字閃爍
+        this.updateGameOverFlicker();
+    }
+
+    // 顯示 GAME OVER 點陣字
+    private showGameOver() {
+        if (this.gameOverActive) return;
+        this.gameOverActive = true;
+
+        // 清除現有地板字
+        for (const hex of this.floorHexChars) {
+            this.releaseFloorHexSprite(hex.sprite);
+        }
+        this.floorHexChars = [];
+        this.floorHexUsedPositions.clear();
+
+        // 使用地板字的格子大小
+        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
+        const charWidth = 7;  // 每個字母 7 格寬（2格粗筆畫）
+        const charHeight = 9; // 每個字母 9 格高
+        const charSpacing = 2; // 字母間隔 2 格
+        const rowSpacing = 2;  // 行間隔 2 格
+        const rowOffset = charWidth + charSpacing; // 上下排各錯開一個字寬
+
+        // 計算總寬度
+        const line1 = 'GAME';
+        const line2 = 'OVER';
+        const line1Cols = line1.length * (charWidth + charSpacing) - charSpacing;
+        const line2Cols = line2.length * (charWidth + charSpacing) - charSpacing;
+        const totalHeight = charHeight * 2 + rowSpacing;
+
+        // 平行四邊形偏移量（右上左下：row 增加時 x 減少）
+        const skewOffset = -gridSize * 0.25;
+
+        // 計算起始位置（畫面中央）
+        const centerX = this.characterX;
+        const centerY = this.characterY;
+
+        // 繪製 GAME（第一行，往左偏移半個字寬）
+        const line1StartX = centerX - (line1Cols * gridSize) / 2 - (rowOffset * gridSize) / 2;
+        const line1StartY = centerY - (totalHeight * gridSize) / 2;
+        this.spawnDotMatrixLine(line1, line1StartX, line1StartY, gridSize, skewOffset, 0);
+
+        // 繪製 OVER（第二行，往右偏移半個字寬）
+        const line2StartX = centerX - (line2Cols * gridSize) / 2 + (rowOffset * gridSize) / 2;
+        const line2StartY = centerY - (totalHeight * gridSize) / 2 + (charHeight + rowSpacing) * gridSize;
+        this.spawnDotMatrixLine(line2, line2StartX, line2StartY, gridSize, skewOffset, charHeight + rowSpacing);
+    }
+
+    // 繪製一行點陣字（使用地板字系統）
+    private spawnDotMatrixLine(text: string, startX: number, startY: number, gridSize: number, skewOffset: number, baseRow: number) {
+        const charWidth = 7;
+        const charHeight = 9;
+        const charSpacing = 2;
+
+        let currentX = startX;
+
+        for (const letter of text) {
+            const pattern = MainScene.DOT_MATRIX_FONT[letter];
+            if (!pattern) continue;
+
+            for (let row = 0; row < charHeight; row++) {
+                for (let col = 0; col < pattern[row].length; col++) {
+                    if (pattern[row][col] === 1) {
+                        // 計算位置（含平行四邊形偏移：右上左下）
+                        const totalRow = baseRow + row;
+                        const x = currentX + col * gridSize + gridSize / 2 + totalRow * skewOffset;
+                        const y = startY + row * gridSize + gridSize / 2;
+
+                        // 檢查格子是否已被使用
+                        const gridCol = Math.floor(x / gridSize);
+                        const gridRow = Math.floor(y / gridSize);
+                        const gridKey = `go_${gridCol},${gridRow}`;
+
+                        if (!this.floorHexUsedPositions.has(gridKey)) {
+                            this.floorHexUsedPositions.add(gridKey);
+
+                            // 隨機選擇 hex 字元
+                            const char = MainScene.HEX_CHARS[Math.floor(Math.random() * 16)];
+                            const sprite = this.getFloorHexSprite(char);
+                            sprite.setPosition(x, y);
+                            sprite.setScale(gridSize / 80);
+                            sprite.setAlpha(0);
+                            sprite.setTint(0xff4444); // 紅色
+                            this.floorHexContainer.add(sprite);
+                            this.gameOverSprites.push(sprite);
+
+                            // 加入 floorHexChars 讓它參與地板字系統（但不會被自動移除）
+                            this.floorHexChars.push({
+                                sprite,
+                                gridKey,
+                                spawnTime: this.time.now,
+                                fadeInDuration: 300,
+                                lifetime: 999999, // 永久存在
+                                fullyVisible: false,
+                                visibleStartTime: 0
+                            });
+
+                            // 延遲淡入（隨機錯開）
+                            const delay = Math.random() * 500;
+                            this.tweens.add({
+                                targets: sprite,
+                                alpha: 0.9,
+                                duration: 300,
+                                delay: delay,
+                                ease: 'Power2',
+                                onComplete: () => {
+                                    // 標記為完全顯現
+                                    const hex = this.floorHexChars.find(h => h.sprite === sprite);
+                                    if (hex) {
+                                        hex.fullyVisible = true;
+                                        hex.visibleStartTime = this.time.now;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
+            currentX += (charWidth + charSpacing) * gridSize;
+        }
+    }
+
+    // 更新 GAME OVER 閃爍效果
+    private updateGameOverFlicker() {
+        if (!this.gameOverActive || this.gameOverSprites.length === 0) return;
+
+        // 隨機閃爍效果
+        for (const sprite of this.gameOverSprites) {
+            if (!sprite.active) continue;
+
+            // 隨機改變字元
+            if (Math.random() < 0.02) { // 2% 機率換字
+                const newChar = MainScene.HEX_CHARS[Math.floor(Math.random() * 16)];
+                sprite.setTexture(`hex_${newChar}`);
+            }
+
+            // 隨機亮度抖動
+            if (Math.random() < 0.05) {
+                const flicker = 0.7 + Math.random() * 0.3;
+                sprite.setAlpha(flicker);
+            }
+
+            // 紅白閃爍
+            if (Math.random() < 0.01) {
+                sprite.setTint(0xffffff);
+                this.time.delayedCall(50 + Math.random() * 100, () => {
+                    if (sprite.active) sprite.setTint(0xff4444);
+                });
+            }
+        }
     }
 
     // 更新橫向掃光效果
