@@ -67,6 +67,10 @@ export default class MainScene extends Phaser.Scene {
     private static readonly HEX_TINT_NORMAL = 0x1a5a1a;  // 暗駭客綠
     private static readonly HEX_TINT_HIGHLIGHT = 0xffffff; // 高亮白色
 
+    // 分身技能專用暗紫色
+    private static readonly PHANTOM_COLOR = 0x5522aa;       // 主色：暗紫
+    private static readonly PHANTOM_COLOR_LIGHT = 0x7744cc; // 輔色：稍亮暗紫
+
     // 橫向掃光系統
     private scanLineX: number = -1;           // 掃光當前 X 位置（-1 表示未啟動）
     private scanLineActive: boolean = false;
@@ -6883,12 +6887,12 @@ export default class MainScene extends Phaser.Scene {
         const startX = this.characterX + Math.cos(angle) * distance;
         const startY = this.characterY + Math.sin(angle) * distance;
 
-        // 創建分身 Sprite（半透明玩家圖像）
+        // 創建分身 Sprite（半透明玩家圖像，暗紫色）
         const sprite = this.add.sprite(0, 0, 'char_idle_1');
         sprite.setOrigin(0.5, 1);
         sprite.setScale(this.character.scaleX, this.character.scaleY);
         sprite.setAlpha(0.5);
-        sprite.setTint(0x9966ff);
+        sprite.setTint(MainScene.PHANTOM_COLOR);
         sprite.play('char_idle');
         this.skillGridContainer.add(sprite);
         sprite.setDepth(55);
@@ -7042,10 +7046,10 @@ export default class MainScene extends Phaser.Scene {
 
     // 分身版燃燒的賽璐珞（指定座標，範圍 3 單位）
     private phantomCastBurningCelluloidAt(baseDamage: number, phantomX: number, phantomY: number) {
-        const range = this.gameBounds.height * 0.3; // 3 單位（本尊 7 單位 -2）
+        const range = this.gameBounds.height * 0.3; // 3 單位（本尊 7 單位）
         const halfAngleDeg = 15; // 30 度扇形
         const halfAngle = halfAngleDeg * Math.PI / 180;
-        const color = 0x9966ff; // 分身用紫色
+        const color = MainScene.PHANTOM_COLOR; // 分身暗紫色
 
         // 旋轉一圈
         const rotationSteps = 12;
@@ -7087,11 +7091,11 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 分身版技術美術大神（指定座標，每次 2 發）
+    // 分身版技術美術大神（指定座標，每次 2 發，範圍縮小）
     private phantomCastTechArtistAt(baseDamage: number, phantomX: number, phantomY: number) {
         const unitSize = this.gameBounds.height / 10;
-        const range = unitSize * 5;
-        const explosionRadius = unitSize * 3;
+        const range = unitSize * 3;          // 縮小：本尊 5 單位
+        const explosionRadius = unitSize * 2; // 縮小：本尊 3 單位
         const beamCount = 2; // 分身版每次 2 發
 
         for (let b = 0; b < beamCount; b++) {
@@ -7109,7 +7113,7 @@ export default class MainScene extends Phaser.Scene {
                 const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
 
                 // 光線效果
-                this.showLightBeamEffect(targetX, targetY, explosionRadius, 0x9966ff, beamOffsetX);
+                this.showLightBeamEffect(targetX, targetY, explosionRadius, MainScene.PHANTOM_COLOR, beamOffsetX);
 
                 // 延遲後爆炸
                 this.time.delayedCall(150, () => {
@@ -7124,7 +7128,7 @@ export default class MainScene extends Phaser.Scene {
                         const distUnits = distPixels / unitSize;
                         const monsterRadiusUnits = monster.definition.size * 0.5;
 
-                        if (distUnits - monsterRadiusUnits <= 3) { // 3 單位爆炸範圍
+                        if (distUnits - monsterRadiusUnits <= 2) { // 2 單位爆炸範圍（本尊 3）
                             hitMonsters.push(monster.id);
                         }
                     }
@@ -7138,19 +7142,19 @@ export default class MainScene extends Phaser.Scene {
                         if (result.totalExp > 0) this.addExp(result.totalExp);
                     }
 
-                    this.showExplosionEffect(targetX, targetY, explosionRadius, 0x9966ff, beamAngle);
+                    this.showExplosionEffect(targetX, targetY, explosionRadius, MainScene.PHANTOM_COLOR, beamAngle);
                 });
             });
         }
     }
 
-    // 分身版完美像素審判（指定座標）
+    // 分身版完美像素審判（指定座標，範圍縮小）
     private phantomCastPerfectPixelAt(baseDamage: number, phantomX: number, phantomY: number) {
         const unitSize = this.gameBounds.height / 10;
-        const explosionRadius = unitSize * 3; // 3 單位爆炸範圍（與主版本一致）
+        const explosionRadius = unitSize * 2; // 縮小：本尊 3 單位
 
-        // 4 個焦點位置（分身位置 ±2 單位）
-        const offset = unitSize * 2;
+        // 4 個焦點位置（分身位置 ±1.5 單位，本尊 ±2）
+        const offset = unitSize * 1.5;
         const focusPoints = [
             { x: phantomX - offset, y: phantomY - offset },  // 左上
             { x: phantomX + offset, y: phantomY - offset },  // 右上
@@ -7176,7 +7180,7 @@ export default class MainScene extends Phaser.Scene {
                     const distUnits = distPixels / unitSize;
                     const monsterRadiusUnits = monster.definition.size * 0.5;
 
-                    if (distUnits - monsterRadiusUnits <= 3) { // 3 單位爆炸範圍
+                    if (distUnits - monsterRadiusUnits <= 2) { // 2 單位爆炸範圍（本尊 3）
                         hitMonsters.push(monster.id);
                     }
                 }
@@ -7190,7 +7194,7 @@ export default class MainScene extends Phaser.Scene {
                     if (result.totalExp > 0) this.addExp(result.totalExp);
                 }
 
-                this.showExplosionEffect(point.x, point.y, explosionRadius, 0x66ffcc);
+                this.showExplosionEffect(point.x, point.y, explosionRadius, MainScene.PHANTOM_COLOR);
             });
         });
     }
@@ -7246,7 +7250,8 @@ export default class MainScene extends Phaser.Scene {
             missile.rotateCanvas(state.rotation);
 
             const halfLen = missileLength / 2;
-            const colors = [0x6633cc, 0x7744dd, 0x8855ee, 0x9966ff, 0xaa77ff, 0xbb88ff];
+            // 暗紫色漸層（比本尊更暗）
+            const colors = [0x331188, 0x442299, 0x5522aa, 0x6633bb, 0x7744cc, 0x8855dd];
             const segmentLen = missileLength / 6;
 
             for (let i = 0; i < 6; i++) {
@@ -7318,10 +7323,10 @@ export default class MainScene extends Phaser.Scene {
         this.phantomSawBladeActive.add(phantomId);
 
         const unitSize = this.gameBounds.height / 10;
-        const orbitRadiusWorld = 2; // 2 單位距離（世界座標）
+        const orbitRadiusWorld = 1.5; // 縮小：本尊 2 單位
         const orbitRadiusPx = unitSize * orbitRadiusWorld;
-        const bladeRadiusPx = unitSize * 0.5; // 0.5 單位範圍
-        const bladeRadiusWorld = 0.5;
+        const bladeRadiusPx = unitSize * 0.4; // 縮小：本尊 0.5 單位
+        const bladeRadiusWorld = 0.4;
         const bladeCount = 3; // 分身產生 3 個輪鋸
 
         // 公轉 2 倍速（數量只有一半，視覺上看起來轉速一樣）
@@ -7359,12 +7364,12 @@ export default class MainScene extends Phaser.Scene {
                 const bladeScreenX = phantomScreen.x + Math.cos(bladeAngle) * orbitRadiusPx;
                 const bladeScreenY = phantomScreen.y + Math.sin(bladeAngle) * orbitRadiusPx;
 
-                // 輪鋸主體（紫色，分身專用）
-                graphics.fillStyle(0x9966ff, 0.6);
+                // 輪鋸主體（暗紫色，分身專用）
+                graphics.fillStyle(MainScene.PHANTOM_COLOR, 0.6);
                 graphics.fillCircle(bladeScreenX, bladeScreenY, bladeRadiusPx);
 
                 // 輪鋸邊緣
-                graphics.lineStyle(3, 0xcc99ff, 0.8);
+                graphics.lineStyle(3, MainScene.PHANTOM_COLOR_LIGHT, 0.8);
                 graphics.strokeCircle(bladeScreenX, bladeScreenY, bladeRadiusPx);
 
                 // 鋸齒
@@ -7381,7 +7386,7 @@ export default class MainScene extends Phaser.Scene {
                     const x3 = bladeScreenX + Math.cos(toothAngle + 0.3) * innerRadius;
                     const y3 = bladeScreenY + Math.sin(toothAngle + 0.3) * innerRadius;
 
-                    graphics.lineStyle(2, 0xcc99ff, 0.8);
+                    graphics.lineStyle(2, MainScene.PHANTOM_COLOR_LIGHT, 0.8);
                     graphics.beginPath();
                     graphics.moveTo(x1, y1);
                     graphics.lineTo(x2, y2);
@@ -7429,8 +7434,8 @@ export default class MainScene extends Phaser.Scene {
                     const distUnits = distPixels / unitSize;
                     const monsterRadiusUnits = monster.definition.size * 0.5;
 
-                    // 0.5 單位輪鋸範圍 + 怪物半徑
-                    if (distUnits <= 0.5 + monsterRadiusUnits) {
+                    // 0.4 單位輪鋸範圍 + 怪物半徑（本尊 0.5）
+                    if (distUnits <= 0.4 + monsterRadiusUnits) {
                         const lastHit = hitCooldown.get(monster.id) || 0;
                         if (now - lastHit >= 500) {
                             hitMonsters.push(monster.id);
@@ -7529,7 +7534,7 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 分身版靈魂斬擊視覺效果（紫色）
+    // 分身版靈魂斬擊視覺效果（暗紫色）
     private drawPhantomSoulSlashEffect(startX: number, startY: number, endX: number, endY: number, angle: number, phantomX: number, phantomY: number) {
         const screenStart = this.worldToScreen(startX, startY);
         const screenEnd = this.worldToScreen(endX, endY);
@@ -7538,8 +7543,8 @@ export default class MainScene extends Phaser.Scene {
         this.skillGridContainer.add(graphics);
         graphics.setDepth(60);
 
-        // 斬擊線（紫色）
-        const slashColor = 0x9966ff;
+        // 斬擊線（暗紫色）
+        const slashColor = MainScene.PHANTOM_COLOR;
 
         // 外層光暈
         graphics.lineStyle(12, slashColor, 0.3);
@@ -7577,7 +7582,7 @@ export default class MainScene extends Phaser.Scene {
         this.showPhantomSlashFlashEffect(phantomScreen.x, phantomScreen.y, angle);
     }
 
-    // 分身斬擊閃光效果（紫色）
+    // 分身斬擊閃光效果（暗紫色）
     private showPhantomSlashFlashEffect(x: number, y: number, angle: number) {
         const graphics = this.add.graphics();
         this.skillGridContainer.add(graphics);
@@ -7585,7 +7590,7 @@ export default class MainScene extends Phaser.Scene {
 
         const flashSize = this.gameBounds.height * 0.1;
 
-        graphics.lineStyle(4, 0x9966ff, 0.8);
+        graphics.lineStyle(4, MainScene.PHANTOM_COLOR, 0.8);
         graphics.beginPath();
         graphics.arc(x, y, flashSize, angle - 0.3, angle + 0.3, false);
         graphics.strokePath();
@@ -7900,7 +7905,7 @@ export default class MainScene extends Phaser.Scene {
 
         const lineSprite = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_LINE);
         lineSprite.setOrigin(0.5, 1); // 底部中心對齊
-        lineSprite.setTint(0x9966ff); // 消失用較暗的紫色
+        lineSprite.setTint(MainScene.PHANTOM_COLOR); // 暗紫色
         this.skillGridContainer.add(lineSprite);
         lineSprite.setDepth(60);
 
@@ -7957,7 +7962,7 @@ export default class MainScene extends Phaser.Scene {
         afterimage.setScale(phantom.sprite.scaleX, phantom.sprite.scaleY);
         afterimage.setFlipX(phantom.sprite.flipX);
         afterimage.setAlpha(0.3);
-        afterimage.setTint(0x9966ff);
+        afterimage.setTint(MainScene.PHANTOM_COLOR);
         this.skillGridContainer.add(afterimage);
         afterimage.setDepth(54);
 
@@ -10594,14 +10599,14 @@ export default class MainScene extends Phaser.Scene {
      * @param hitDirection 打擊方向（弧度），火花會往反方向噴發；undefined 則隨機方向
      * @param count 火花數量（預設 8，一般技能建議 4-5）
      */
-    private showHitSparkEffect(worldX: number, worldY: number, color: number, hitDirection?: number, count: number = 8) {
+    private showHitSparkEffect(worldX: number, worldY: number, color: number, hitDirection?: number, count: number = 4) {
         const screen = this.worldToScreen(worldX, worldY);
         const unitSize = this.gameBounds.height / 10;
 
         const sparkCount = count;
-        const sparkLength = unitSize * 1.8;
+        const sparkLength = unitSize * 1.2; // 原 1.8，減少 1/3
         const sparkWidth = 36;
-        const spreadAngle = 40 * (Math.PI / 180); // 總散射角度 80 度
+        const spreadAngle = 35 * (Math.PI / 180); // 原 40°，左右各少 5°（總 70°）
 
         // 根據主色生成漸層
         const r = (color >> 16) & 0xff;
