@@ -49,9 +49,9 @@ export default class MainScene extends Phaser.Scene {
     private floorHexContainer!: Phaser.GameObjects.Container; // 地板字元容器（在 floorGrid 之上）
 
     // 地板隨機字元（空間定位用）
-    private floorHexChars: { text: Phaser.GameObjects.Text; gridKey: string; spawnTime: number }[] = [];
+    private floorHexChars: { sprite: Phaser.GameObjects.Sprite; gridKey: string; spawnTime: number }[] = [];
     private floorHexUsedPositions: Set<string> = new Set();
-    private floorHexPool: Phaser.GameObjects.Text[] = []; // 物件池
+    private floorHexPool: Phaser.GameObjects.Sprite[] = []; // 物件池
     private static readonly FLOOR_HEX_MAX = 150; // 最多 150 個字
     private static readonly FLOOR_HEX_LIFETIME = 2000; // 2 秒消失
     private static readonly HEX_CHARS = '0123456789ABCDEF';
@@ -4035,30 +4035,25 @@ export default class MainScene extends Phaser.Scene {
         this.floorGrid.strokeRect(0, 0, this.mapWidth, this.mapHeight);
     }
 
-    // 從物件池取得或建立 hex text
-    private getFloorHexText(char: string, fontSize: number): Phaser.GameObjects.Text {
-        let text = this.floorHexPool.pop();
-        if (!text) {
-            text = this.add.text(0, 0, char, {
-                fontFamily: 'Consolas, "Courier New", monospace',
-                fontSize: `${fontSize}px`,
-                color: '#2a8a2a',
-                fontStyle: 'italic'
-            });
+    // 從物件池取得或建立 hex sprite
+    private getFloorHexSprite(char: string): Phaser.GameObjects.Sprite {
+        const textureKey = `hex_${char}`;
+        let sprite = this.floorHexPool.pop();
+        if (!sprite) {
+            sprite = this.add.sprite(0, 0, textureKey);
         } else {
-            text.setText(char);
-            text.setFontSize(fontSize);
-            text.setVisible(true);
-            text.setActive(true);
+            sprite.setTexture(textureKey);
+            sprite.setVisible(true);
+            sprite.setActive(true);
         }
-        return text;
+        return sprite;
     }
 
-    // 釋放 hex text 回物件池
-    private releaseFloorHexText(text: Phaser.GameObjects.Text) {
-        text.setVisible(false);
-        text.setActive(false);
-        this.floorHexPool.push(text);
+    // 釋放 hex sprite 回物件池
+    private releaseFloorHexSprite(sprite: Phaser.GameObjects.Sprite) {
+        sprite.setVisible(false);
+        sprite.setActive(false);
+        this.floorHexPool.push(sprite);
     }
 
     // 生成地板隨機字元（空間定位用，只在可見區域附近生成）
@@ -4090,17 +4085,18 @@ export default class MainScene extends Phaser.Scene {
                 const char = MainScene.HEX_CHARS[Math.floor(Math.random() * MainScene.HEX_CHARS.length)];
                 const centerX = col * gridSize + gridSize / 2;
                 const centerY = row * gridSize + gridSize / 2;
-                const fontSize = Math.floor(gridSize * 0.8);
 
-                // 使用 text 物件
-                const text = this.getFloorHexText(char, fontSize);
-                text.setPosition(centerX, centerY);
-                text.setOrigin(0.5);
-                text.setAlpha(0); // 從 0 開始淡入
-                this.floorHexContainer.add(text);
+                // 使用 sprite 圖片
+                const sprite = this.getFloorHexSprite(char);
+                sprite.setPosition(centerX, centerY);
+                // 縮放到適當大小（紋理 64px，目標為 gridSize * 0.8）
+                const targetSize = gridSize * 0.8;
+                sprite.setScale(targetSize / 64);
+                sprite.setAlpha(0); // 從 0 開始淡入
+                this.floorHexContainer.add(sprite);
 
                 this.floorHexChars.push({
-                    text,
+                    sprite,
                     gridKey,
                     spawnTime: this.time.now
                 });
@@ -4122,28 +4118,28 @@ export default class MainScene extends Phaser.Scene {
             const age = now - hex.spawnTime;
 
             // 計算距離角色的距離
-            const textX = hex.text.x;
-            const textY = hex.text.y;
+            const spriteX = hex.sprite.x;
+            const spriteY = hex.sprite.y;
             const dist = Math.sqrt(
-                Math.pow(textX - this.characterX, 2) +
-                Math.pow(textY - this.characterY, 2)
+                Math.pow(spriteX - this.characterX, 2) +
+                Math.pow(spriteY - this.characterY, 2)
             );
 
             if (age >= MainScene.FLOOR_HEX_LIFETIME || dist > maxDist) {
                 // 時間到或太遠，回收到物件池
-                this.releaseFloorHexText(hex.text);
+                this.releaseFloorHexSprite(hex.sprite);
                 this.floorHexUsedPositions.delete(hex.gridKey);
                 this.floorHexChars.splice(i, 1);
             } else if (age < fadeTime) {
                 // 淡入（前 20%）
                 const fadeInProgress = age / fadeTime;
-                hex.text.setAlpha(0.7 * fadeInProgress);
+                hex.sprite.setAlpha(0.7 * fadeInProgress);
             } else if (age > MainScene.FLOOR_HEX_LIFETIME - fadeTime) {
                 // 淡出（後 20%）
                 const fadeOutProgress = (MainScene.FLOOR_HEX_LIFETIME - age) / fadeTime;
-                hex.text.setAlpha(0.7 * fadeOutProgress);
+                hex.sprite.setAlpha(0.7 * fadeOutProgress);
             } else {
-                hex.text.setAlpha(0.7);
+                hex.sprite.setAlpha(0.7);
             }
         }
 
