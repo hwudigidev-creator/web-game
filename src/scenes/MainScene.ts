@@ -89,6 +89,44 @@ export default class MainScene extends Phaser.Scene {
     private static readonly CIRCULAR_SCAN_SPEED = 0.8;       // 擴散速度（畫面高度/秒）
     private static readonly CIRCULAR_SCAN_MAX = 1.5;         // 最大半徑（畫面高度比例）
 
+    // 受傷紅色掃光系統（兩圈同時擴散）
+    private damageScanRings: {
+        radius: number;      // 當前半徑
+        active: boolean;     // 是否啟動
+    }[] = [];
+    private static readonly DAMAGE_SCAN_COLOR = 0xff4444;    // 紅色
+    private static readonly DAMAGE_SCAN_WIDTH = 0.08;        // 掃光環寬度
+    private static readonly DAMAGE_SCAN_SPEED = 1.2;         // 擴散速度
+    private static readonly DAMAGE_SCAN_MAX = 0.6;           // 最大半徑（6 單位）
+
+    // 護盾金色呼吸掃光系統（擴散→收縮→爆發）
+    private shieldBreathScan: {
+        phase: 'expand' | 'contract' | 'burst' | 'idle';  // 階段
+        radius: number;                                     // 當前半徑
+        targetRadius: number;                               // 目標半徑
+    } = { phase: 'idle', radius: 0, targetRadius: 0 };
+    private static readonly SHIELD_SCAN_COLOR = 0xffcc00;    // 金色
+    private static readonly SHIELD_SCAN_WIDTH = 0.1;         // 掃光環寬度
+    private static readonly SHIELD_SCAN_EXPAND_SPEED = 1.0;  // 擴散速度
+    private static readonly SHIELD_SCAN_CONTRACT_SPEED = 2.5; // 收縮速度（快）
+    private static readonly SHIELD_SCAN_BURST_SPEED = 3.0;   // 爆發速度（更快）
+    private static readonly SHIELD_SCAN_EXPAND_MAX = 0.35;   // 擴散最大（3.5 單位）
+    private static readonly SHIELD_SCAN_BURST_MAX = 0.8;     // 爆發最大（8 單位）
+
+    // 升級藍色呼吸掃光系統（與護盾類似）
+    private levelUpBreathScan: {
+        phase: 'expand' | 'contract' | 'burst' | 'idle';
+        radius: number;
+        targetRadius: number;
+    } = { phase: 'idle', radius: 0, targetRadius: 0 };
+    private static readonly LEVELUP_SCAN_COLOR = 0x4488ff;   // 藍色
+    private static readonly LEVELUP_SCAN_WIDTH = 0.1;        // 掃光環寬度
+    private static readonly LEVELUP_SCAN_EXPAND_SPEED = 1.2; // 擴散速度（稍快）
+    private static readonly LEVELUP_SCAN_CONTRACT_SPEED = 3.0; // 收縮速度
+    private static readonly LEVELUP_SCAN_BURST_SPEED = 3.5;  // 爆發速度
+    private static readonly LEVELUP_SCAN_EXPAND_MAX = 0.4;   // 擴散最大（4 單位）
+    private static readonly LEVELUP_SCAN_BURST_MAX = 1.0;    // 爆發最大（10 單位）
+
     // 圓形擴散系統（半徑擴散）
     private radiusWaves: {
         centerCol: number;          // 圓心格子列
@@ -1987,6 +2025,8 @@ export default class MainScene extends Phaser.Scene {
         const shieldFlashColor = skill.definition.flashColor || skill.definition.color;
         this.flashShieldEffect(this.characterX, this.characterY, shieldRadius, shieldFlashColor);
 
+        // 地面文字金色呼吸掃光
+        this.triggerShieldBreathScan();
     }
 
     // 護盾堅守效果：向外 3 單位圓形攻擊 + 擊退
@@ -2239,6 +2279,8 @@ export default class MainScene extends Phaser.Scene {
         // 更新經驗條
         this.drawExpBarFill();
 
+        // 地面文字藍色呼吸掃光
+        this.triggerLevelUpBreathScan();
     }
 
     // 重新計算最大 HP（基礎 + 等級成長 + 被動技能加成）
@@ -3303,6 +3345,9 @@ export default class MainScene extends Phaser.Scene {
             // 角色閃紅白效果
             this.flashCharacter();
 
+            // 地面文字紅色掃光（兩圈）
+            this.triggerDamageScan();
+
             // 更新低血量紅暈效果
             this.updateLowHpVignette();
 
@@ -4126,6 +4171,246 @@ export default class MainScene extends Phaser.Scene {
         return (r << 16) | (g << 8) | b;
     }
 
+    // 通用顏色插值（從 colorFrom 過渡到 colorTo）
+    private lerpTintColor(colorFrom: number, colorTo: number, intensity: number): number {
+        const r1 = (colorFrom >> 16) & 0xff;
+        const g1 = (colorFrom >> 8) & 0xff;
+        const b1 = colorFrom & 0xff;
+        const r2 = (colorTo >> 16) & 0xff;
+        const g2 = (colorTo >> 8) & 0xff;
+        const b2 = colorTo & 0xff;
+        const r = Math.round(r1 + (r2 - r1) * intensity);
+        const g = Math.round(g1 + (g2 - g1) * intensity);
+        const b = Math.round(b1 + (b2 - b1) * intensity);
+        return (r << 16) | (g << 8) | b;
+    }
+
+    // 觸發受傷紅色掃光（兩圈同時擴散）
+    private triggerDamageScan() {
+        // 清除舊的並啟動兩圈新的
+        this.damageScanRings = [
+            { radius: 0, active: true },
+            { radius: -this.gameBounds.height * 0.1, active: true } // 第二圈稍微延遲
+        ];
+    }
+
+    // 更新受傷紅色掃光
+    private updateDamageScan() {
+        const screenHeight = this.gameBounds.height;
+        const delta = this.game.loop.delta / 1000;
+        const ringWidth = screenHeight * MainScene.DAMAGE_SCAN_WIDTH;
+        const maxRadius = screenHeight * MainScene.DAMAGE_SCAN_MAX;
+
+        // 更新每個掃光環
+        for (const ring of this.damageScanRings) {
+            if (!ring.active) continue;
+
+            // 擴大半徑
+            ring.radius += screenHeight * MainScene.DAMAGE_SCAN_SPEED * delta;
+
+            // 對每個字元計算掃光亮度加成
+            if (ring.radius > 0) {
+                const innerRadius = Math.max(0, ring.radius - ringWidth / 2);
+                const outerRadius = ring.radius + ringWidth / 2;
+
+                for (const hex of this.floorHexChars) {
+                    const dx = hex.sprite.x - this.characterX;
+                    const dy = hex.sprite.y - this.characterY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist >= innerRadius && dist <= outerRadius) {
+                        // 在掃光環內，計算亮度漸層（環中心最亮）
+                        const distFromRingCenter = Math.abs(dist - ring.radius);
+                        const normalizedDist = distFromRingCenter / (ringWidth / 2);
+                        const intensity = 1 - normalizedDist;
+
+                        // 紅色→白色漸層
+                        const scanColor = this.lerpTintColor(MainScene.DAMAGE_SCAN_COLOR, 0xffffff, intensity);
+                        hex.sprite.setTint(scanColor);
+                    }
+                }
+            }
+
+            // 檢查掃光是否結束
+            if (ring.radius > maxRadius) {
+                ring.active = false;
+            }
+        }
+
+        // 移除已完成的環
+        this.damageScanRings = this.damageScanRings.filter(r => r.active);
+    }
+
+    // 觸發護盾金色呼吸掃光
+    private triggerShieldBreathScan() {
+        this.shieldBreathScan = {
+            phase: 'expand',
+            radius: 0,
+            targetRadius: this.gameBounds.height * MainScene.SHIELD_SCAN_EXPAND_MAX
+        };
+    }
+
+    // 更新護盾金色呼吸掃光
+    private updateShieldBreathScan() {
+        if (this.shieldBreathScan.phase === 'idle') return;
+
+        const screenHeight = this.gameBounds.height;
+        const delta = this.game.loop.delta / 1000;
+        const ringWidth = screenHeight * MainScene.SHIELD_SCAN_WIDTH;
+
+        let speed = 0;
+        let colorFrom = MainScene.SHIELD_SCAN_COLOR;
+        let colorTo = 0xffffff;
+
+        switch (this.shieldBreathScan.phase) {
+            case 'expand':
+                speed = MainScene.SHIELD_SCAN_EXPAND_SPEED;
+                this.shieldBreathScan.radius += screenHeight * speed * delta;
+                colorFrom = MainScene.SHIELD_SCAN_COLOR;
+                colorTo = 0xffffff;
+
+                // 到達目標後轉為收縮
+                if (this.shieldBreathScan.radius >= this.shieldBreathScan.targetRadius) {
+                    this.shieldBreathScan.phase = 'contract';
+                }
+                break;
+
+            case 'contract':
+                speed = MainScene.SHIELD_SCAN_CONTRACT_SPEED;
+                this.shieldBreathScan.radius -= screenHeight * speed * delta;
+                colorFrom = 0xffffff; // 收縮時變白
+                colorTo = 0xffffff;
+
+                // 收縮到中心後轉為爆發
+                if (this.shieldBreathScan.radius <= 0) {
+                    this.shieldBreathScan.radius = 0;
+                    this.shieldBreathScan.phase = 'burst';
+                    this.shieldBreathScan.targetRadius = screenHeight * MainScene.SHIELD_SCAN_BURST_MAX;
+                }
+                break;
+
+            case 'burst':
+                speed = MainScene.SHIELD_SCAN_BURST_SPEED;
+                this.shieldBreathScan.radius += screenHeight * speed * delta;
+                colorFrom = 0xffffff; // 爆發時從白開始
+                colorTo = MainScene.SHIELD_SCAN_COLOR;
+
+                // 到達最大後結束
+                if (this.shieldBreathScan.radius >= this.shieldBreathScan.targetRadius) {
+                    this.shieldBreathScan.phase = 'idle';
+                }
+                break;
+        }
+
+        // 對每個字元計算掃光亮度加成
+        if (this.shieldBreathScan.radius > 0) {
+            const innerRadius = Math.max(0, this.shieldBreathScan.radius - ringWidth / 2);
+            const outerRadius = this.shieldBreathScan.radius + ringWidth / 2;
+
+            for (const hex of this.floorHexChars) {
+                const dx = hex.sprite.x - this.characterX;
+                const dy = hex.sprite.y - this.characterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist >= innerRadius && dist <= outerRadius) {
+                    // 在掃光環內，計算亮度漸層（環中心最亮）
+                    const distFromRingCenter = Math.abs(dist - this.shieldBreathScan.radius);
+                    const normalizedDist = distFromRingCenter / (ringWidth / 2);
+                    const intensity = 1 - normalizedDist;
+
+                    // 根據階段決定顏色過渡
+                    const scanColor = this.lerpTintColor(colorFrom, colorTo, intensity);
+                    hex.sprite.setTint(scanColor);
+                }
+            }
+        }
+    }
+
+    // 觸發升級藍色呼吸掃光
+    private triggerLevelUpBreathScan() {
+        this.levelUpBreathScan = {
+            phase: 'expand',
+            radius: 0,
+            targetRadius: this.gameBounds.height * MainScene.LEVELUP_SCAN_EXPAND_MAX
+        };
+    }
+
+    // 更新升級藍色呼吸掃光
+    private updateLevelUpBreathScan() {
+        if (this.levelUpBreathScan.phase === 'idle') return;
+
+        const screenHeight = this.gameBounds.height;
+        const delta = this.game.loop.delta / 1000;
+        const ringWidth = screenHeight * MainScene.LEVELUP_SCAN_WIDTH;
+
+        let speed = 0;
+        let colorFrom = MainScene.LEVELUP_SCAN_COLOR;
+        let colorTo = 0xffffff;
+
+        switch (this.levelUpBreathScan.phase) {
+            case 'expand':
+                speed = MainScene.LEVELUP_SCAN_EXPAND_SPEED;
+                this.levelUpBreathScan.radius += screenHeight * speed * delta;
+                colorFrom = MainScene.LEVELUP_SCAN_COLOR;
+                colorTo = 0xffffff;
+
+                // 到達目標後轉為收縮
+                if (this.levelUpBreathScan.radius >= this.levelUpBreathScan.targetRadius) {
+                    this.levelUpBreathScan.phase = 'contract';
+                }
+                break;
+
+            case 'contract':
+                speed = MainScene.LEVELUP_SCAN_CONTRACT_SPEED;
+                this.levelUpBreathScan.radius -= screenHeight * speed * delta;
+                colorFrom = 0xffffff; // 收縮時變白
+                colorTo = 0xffffff;
+
+                // 收縮到中心後轉為爆發
+                if (this.levelUpBreathScan.radius <= 0) {
+                    this.levelUpBreathScan.radius = 0;
+                    this.levelUpBreathScan.phase = 'burst';
+                    this.levelUpBreathScan.targetRadius = screenHeight * MainScene.LEVELUP_SCAN_BURST_MAX;
+                }
+                break;
+
+            case 'burst':
+                speed = MainScene.LEVELUP_SCAN_BURST_SPEED;
+                this.levelUpBreathScan.radius += screenHeight * speed * delta;
+                colorFrom = 0xffffff; // 爆發時從白開始
+                colorTo = MainScene.LEVELUP_SCAN_COLOR;
+
+                // 到達最大後結束
+                if (this.levelUpBreathScan.radius >= this.levelUpBreathScan.targetRadius) {
+                    this.levelUpBreathScan.phase = 'idle';
+                }
+                break;
+        }
+
+        // 對每個字元計算掃光亮度加成
+        if (this.levelUpBreathScan.radius > 0) {
+            const innerRadius = Math.max(0, this.levelUpBreathScan.radius - ringWidth / 2);
+            const outerRadius = this.levelUpBreathScan.radius + ringWidth / 2;
+
+            for (const hex of this.floorHexChars) {
+                const dx = hex.sprite.x - this.characterX;
+                const dy = hex.sprite.y - this.characterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist >= innerRadius && dist <= outerRadius) {
+                    // 在掃光環內，計算亮度漸層（環中心最亮）
+                    const distFromRingCenter = Math.abs(dist - this.levelUpBreathScan.radius);
+                    const normalizedDist = distFromRingCenter / (ringWidth / 2);
+                    const intensity = 1 - normalizedDist;
+
+                    // 根據階段決定顏色過渡
+                    const scanColor = this.lerpTintColor(colorFrom, colorTo, intensity);
+                    hex.sprite.setTint(scanColor);
+                }
+            }
+        }
+    }
+
     // 生成地板隨機字元（空間定位用，只在可見區域附近生成）
     private spawnFloorHexChar() {
         if (this.floorHexChars.length >= MainScene.FLOOR_HEX_MAX) return;
@@ -4302,6 +4587,15 @@ export default class MainScene extends Phaser.Scene {
 
         // 更新圓形擴散掃光
         this.updateCircularScan();
+
+        // 更新受傷紅色掃光
+        this.updateDamageScan();
+
+        // 更新護盾金色呼吸掃光
+        this.updateShieldBreathScan();
+
+        // 更新升級藍色呼吸掃光
+        this.updateLevelUpBreathScan();
     }
 
     // 更新圓形擴散掃光效果（從角色位置向外擴散）
