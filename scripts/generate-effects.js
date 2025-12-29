@@ -106,12 +106,18 @@ generateHexChars();
 
 console.log('\nDone! Files saved to:', OUTPUT_DIR);
 
-// 生成 hex 字元紋理
+// 生成 hex 字元紋理（平行四邊形傾斜，白色供 tint 染色）
 function generateHexChars() {
+    const hexDir = path.join(OUTPUT_DIR, 'hex');
+    if (!fs.existsSync(hexDir)) {
+        fs.mkdirSync(hexDir, { recursive: true });
+    }
+
     const chars = '0123456789ABCDEF';
-    const size = 64;
-    const fontSize = 52;
-    const color = '#2a8a2a'; // 駭客綠
+    const size = 80; // 畫布大小
+    const fontSize = 70; // 字佔 70px，只有 5px padding
+    const color = '#ffffff'; // 白色，用 tint 染色
+    const skewFactor = 0.25; // 傾斜程度
 
     for (const char of chars) {
         const canvas = createCanvas(size, size);
@@ -119,6 +125,13 @@ function generateHexChars() {
 
         // 透明背景
         ctx.clearRect(0, 0, size, size);
+
+        // 套用傾斜變形（平行四邊形）
+        // transform(a, b, c, d, e, f): c 是水平傾斜
+        ctx.save();
+        ctx.translate(size / 2, size / 2);
+        ctx.transform(1, 0, -skewFactor, 1, 0, 0); // 向左傾斜
+        ctx.translate(-size / 2, -size / 2);
 
         // 設定字型
         ctx.font = `bold ${fontSize}px "Courier New", monospace`;
@@ -128,11 +141,12 @@ function generateHexChars() {
 
         // 繪製字元
         ctx.fillText(char, size / 2, size / 2);
+        ctx.restore();
 
-        // 儲存 PNG
+        // 儲存 PNG 到 hex 子資料夾
         const buffer = canvas.toBuffer('image/png');
-        const filename = `hex_${char}.png`;
-        fs.writeFileSync(path.join(OUTPUT_DIR, filename), buffer);
-        console.log(`Generated: ${filename}`);
+        const filename = `${char}.png`;
+        fs.writeFileSync(path.join(hexDir, filename), buffer);
+        console.log(`Generated: hex/${filename}`);
     }
 }

@@ -49,12 +49,54 @@ export default class MainScene extends Phaser.Scene {
     private floorHexContainer!: Phaser.GameObjects.Container; // 地板字元容器（在 floorGrid 之上）
 
     // 地板隨機字元（空間定位用）
-    private floorHexChars: { sprite: Phaser.GameObjects.Sprite; gridKey: string; spawnTime: number }[] = [];
+    private floorHexChars: {
+        sprite: Phaser.GameObjects.Sprite;
+        gridKey: string;
+        spawnTime: number;
+        fadeInDuration: number;  // 淡入時間（1-3秒隨機）
+        lifetime: number;        // 完全顯現後的存活時間（2-5秒隨機）
+        fullyVisible: boolean;   // 是否已完全顯現
+        visibleStartTime: number; // 完全顯現的時間點
+    }[] = [];
     private floorHexUsedPositions: Set<string> = new Set();
     private floorHexPool: Phaser.GameObjects.Sprite[] = []; // 物件池
     private static readonly FLOOR_HEX_MAX = 150; // 最多 150 個字
-    private static readonly FLOOR_HEX_LIFETIME = 2000; // 2 秒消失
     private static readonly HEX_CHARS = '0123456789ABCDEF';
+    private static readonly BINARY_CHARS = '01';
+    private static readonly HEX_CHANCE = 0.3; // 30% 機率用 16 進制，70% 用二進制
+    private static readonly HEX_TINT_NORMAL = 0x1a5a1a;  // 暗駭客綠
+    private static readonly HEX_TINT_HIGHLIGHT = 0xffffff; // 高亮白色
+
+    // 橫向掃光系統
+    private scanLineX: number = -1;           // 掃光當前 X 位置（-1 表示未啟動）
+    private scanLineActive: boolean = false;
+    private lastScanTime: number = -25000;    // 初始值讓第一次掃光5秒後發生
+    private static readonly SCAN_INTERVAL = 30000;    // 每30秒觸發
+    private static readonly SCAN_WIDTH = 0.15;        // 掃光寬度（畫面寬度比例）
+    private static readonly SCAN_SPEED = 0.3;         // 掃光速度（畫面寬度/秒）
+    private static readonly SCAN_BRIGHTNESS = 1.0;    // 掃光最高亮度
+
+    // 圓形擴散掃光系統（從角色位置）
+    private circularScanRadius: number = 0;
+    private circularScanActive: boolean = false;
+    private lastCircularScanTime: number = -5000;     // 初始值讓第一次5秒後發生
+    private static readonly CIRCULAR_SCAN_INTERVAL = 10000;  // 每10秒觸發
+    private static readonly CIRCULAR_SCAN_WIDTH = 0.1;       // 掃光環寬度（畫面高度比例）
+    private static readonly CIRCULAR_SCAN_SPEED = 0.8;       // 擴散速度（畫面高度/秒）
+    private static readonly CIRCULAR_SCAN_MAX = 1.5;         // 最大半徑（畫面高度比例）
+
+    // 圓形擴散系統（半徑擴散）
+    private radiusWaves: {
+        centerCol: number;          // 圓心格子列
+        centerRow: number;          // 圓心格子行
+        rings: string[][];          // 按距離分組的格子
+        currentRing: number;        // 當前擴散到的環
+        lastExpandTime: number;     // 上次擴散時間
+        expandSpeed: number;        // 此波的擴散速度
+    }[] = [];
+    private lastRadiusWaveTime = 0;
+    private static readonly RADIUS_WAVE_INTERVAL = 5000; // 每5秒觸發
+    private static readonly RADIUS_WAVE_POINTS = 5;      // 每次5個起點
 
     // 遊戲世界容器（會隨鏡頭移動的內容）
     private worldContainer!: Phaser.GameObjects.Container;
@@ -4046,6 +4088,7 @@ export default class MainScene extends Phaser.Scene {
             sprite.setVisible(true);
             sprite.setActive(true);
         }
+        sprite.setTint(MainScene.HEX_TINT_NORMAL); // 預設綠色
         return sprite;
     }
 
@@ -4053,7 +4096,30 @@ export default class MainScene extends Phaser.Scene {
     private releaseFloorHexSprite(sprite: Phaser.GameObjects.Sprite) {
         sprite.setVisible(false);
         sprite.setActive(false);
+        sprite.setTint(MainScene.HEX_TINT_NORMAL); // 重設 tint
         this.floorHexPool.push(sprite);
+    }
+
+    // 隨機選擇字元（30% 16進制，70% 二進制）
+    private getRandomHexChar(): string {
+        const chars = Math.random() < MainScene.HEX_CHANCE
+            ? MainScene.HEX_CHARS
+            : MainScene.BINARY_CHARS;
+        return chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    // 根據強度混合 tint 顏色（0=綠色，1=白色）
+    private lerpTint(intensity: number): number {
+        const r1 = (MainScene.HEX_TINT_NORMAL >> 16) & 0xff;
+        const g1 = (MainScene.HEX_TINT_NORMAL >> 8) & 0xff;
+        const b1 = MainScene.HEX_TINT_NORMAL & 0xff;
+        const r2 = (MainScene.HEX_TINT_HIGHLIGHT >> 16) & 0xff;
+        const g2 = (MainScene.HEX_TINT_HIGHLIGHT >> 8) & 0xff;
+        const b2 = MainScene.HEX_TINT_HIGHLIGHT & 0xff;
+        const r = Math.round(r1 + (r2 - r1) * intensity);
+        const g = Math.round(g1 + (g2 - g1) * intensity);
+        const b = Math.round(b1 + (b2 - b1) * intensity);
+        return (r << 16) | (g << 8) | b;
     }
 
     // 生成地板隨機字元（空間定位用，只在可見區域附近生成）
@@ -4082,23 +4148,29 @@ export default class MainScene extends Phaser.Scene {
 
             if (!this.floorHexUsedPositions.has(gridKey)) {
                 // 找到空位，生成字元
-                const char = MainScene.HEX_CHARS[Math.floor(Math.random() * MainScene.HEX_CHARS.length)];
-                const centerX = col * gridSize + gridSize / 2;
+                const char = this.getRandomHexChar();
+                // 平行四邊形排列：每行向右偏移（上端連接偏移4格）
+                const skewOffset = gridSize * 0.25; // 每4行偏移1格
+                const centerX = col * gridSize + gridSize / 2 + row * skewOffset;
                 const centerY = row * gridSize + gridSize / 2;
 
                 // 使用 sprite 圖片
                 const sprite = this.getFloorHexSprite(char);
                 sprite.setPosition(centerX, centerY);
-                // 縮放到適當大小（紋理 64px，目標為 gridSize * 0.8）
-                const targetSize = gridSize * 0.8;
-                sprite.setScale(targetSize / 64);
+                // 縮放到適當大小（紋理 80px，目標為 gridSize * 0.8）
+                const targetSize = gridSize; // 無間隙
+                sprite.setScale(targetSize / 80);
                 sprite.setAlpha(0); // 從 0 開始淡入
                 this.floorHexContainer.add(sprite);
 
                 this.floorHexChars.push({
                     sprite,
                     gridKey,
-                    spawnTime: this.time.now
+                    spawnTime: this.time.now,
+                    fadeInDuration: 1000 + Math.random() * 1000, // 淡入1-2秒隨機
+                    lifetime: 1000 + Math.random() * 2000,       // 顯現後存活1-3秒隨機
+                    fullyVisible: false,
+                    visibleStartTime: 0
                 });
                 this.floorHexUsedPositions.add(gridKey);
                 return;
@@ -4110,7 +4182,6 @@ export default class MainScene extends Phaser.Scene {
     // 更新地板字元（淡入淡出）
     private updateFloorHexChars() {
         const now = this.time.now;
-        const fadeTime = MainScene.FLOOR_HEX_LIFETIME * 0.2; // 前後 20% 時間淡入淡出
         const maxDist = this.gameBounds.width * 1.5; // 超出 1.5 倍螢幕寬度就移除
 
         for (let i = this.floorHexChars.length - 1; i >= 0; i--) {
@@ -4125,21 +4196,42 @@ export default class MainScene extends Phaser.Scene {
                 Math.pow(spriteY - this.characterY, 2)
             );
 
-            if (age >= MainScene.FLOOR_HEX_LIFETIME || dist > maxDist) {
-                // 時間到或太遠，回收到物件池
+            // 太遠就移除
+            if (dist > maxDist) {
                 this.releaseFloorHexSprite(hex.sprite);
                 this.floorHexUsedPositions.delete(hex.gridKey);
                 this.floorHexChars.splice(i, 1);
-            } else if (age < fadeTime) {
-                // 淡入（前 20%）
-                const fadeInProgress = age / fadeTime;
-                hex.sprite.setAlpha(0.7 * fadeInProgress);
-            } else if (age > MainScene.FLOOR_HEX_LIFETIME - fadeTime) {
-                // 淡出（後 20%）
-                const fadeOutProgress = (MainScene.FLOOR_HEX_LIFETIME - age) / fadeTime;
-                hex.sprite.setAlpha(0.7 * fadeOutProgress);
+                continue;
+            }
+
+            if (!hex.fullyVisible) {
+                // 淡入階段
+                if (age < hex.fadeInDuration) {
+                    const fadeInProgress = age / hex.fadeInDuration;
+                    hex.sprite.setAlpha(0.7 * fadeInProgress);
+                } else {
+                    // 完全顯現
+                    hex.fullyVisible = true;
+                    hex.visibleStartTime = now;
+                    hex.sprite.setAlpha(0.7);
+                }
             } else {
-                hex.sprite.setAlpha(0.7);
+                // 已完全顯現，計算存活和淡出
+                const visibleAge = now - hex.visibleStartTime;
+                const fadeOutDuration = hex.lifetime * 0.2; // 淡出時間為 lifetime 的 20%
+
+                if (visibleAge >= hex.lifetime) {
+                    // 時間到，回收到物件池
+                    this.releaseFloorHexSprite(hex.sprite);
+                    this.floorHexUsedPositions.delete(hex.gridKey);
+                    this.floorHexChars.splice(i, 1);
+                } else if (visibleAge > hex.lifetime - fadeOutDuration) {
+                    // 淡出階段
+                    const fadeOutProgress = (hex.lifetime - visibleAge) / fadeOutDuration;
+                    hex.sprite.setAlpha(0.7 * fadeOutProgress);
+                } else {
+                    hex.sprite.setAlpha(0.7);
+                }
             }
         }
 
@@ -4148,6 +4240,254 @@ export default class MainScene extends Phaser.Scene {
         const spawnPerFrame = Math.min(10, targetCount - this.floorHexChars.length);
         for (let i = 0; i < spawnPerFrame; i++) {
             this.spawnFloorHexChar();
+        }
+
+        // 更新圓形半徑擴散
+        this.updateRadiusWaves();
+
+        // 更新橫向掃光
+        this.updateScanLine();
+    }
+
+    // 更新橫向掃光效果
+    private updateScanLine() {
+        const now = this.time.now;
+        const screenWidth = this.gameBounds.width;
+        const scanWidth = screenWidth * MainScene.SCAN_WIDTH;
+
+        // 檢查是否該啟動新的掃光
+        if (!this.scanLineActive && now - this.lastScanTime >= MainScene.SCAN_INTERVAL) {
+            this.scanLineActive = true;
+            this.scanLineX = this.characterX - screenWidth / 2 - scanWidth; // 從畫面左邊外開始
+            this.lastScanTime = now;
+        }
+
+        if (this.scanLineActive) {
+            // 移動掃光位置
+            const delta = this.game.loop.delta / 1000; // 秒
+            this.scanLineX += screenWidth * MainScene.SCAN_SPEED * delta;
+
+            // 計算掃光範圍
+            const scanLeft = this.scanLineX;
+            const scanRight = this.scanLineX + scanWidth;
+            const scanCenter = this.scanLineX + scanWidth / 2;
+
+            // 對每個字元計算掃光亮度加成
+            for (const hex of this.floorHexChars) {
+                const spriteX = hex.sprite.x;
+
+                if (spriteX >= scanLeft && spriteX <= scanRight) {
+                    // 在掃光範圍內，計算亮度漸層
+                    const distFromCenter = Math.abs(spriteX - scanCenter);
+                    const normalizedDist = distFromCenter / (scanWidth / 2);
+                    const intensity = 1 - normalizedDist; // 中心最亮
+
+                    // 用 tint 變色（綠→白）
+                    hex.sprite.setTint(this.lerpTint(intensity));
+                } else {
+                    // 不在掃光範圍，恢復正常綠色
+                    hex.sprite.setTint(MainScene.HEX_TINT_NORMAL);
+                }
+            }
+
+            // 檢查掃光是否結束（超出畫面右邊）
+            if (this.scanLineX > this.characterX + screenWidth / 2 + scanWidth) {
+                this.scanLineActive = false;
+            }
+        }
+
+        // 更新圓形擴散掃光
+        this.updateCircularScan();
+    }
+
+    // 更新圓形擴散掃光效果（從角色位置向外擴散）
+    private updateCircularScan() {
+        const now = this.time.now;
+        const screenHeight = this.gameBounds.height;
+        const ringWidth = screenHeight * MainScene.CIRCULAR_SCAN_WIDTH;
+        const maxRadius = screenHeight * MainScene.CIRCULAR_SCAN_MAX;
+
+        // 檢查是否該啟動新的圓形掃光
+        if (!this.circularScanActive && now - this.lastCircularScanTime >= MainScene.CIRCULAR_SCAN_INTERVAL) {
+            this.circularScanActive = true;
+            this.circularScanRadius = 0;
+            this.lastCircularScanTime = now;
+        }
+
+        if (this.circularScanActive) {
+            // 擴大掃光半徑
+            const delta = this.game.loop.delta / 1000; // 秒
+            this.circularScanRadius += screenHeight * MainScene.CIRCULAR_SCAN_SPEED * delta;
+
+            // 計算掃光環範圍
+            const innerRadius = Math.max(0, this.circularScanRadius - ringWidth / 2);
+            const outerRadius = this.circularScanRadius + ringWidth / 2;
+
+            // 對每個字元計算掃光亮度加成
+            for (const hex of this.floorHexChars) {
+                const dx = hex.sprite.x - this.characterX;
+                const dy = hex.sprite.y - this.characterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist >= innerRadius && dist <= outerRadius) {
+                    // 在掃光環內，計算亮度漸層（環中心最亮）
+                    const distFromRingCenter = Math.abs(dist - this.circularScanRadius);
+                    const normalizedDist = distFromRingCenter / (ringWidth / 2);
+                    const intensity = 1 - normalizedDist;
+
+                    // 用 tint 變色（綠→白）
+                    hex.sprite.setTint(this.lerpTint(intensity));
+                }
+            }
+
+            // 檢查掃光是否結束
+            if (this.circularScanRadius > maxRadius) {
+                this.circularScanActive = false;
+            }
+        }
+    }
+
+    // 啟動圓形半徑擴散
+    private startRadiusWave() {
+        const gridSize = this.gameBounds.height * 0.04;
+        const skewOffset = gridSize * 0.25;
+        const unitSize = this.gameBounds.height * 0.1; // 1單位 = 畫面10%高
+        const gridsPerUnit = unitSize / gridSize;      // 每單位有幾格
+
+        // 計算可視區域的格子範圍
+        const viewLeft = this.characterX - this.gameBounds.width / 2;
+        const viewRight = this.characterX + this.gameBounds.width / 2;
+        const viewTop = this.characterY - this.gameBounds.height / 2;
+        const viewBottom = this.characterY + this.gameBounds.height / 2;
+
+        const minRow = Math.floor(viewTop / gridSize);
+        const maxRow = Math.ceil(viewBottom / gridSize);
+
+        // 隨機選擇起點
+        for (let i = 0; i < MainScene.RADIUS_WAVE_POINTS; i++) {
+            let attempts = 0;
+            while (attempts < 50) {
+                const row = minRow + Math.floor(Math.random() * (maxRow - minRow));
+                const rowOffset = row * skewOffset;
+                const minCol = Math.floor((viewLeft - rowOffset) / gridSize);
+                const maxCol = Math.ceil((viewRight - rowOffset) / gridSize);
+                const col = minCol + Math.floor(Math.random() * (maxCol - minCol));
+
+                // 隨機範圍 2-5 單位，轉換為格子數
+                const rangeUnits = 2 + Math.random() * 3; // 2~5 單位
+                const maxRadius = Math.floor(rangeUnits * gridsPerUnit);
+
+                // 隨機擴散速度 40-100ms 每環
+                const expandSpeed = 40 + Math.random() * 60;
+
+                // 預計算所有環內的格子（按歐幾里得距離分組）
+                const rings: string[][] = [];
+                for (let r = 0; r <= maxRadius; r++) {
+                    rings[r] = [];
+                }
+
+                for (let dy = -maxRadius; dy <= maxRadius; dy++) {
+                    for (let dx = -maxRadius; dx <= maxRadius; dx++) {
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const ringIdx = Math.floor(dist);
+                        if (ringIdx <= maxRadius) {
+                            const nCol = col + dx;
+                            const nRow = row + dy;
+                            rings[ringIdx].push(`${nCol},${nRow}`);
+                        }
+                    }
+                }
+
+                this.radiusWaves.push({
+                    centerCol: col,
+                    centerRow: row,
+                    rings,
+                    currentRing: 0,
+                    lastExpandTime: this.time.now,
+                    expandSpeed
+                });
+                break;
+            }
+        }
+    }
+
+    // 更新圓形半徑擴散
+    private updateRadiusWaves() {
+        const now = this.time.now;
+        const gridSize = this.gameBounds.height * 0.04;
+        const skewOffset = gridSize * 0.25;
+
+        // 檢查是否該啟動新的擴散波
+        if (now - this.lastRadiusWaveTime >= MainScene.RADIUS_WAVE_INTERVAL) {
+            this.startRadiusWave();
+            this.lastRadiusWaveTime = now;
+        }
+
+        // 計算可視區域邊界（含畫面外緩衝，避免移動時看到切割線）
+        const viewLeft = this.characterX - this.gameBounds.width / 2;
+        const viewRight = this.characterX + this.gameBounds.width / 2;
+        const viewTop = this.characterY - this.gameBounds.height / 2;
+        const viewBottom = this.characterY + this.gameBounds.height / 2;
+        const buffer = this.gameBounds.height * 0.2; // 20% 畫面高度的緩衝區
+
+        // 更新每個波
+        for (let w = this.radiusWaves.length - 1; w >= 0; w--) {
+            const wave = this.radiusWaves[w];
+
+            // 檢查是否該擴散下一環（使用此波的隨機速度）
+            if (now - wave.lastExpandTime < wave.expandSpeed) {
+                continue;
+            }
+            wave.lastExpandTime = now;
+
+            // 處理當前環的所有格子
+            if (wave.currentRing < wave.rings.length) {
+                const ring = wave.rings[wave.currentRing];
+
+                for (const gridKey of ring) {
+                    // 跳過已有字元的格子
+                    if (this.floorHexUsedPositions.has(gridKey)) {
+                        continue;
+                    }
+
+                    const [col, row] = gridKey.split(',').map(Number);
+                    const centerX = col * gridSize + gridSize / 2 + row * skewOffset;
+                    const centerY = row * gridSize + gridSize / 2;
+
+                    // 檢查是否在可視區域內（含緩衝）
+                    if (centerX < viewLeft - buffer || centerX > viewRight + buffer ||
+                        centerY < viewTop - buffer || centerY > viewBottom + buffer) {
+                        continue;
+                    }
+
+                    // 生成字元
+                    const char = this.getRandomHexChar();
+                    const sprite = this.getFloorHexSprite(char);
+                    sprite.setPosition(centerX, centerY);
+                    const targetSize = gridSize; // 無間隙
+                    sprite.setScale(targetSize / 80);
+                    sprite.setAlpha(0);
+                    this.floorHexContainer.add(sprite);
+
+                    this.floorHexChars.push({
+                        sprite,
+                        gridKey,
+                        spawnTime: now,
+                        fadeInDuration: 1000 + Math.random() * 2000, // 淡入1-3秒隨機
+                        lifetime: 2000 + Math.random() * 3000,       // 顯現後存活2-5秒隨機
+                        fullyVisible: false,
+                        visibleStartTime: 0
+                    });
+                    this.floorHexUsedPositions.add(gridKey);
+                }
+
+                wave.currentRing++;
+            }
+
+            // 如果所有環都處理完了，移除這個波
+            if (wave.currentRing >= wave.rings.length) {
+                this.radiusWaves.splice(w, 1);
+            }
         }
     }
 

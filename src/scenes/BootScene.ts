@@ -26,7 +26,7 @@ export default class BootScene extends Phaser.Scene {
         // 載入地板 hex 字元紋理（0-9, A-F）
         const hexChars = '0123456789ABCDEF';
         for (const char of hexChars) {
-            this.load.image(`hex_${char}`, `effects/hex_${char}.png`);
+            this.load.image(`hex_${char}`, `effects/hex/${char}.png`);
         }
     }
 

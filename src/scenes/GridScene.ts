@@ -497,7 +497,7 @@ export default class GridScene extends Phaser.Scene {
         // 預載入地板 hex 字元紋理
         const hexChars = '0123456789ABCDEF';
         for (const char of hexChars) {
-            this.load.image(`hex_${char}`, `effects/hex_${char}.png`);
+            this.load.image(`hex_${char}`, `effects/hex/${char}.png`);
         }
 
         // 預載入技能圖示
