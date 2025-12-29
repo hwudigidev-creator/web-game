@@ -60,7 +60,8 @@ export default class MainScene extends Phaser.Scene {
     }[] = [];
     private floorHexUsedPositions: Set<string> = new Set();
     private floorHexPool: Phaser.GameObjects.Sprite[] = []; // 物件池
-    private static readonly FLOOR_HEX_MAX = 150; // 最多 150 個字
+    private static readonly FLOOR_HEX_MAX = 500; // 最多 500 個字（加密）
+    private static readonly FLOOR_HEX_GRID_SIZE = 0.025; // 格子大小：2.5% 畫面高度
     private static readonly HEX_CHARS = '0123456789ABCDEF';
     private static readonly BINARY_CHARS = '01';
     private static readonly HEX_CHANCE = 0.3; // 30% 機率用 16 進制，70% 用二進制
@@ -4415,8 +4416,8 @@ export default class MainScene extends Phaser.Scene {
     private spawnFloorHexChar() {
         if (this.floorHexChars.length >= MainScene.FLOOR_HEX_MAX) return;
 
-        // 格子大小：4% 畫面高度
-        const gridSize = this.gameBounds.height * 0.04;
+        // 格子大小
+        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
 
         // 只在角色周圍 2 倍螢幕範圍內生成
         const viewWidth = this.gameBounds.width * 2;
@@ -4526,7 +4527,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 每幀生成多個字元，快速填滿到目標數量
         const targetCount = MainScene.FLOOR_HEX_MAX;
-        const spawnPerFrame = Math.min(10, targetCount - this.floorHexChars.length);
+        const spawnPerFrame = Math.min(20, targetCount - this.floorHexChars.length);
         for (let i = 0; i < spawnPerFrame; i++) {
             this.spawnFloorHexChar();
         }
@@ -4647,7 +4648,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 啟動圓形半徑擴散
     private startRadiusWave() {
-        const gridSize = this.gameBounds.height * 0.04;
+        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
         const skewOffset = gridSize * 0.25;
         const unitSize = this.gameBounds.height * 0.1; // 1單位 = 畫面10%高
         const gridsPerUnit = unitSize / gridSize;      // 每單位有幾格
@@ -4671,8 +4672,8 @@ export default class MainScene extends Phaser.Scene {
                 const maxCol = Math.ceil((viewRight - rowOffset) / gridSize);
                 const col = minCol + Math.floor(Math.random() * (maxCol - minCol));
 
-                // 隨機範圍 2-5 單位，轉換為格子數
-                const rangeUnits = 2 + Math.random() * 3; // 2~5 單位
+                // 隨機範圍 4-10 單位，轉換為格子數（加大1倍）
+                const rangeUnits = 4 + Math.random() * 6; // 4~10 單位
                 const maxRadius = Math.floor(rangeUnits * gridsPerUnit);
 
                 // 隨機擴散速度 40-100ms 每環
@@ -4712,7 +4713,7 @@ export default class MainScene extends Phaser.Scene {
     // 更新圓形半徑擴散
     private updateRadiusWaves() {
         const now = this.time.now;
-        const gridSize = this.gameBounds.height * 0.04;
+        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
         const skewOffset = gridSize * 0.25;
 
         // 檢查是否該啟動新的擴散波
@@ -4771,8 +4772,8 @@ export default class MainScene extends Phaser.Scene {
                         sprite,
                         gridKey,
                         spawnTime: now,
-                        fadeInDuration: 1000 + Math.random() * 2000, // 淡入1-3秒隨機
-                        lifetime: 2000 + Math.random() * 3000,       // 顯現後存活2-5秒隨機
+                        fadeInDuration: 300 + Math.random() * 400,  // 淡入0.3-0.7秒（加快）
+                        lifetime: 500 + Math.random() * 1000,       // 顯現後存活0.5-1.5秒（加快）
                         fullyVisible: false,
                         visibleStartTime: 0
                     });
@@ -7488,8 +7489,104 @@ export default class MainScene extends Phaser.Scene {
                     if (result.totalExp > 0) this.addExp(result.totalExp);
                 }
 
-                this.showExplosionEffect(point.x, point.y, explosionRadius, MainScene.PHANTOM_COLOR);
+                // 顯示完整爆炸視覺效果（暗紫色版）
+                const screenPos = this.worldToScreen(point.x, point.y);
+                this.showPhantomPerfectPixelExplosion(screenPos.x, screenPos.y, explosionRadius);
+
+                // 被炸到的怪物噴出爆炸火花（暗紫色）
+                const monstersForSpark = this.monsterManager.getMonsters();
+                for (const monsterId of hitMonsters) {
+                    const monster = monstersForSpark.find(m => m.id === monsterId);
+                    if (monster) {
+                        const sparkPos = this.worldToScreen(monster.x, monster.y);
+                        this.showExplosionSparkEffect(sparkPos.x, sparkPos.y, MainScene.PHANTOM_COLOR_LIGHT, 0.8);
+                    }
+                }
             });
+        });
+    }
+
+    // 分身版完美像素爆炸效果（暗紫色）
+    private showPhantomPerfectPixelExplosion(x: number, y: number, radius: number) {
+        const allSprites: Phaser.GameObjects.Sprite[] = [];
+        const lineWidth = 20; // 稍細
+        const flashLength = radius * 1.0; // 稍短
+
+        // 爆炸核心（暗紫色）- 使用 sector_360 紋理
+        const coreSprite = this.add.sprite(x, y, MainScene.TEXTURE_SECTOR_360);
+        this.uiContainer.add(coreSprite);
+        coreSprite.setDepth(1006);
+        coreSprite.setTint(MainScene.PHANTOM_COLOR);
+        coreSprite.setScale((radius * 0.5) / MainScene.EFFECT_TEXTURE_SIZE);
+        coreSprite.setAlpha(0.9);
+        allSprites.push(coreSprite);
+
+        // 爆炸光環 - 使用 circle_line 紋理
+        const ringSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE_LINE);
+        this.uiContainer.add(ringSprite);
+        ringSprite.setDepth(1005);
+        ringSprite.setTint(MainScene.PHANTOM_COLOR_LIGHT);
+        ringSprite.setScale((radius * 0.8) / MainScene.EFFECT_TEXTURE_SIZE);
+        ringSprite.setAlpha(0.7);
+        allSprites.push(ringSprite);
+
+        // 外圈光暈 - 使用 circle_line 紋理（更大更透明）
+        const outerSprite = this.add.sprite(x, y, MainScene.TEXTURE_CIRCLE_LINE);
+        this.uiContainer.add(outerSprite);
+        outerSprite.setDepth(1004);
+        outerSprite.setTint(MainScene.PHANTOM_COLOR_LIGHT);
+        outerSprite.setScale((radius * 1.5) / MainScene.EFFECT_TEXTURE_SIZE);
+        outerSprite.setAlpha(0.35);
+        allSprites.push(outerSprite);
+
+        // 十字閃光 - 水平線
+        const hLine = this.add.sprite(x, y, MainScene.TEXTURE_LINE);
+        this.uiContainer.add(hLine);
+        hLine.setDepth(1007);
+        hLine.setTint(MainScene.PHANTOM_COLOR_LIGHT);
+        hLine.setRotation(0);
+        hLine.setScale((flashLength * 1.8) / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+        hLine.setAlpha(0.7);
+        allSprites.push(hLine);
+
+        // 十字閃光 - 垂直線
+        const vLine = this.add.sprite(x, y, MainScene.TEXTURE_LINE);
+        this.uiContainer.add(vLine);
+        vLine.setDepth(1007);
+        vLine.setTint(MainScene.PHANTOM_COLOR_LIGHT);
+        vLine.setRotation(Math.PI / 2);
+        vLine.setScale((flashLength * 1.8) / MainScene.EFFECT_TEXTURE_SIZE, lineWidth / MainScene.EFFECT_LINE_HEIGHT);
+        vLine.setAlpha(0.7);
+        allSprites.push(vLine);
+
+        // 淡出動畫
+        for (const sprite of allSprites) {
+            this.tweens.add({
+                targets: sprite,
+                alpha: 0,
+                duration: 400,
+                ease: 'Power2',
+                onComplete: () => sprite.destroy()
+            });
+        }
+
+        // 擴散圓環動畫 - 使用 sector_360 紋理
+        const expandSprite = this.add.sprite(x, y, MainScene.TEXTURE_SECTOR_360);
+        this.uiContainer.add(expandSprite);
+        expandSprite.setDepth(1005);
+        expandSprite.setTint(MainScene.PHANTOM_COLOR);
+        const startScale = (radius * 0.5) / MainScene.EFFECT_TEXTURE_SIZE;
+        const endScale = (radius * 1.5) / MainScene.EFFECT_TEXTURE_SIZE;
+        expandSprite.setScale(startScale);
+        expandSprite.setAlpha(0.8);
+
+        this.tweens.add({
+            targets: expandSprite,
+            scale: endScale,
+            alpha: 0,
+            duration: 250,
+            ease: 'Power2',
+            onComplete: () => expandSprite.destroy()
         });
     }
 
