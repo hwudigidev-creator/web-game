@@ -278,7 +278,7 @@
     /* 排行榜專用樣式 */
     .leaderboard-content {
       width: min(520px, 95vw);
-      overflow: hidden;
+      overflow: visible;
       box-sizing: border-box;
     }
 
@@ -897,7 +897,7 @@
       user-select: none;
     }
   </style>
-  <script type="module" crossorigin src="/web-game/assets/index-CV4ESQAW.js"></script>
+  <script type="module" crossorigin src="/web-game/assets/index-BvZl9BVe.js"></script>
   <link rel="modulepreload" crossorigin href="/web-game/assets/phaser-0RJB29YE.js">
 </head>
 
@@ -1296,11 +1296,17 @@
             school: e.school || '',
             score: formatTime(e.score)
           }));
-          leaderboardData.level = (result.data.level || []).map(e => ({
-            name: e.name,
-            school: e.school || '',
-            score: `Lv.${e.score}`
-          }));
+          leaderboardData.level = (result.data.level || []).map(e => {
+            const lv = parseFloat(e.score) || 0;
+            const lvInt = Math.floor(lv);
+            const expPercent = Math.round((lv - lvInt) * 100);
+            return {
+              name: e.name,
+              school: e.school || '',
+              score: expPercent > 0 ? `Lv.${lvInt} (${expPercent}%)` : `Lv.${lvInt}`,
+              rawScore: lv
+            };
+          });
           leaderboardData.damage = (result.data.damage || []).map(e => ({
             name: e.name,
             school: e.school || '',
@@ -1456,11 +1462,14 @@
 
     // 監聯遊戲結束事件以更新排行榜
     window.addEventListener('gameRecordUpdate', (e) => {
-      const { type, name, school, score, level } = e.detail;
+      const { type, name, school, score, level, rawScore } = e.detail;
       if (leaderboardData[type]) {
         // 傷害榜需要額外記錄等級用於二次排序
         if (type === 'damage') {
           leaderboardData[type].push({ name, school: school || '', score, level: level || 0 });
+        } else if (type === 'level') {
+          // 等級榜需要 rawScore 用於排序
+          leaderboardData[type].push({ name, school: school || '', score, rawScore: rawScore || 0 });
         } else {
           leaderboardData[type].push({ name, school: school || '', score });
         }
@@ -1474,8 +1483,8 @@
           });
         } else if (type === 'level') {
           leaderboardData[type].sort((a, b) => {
-            const lvA = parseInt(a.score.replace('Lv.', ''));
-            const lvB = parseInt(b.score.replace('Lv.', ''));
+            const lvA = a.rawScore || parseFloat(a.score.replace('Lv.', '')) || 0;
+            const lvB = b.rawScore || parseFloat(b.score.replace('Lv.', '')) || 0;
             return lvB - lvA;
           });
         } else if (type === 'time') {
@@ -1560,7 +1569,11 @@
     // 顯示死亡彈出視窗
     function showDeathPopup(time, level, damage) {
       deathTime.textContent = time;
-      deathLevel.textContent = `Lv.${level}`;
+      // 顯示等級含經驗百分比，例如 75.30 顯示為 "Lv.75 (30%)"
+      const lvInt = Math.floor(level);
+      const expPercent = Math.round((level - lvInt) * 100);
+      deathLevel.textContent = expPercent > 0 ? `Lv.${lvInt} (${expPercent}%)` : `Lv.${lvInt}`;
+      deathLevel.dataset.rawLevel = level; // 存原始值供提交用
       deathDamage.textContent = damage;
       deathNickname.value = '';
       deathSchoolInput.value = '';
@@ -1573,7 +1586,7 @@
       const nickname = deathNickname.value.trim() || '匿名玩家';
       const school = selectedSchool || deathSchoolInput.value.trim() || '無陣營';
       const displayName = `${nickname}`;
-      const level = parseInt(deathLevel.textContent.replace('Lv.', '')) || 0;
+      const level = parseFloat(deathLevel.dataset.rawLevel) || 0;
 
       // 顯示載入狀態
       deathSubmit.disabled = true;
@@ -1600,8 +1613,12 @@
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
         detail: { type: 'time', name: displayName, school, score: deathTime.textContent }
       }));
+      // 等級榜需要 rawScore 用於排序
+      const lvInt = Math.floor(level);
+      const expPct = Math.round((level - lvInt) * 100);
+      const levelDisplay = expPct > 0 ? `Lv.${lvInt} (${expPct}%)` : `Lv.${lvInt}`;
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-        detail: { type: 'level', name: displayName, school, score: deathLevel.textContent }
+        detail: { type: 'level', name: displayName, school, score: levelDisplay, rawScore: level }
       }));
       if (level >= 75) {
         window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
