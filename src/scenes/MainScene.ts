@@ -3536,12 +3536,16 @@ export default class MainScene extends Phaser.Scene {
         const seconds = Math.floor((this.gameTimer % 60000) / 1000);
         const survivalTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
+        // 計算等級（含經驗值百分比），例如 75級30% = 75.30
+        const expPercent = Math.floor((this.currentExp / this.maxExp) * 100);
+        const levelWithExp = this.currentLevel + expPercent / 100;
+
         // 延遲一點時間再顯示死亡彈出視窗，讓玩家看到 GAME OVER
         this.time.delayedCall(2000, () => {
             window.dispatchEvent(new CustomEvent('playerDeath', {
                 detail: {
                     survivalTime,
-                    level: this.currentLevel,
+                    level: levelWithExp,
                     totalDamage: Math.floor(this.totalDamageReceived)
                 }
             }));

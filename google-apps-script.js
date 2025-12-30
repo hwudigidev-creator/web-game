@@ -18,7 +18,7 @@ const GAME_SALT = 'DDT_2024_HWUDI'; // 必須與前端一致
 // 分數合理範圍
 const SCORE_LIMITS = {
   time: { min: 0, max: 5999 },    // 0~99:59 秒
-  level: { min: 1, max: 999 },    // 1~999 級
+  level: { min: 1, max: 999.99 }, // 1~999.99 級（含經驗百分比）
   damage: { min: 0, max: 999999 } // 0~999999 傷害
 };
 
