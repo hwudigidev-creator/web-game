@@ -1317,8 +1317,7 @@
     // 開啟排行榜時載入並渲染
     leaderboardBtn.addEventListener('click', () => {
       currentPage = 1;
-      fetchLeaderboard(); // 從 Google Sheets 載入
-      renderLeaderboard();
+      fetchLeaderboard(); // 從 Google Sheets 載入（完成後會自動 render）
     });
 
     // 監聯遊戲結束事件以更新排行榜
