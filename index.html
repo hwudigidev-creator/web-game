@@ -399,6 +399,18 @@
       font-size: clamp(14px, 3vw, 16px);
     }
 
+    .lb-loading {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.7);
+      padding: 60px 0;
+      font-size: clamp(14px, 3vw, 16px);
+    }
+
+    .lb-loading i {
+      margin-right: 8px;
+      color: #ffcc00;
+    }
+
     #lb-entries:not(:empty) + .lb-empty {
       display: none;
     }
@@ -753,7 +765,7 @@
       user-select: none;
     }
   </style>
-  <script type="module" crossorigin src="/web-game/assets/index-BO90we04.js"></script>
+  <script type="module" crossorigin src="/web-game/assets/index-CV4ESQAW.js"></script>
   <link rel="modulepreload" crossorigin href="/web-game/assets/phaser-0RJB29YE.js">
 </head>
 
@@ -1131,6 +1143,12 @@
       if (isLoadingLeaderboard) return;
       isLoadingLeaderboard = true;
 
+      // 顯示讀取中提示
+      const lbEntries = document.getElementById('lb-entries');
+      if (lbEntries) {
+        lbEntries.innerHTML = '<div class="lb-loading"><i class="fa-solid fa-spinner fa-spin"></i> 讀取中...</div>';
+      }
+
       try {
         const response = await fetch(`${SHEET_API_URL}?type=all`, {
           method: 'GET',
@@ -1155,8 +1173,8 @@
             score: String(e.score),
             level: e.level || 0
           }));
-          renderLeaderboard();
         }
+        renderLeaderboard();
       } catch (error) {
         console.error('Failed to fetch leaderboard:', error);
       } finally {
