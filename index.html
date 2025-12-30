@@ -258,7 +258,7 @@
 
     /* 排行榜專用樣式 */
     .leaderboard-content {
-      width: min(400px, 90vw);
+      width: min(520px, 95vw);
       overflow: hidden;
       box-sizing: border-box;
     }
@@ -341,10 +341,24 @@
 
     .lb-name {
       flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .lb-school {
+      width: 100px;
+      text-align: center;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: clamp(10px, 2.5vw, 12px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .lb-score {
-      width: 80px;
+      width: 70px;
       text-align: right;
     }
 
@@ -786,6 +800,7 @@
         <div class="lb-header">
           <span class="lb-rank">#</span>
           <span class="lb-name">玩家</span>
+          <span class="lb-school">陣營</span>
           <span class="lb-score">成績</span>
         </div>
         <div id="lb-entries">
@@ -1111,17 +1126,20 @@
         });
         const result = await response.json();
         if (result.success && result.data) {
-          // 轉換格式
+          // 轉換格式（包含陣營）
           leaderboardData.time = (result.data.time || []).map(e => ({
             name: e.name,
+            school: e.school || '',
             score: formatTime(e.score)
           }));
           leaderboardData.level = (result.data.level || []).map(e => ({
             name: e.name,
+            school: e.school || '',
             score: `Lv.${e.score}`
           }));
           leaderboardData.damage = (result.data.damage || []).map(e => ({
             name: e.name,
+            school: e.school || '',
             score: String(e.score),
             level: e.level || 0
           }));
@@ -1219,9 +1237,11 @@
         const div = document.createElement('div');
         div.className = 'lb-entry';
         if (rank <= 3) div.classList.add(`rank-${rank}`);
+        const schoolDisplay = entry.school || '-';
         div.innerHTML = `
           <span class="lb-rank">${rank}</span>
           <span class="lb-name">${entry.name}</span>
+          <span class="lb-school" title="${schoolDisplay}">${schoolDisplay}</span>
           <span class="lb-score">${entry.score}</span>
         `;
         lbEntries.appendChild(div);
@@ -1271,15 +1291,15 @@
       renderLeaderboard();
     });
 
-    // 監聽遊戲結束事件以更新排行榜
+    // 監聯遊戲結束事件以更新排行榜
     window.addEventListener('gameRecordUpdate', (e) => {
-      const { type, name, score, level } = e.detail;
+      const { type, name, school, score, level } = e.detail;
       if (leaderboardData[type]) {
         // 傷害榜需要額外記錄等級用於二次排序
         if (type === 'damage') {
-          leaderboardData[type].push({ name, score, level: level || 0 });
+          leaderboardData[type].push({ name, school: school || '', score, level: level || 0 });
         } else {
-          leaderboardData[type].push({ name, score });
+          leaderboardData[type].push({ name, school: school || '', score });
         }
         // 排序（時間和等級越大越好，傷害越小越好且等級越高越好）
         if (type === 'damage') {
@@ -1415,14 +1435,14 @@
 
       // 也更新本地快取（供即時顯示）
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-        detail: { type: 'time', name: displayName, score: deathTime.textContent }
+        detail: { type: 'time', name: displayName, school, score: deathTime.textContent }
       }));
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-        detail: { type: 'level', name: displayName, score: deathLevel.textContent }
+        detail: { type: 'level', name: displayName, school, score: deathLevel.textContent }
       }));
       if (level >= 75) {
         window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-          detail: { type: 'damage', name: displayName, score: deathDamage.textContent, level: level }
+          detail: { type: 'damage', name: displayName, school, score: deathDamage.textContent, level: level }
         }));
       }
 
