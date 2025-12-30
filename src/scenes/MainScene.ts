@@ -34,6 +34,15 @@ export default class MainScene extends Phaser.Scene {
     private isPointerDown: boolean = false; // 是否按住滑鼠/觸控
     private moveDirX: number = 0; // 移動方向 X（-1, 0, 1 或連續值）
     private moveDirY: number = 0; // 移動方向 Y（-1, 0, 1 或連續值）
+
+    // 虛擬搖桿系統
+    private joystickContainer!: Phaser.GameObjects.Container;
+    private joystickBase!: Phaser.GameObjects.Graphics;
+    private joystickKnob!: Phaser.GameObjects.Graphics;
+    private joystickOriginX: number = 0;  // 搖桿起點 X（螢幕座標）
+    private joystickOriginY: number = 0;  // 搖桿起點 Y（螢幕座標）
+    private static readonly JOYSTICK_RADIUS = 60;      // 搖桿基座半徑
+    private static readonly JOYSTICK_KNOB_RADIUS = 25; // 搖桿旋鈕半徑
     private baseMoveSpeed: number = 0; // 基礎移動速度（像素/秒），在 create 中根據畫面大小初始化
     private moveSpeed: number = 0; // 實際移動速度（套用加成後）
 
@@ -68,19 +77,16 @@ export default class MainScene extends Phaser.Scene {
     private static readonly HEX_TINT_NORMAL = 0x1a5a1a;  // 暗駭客綠
     private static readonly HEX_TINT_HIGHLIGHT = 0xffffff; // 高亮白色
 
-    // 地圖邊緣紅色波浪警示
-    private edgeWaveChars: {
-        sprite: Phaser.GameObjects.Sprite;
-        x: number;
-        y: number;
-        phase: number;      // 波浪相位（0-1）
-        edge: 'top' | 'bottom' | 'left' | 'right';
+    // 邊緣波浪脈衝系統（紅到橘漸層）
+    private edgeWavePulses: {
+        x: number;           // 起點 X（地圖座標）
+        y: number;           // 起點 Y（地圖座標）
+        edge: 'left' | 'right' | 'top' | 'bottom';
+        startTime: number;   // 開始時間
+        length: number;      // 波浪長度（3-5格）
+        duration: number;    // 持續時間（ms）
     }[] = [];
-    private edgeWavePool: Phaser.GameObjects.Sprite[] = [];
-    private static readonly EDGE_WAVE_TINT = 0xff3333;  // 紅色
-    private static readonly EDGE_WARN_DISTANCE = 2.0;    // 警示距離：2 倍螢幕寬/高
-    private static readonly EDGE_WAVE_ROWS = 8;          // 波浪行數
-    private lastEdgeWaveUpdate: number = 0;
+    private lastEdgePulseTime: number = 0;
 
     // 分身技能專用暗紫色
     private static readonly PHANTOM_COLOR = 0x5522aa;       // 主色：暗紫
@@ -268,12 +274,16 @@ export default class MainScene extends Phaser.Scene {
     // 鏡頭安全區域（中間 30% 不移動鏡頭）
     private static readonly CAMERA_DEAD_ZONE = 0.3;
 
-    // WASD 鍵盤控制
+    // WASD + 方向鍵 鍵盤控制
     private cursors!: {
         W: Phaser.Input.Keyboard.Key;
         A: Phaser.Input.Keyboard.Key;
         S: Phaser.Input.Keyboard.Key;
         D: Phaser.Input.Keyboard.Key;
+        UP: Phaser.Input.Keyboard.Key;
+        DOWN: Phaser.Input.Keyboard.Key;
+        LEFT: Phaser.Input.Keyboard.Key;
+        RIGHT: Phaser.Input.Keyboard.Key;
     };
     private isKeyboardMoving: boolean = false;
 
@@ -680,13 +690,17 @@ export default class MainScene extends Phaser.Scene {
         this.input.on('pointermove', this.onPointerMove, this);
         this.input.on('pointerup', this.onPointerUp, this);
 
-        // 設定 WASD 鍵盤控制
+        // 設定 WASD + 方向鍵 鍵盤控制
         if (this.input.keyboard) {
             this.cursors = {
                 W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
                 A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
                 S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-                D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
+                D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+                UP: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+                DOWN: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+                LEFT: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+                RIGHT: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT)
             };
 
             // 技能選擇按鍵 (1, 2, 3)
@@ -733,7 +747,38 @@ export default class MainScene extends Phaser.Scene {
         // 建立低血量紅暈效果
         this.createLowHpVignette();
 
+        // 建立虛擬搖桿
+        this.createVirtualJoystick();
+
         // 注意：技能面板會在轉場完成後自動顯示（見 onRevealComplete）
+    }
+
+    // 建立虛擬搖桿 UI
+    private createVirtualJoystick() {
+        const baseRadius = MainScene.JOYSTICK_RADIUS;
+        const knobRadius = MainScene.JOYSTICK_KNOB_RADIUS;
+
+        // 建立容器（固定在螢幕座標，不隨鏡頭移動）
+        this.joystickContainer = this.add.container(0, 0);
+        this.joystickContainer.setScrollFactor(0);
+        this.joystickContainer.setDepth(1000);
+        this.joystickContainer.setVisible(false);
+
+        // 基座（半透明圓形）
+        this.joystickBase = this.add.graphics();
+        this.joystickBase.fillStyle(0x000000, 0.3);
+        this.joystickBase.fillCircle(0, 0, baseRadius);
+        this.joystickBase.lineStyle(2, 0xffffff, 0.5);
+        this.joystickBase.strokeCircle(0, 0, baseRadius);
+        this.joystickContainer.add(this.joystickBase);
+
+        // 旋鈕（較小的實心圓）
+        this.joystickKnob = this.add.graphics();
+        this.joystickKnob.fillStyle(0xffffff, 0.6);
+        this.joystickKnob.fillCircle(0, 0, knobRadius);
+        this.joystickKnob.lineStyle(2, 0xffffff, 0.8);
+        this.joystickKnob.strokeCircle(0, 0, knobRadius);
+        this.joystickContainer.add(this.joystickKnob);
     }
 
     update(_time: number, delta: number) {
@@ -2570,10 +2615,10 @@ export default class MainScene extends Phaser.Scene {
         let dx = 0;
         let dy = 0;
 
-        if (this.cursors.W.isDown) dy = -1;
-        if (this.cursors.S.isDown) dy = 1;
-        if (this.cursors.A.isDown) dx = -1;
-        if (this.cursors.D.isDown) dx = 1;
+        if (this.cursors.W.isDown || this.cursors.UP.isDown) dy = -1;
+        if (this.cursors.S.isDown || this.cursors.DOWN.isDown) dy = 1;
+        if (this.cursors.A.isDown || this.cursors.LEFT.isDown) dx = -1;
+        if (this.cursors.D.isDown || this.cursors.RIGHT.isDown) dx = 1;
 
         // 如果有按鍵按下
         if (dx !== 0 || dy !== 0) {
@@ -2641,21 +2686,59 @@ export default class MainScene extends Phaser.Scene {
         }
 
         this.isPointerDown = true;
-        this.updateMoveDirectionFromPointer(pointer);
+
+        // 記錄搖桿起點並顯示搖桿
+        this.joystickOriginX = pointer.x;
+        this.joystickOriginY = pointer.y;
+        this.joystickContainer.setPosition(pointer.x, pointer.y);
+        this.joystickKnob.setPosition(0, 0); // 旋鈕回到中心
+        this.joystickContainer.setVisible(true);
+
+        // 初始狀態不移動
+        this.moveDirX = 0;
+        this.moveDirY = 0;
     }
 
     private onPointerMove(pointer: Phaser.Input.Pointer) {
         // 只有在按住時才更新方向
         if (!this.isPointerDown || this.isPaused || this.popupPaused) return;
 
-        // 檢查是否仍在遊戲區域內
-        if (this.isPointerInGameArea(pointer)) {
-            this.updateMoveDirectionFromPointer(pointer);
+        // 計算從起點到當前位置的向量
+        const dx = pointer.x - this.joystickOriginX;
+        const dy = pointer.y - this.joystickOriginY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const maxRadius = MainScene.JOYSTICK_RADIUS;
+
+        if (distance > 0) {
+            // 計算移動方向（正規化）
+            this.moveDirX = dx / distance;
+            this.moveDirY = dy / distance;
+
+            // 更新角色面向
+            if (Math.abs(dx) > 5) {
+                this.facingRight = dx > 0;
+            }
+
+            // 限制旋鈕位置在基座範圍內
+            const clampedDist = Math.min(distance, maxRadius);
+            const knobX = this.moveDirX * clampedDist;
+            const knobY = this.moveDirY * clampedDist;
+            this.joystickKnob.setPosition(knobX, knobY);
+        } else {
+            this.moveDirX = 0;
+            this.moveDirY = 0;
+            this.joystickKnob.setPosition(0, 0);
         }
     }
 
     private onPointerUp() {
         this.isPointerDown = false;
+
+        // 隱藏搖桿
+        this.joystickContainer.setVisible(false);
+        this.moveDirX = 0;
+        this.moveDirY = 0;
+
         // 放開時立即停止移動並切換到待機
         if (!this.isKeyboardMoving) {
             this.setCharacterState('idle');
@@ -2670,30 +2753,6 @@ export default class MainScene extends Phaser.Scene {
             pointer.y >= this.gameBounds.y &&
             pointer.y <= this.gameBounds.y + this.gameBounds.height
         );
-    }
-
-    private updateMoveDirectionFromPointer(pointer: Phaser.Input.Pointer) {
-        // 將螢幕座標轉換為地圖座標
-        const localX = pointer.x - this.gameBounds.x;
-        const localY = pointer.y - this.gameBounds.y;
-
-        // 加上鏡頭偏移得到地圖座標
-        const mapX = localX + this.cameraOffsetX;
-        const mapY = localY + this.cameraOffsetY;
-
-        // 計算從角色到點擊位置的方向向量
-        const dx = mapX - this.characterX;
-        const dy = mapY - this.characterY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        // 標準化方向向量
-        if (distance > 0) {
-            this.moveDirX = dx / distance;
-            this.moveDirY = dy / distance;
-        } else {
-            this.moveDirX = 0;
-            this.moveDirY = 0;
-        }
     }
 
     private moveCharacter(delta: number) {
@@ -4750,6 +4809,57 @@ export default class MainScene extends Phaser.Scene {
         const now = this.time.now;
         const maxDist = this.gameBounds.width * 1.5; // 超出 1.5 倍螢幕寬度就移除
 
+        // 地圖邊緣警示參數
+        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
+        const screenHalfW = this.gameBounds.width / 2;
+        const screenHalfH = this.gameBounds.height / 2;
+        // 計算螢幕可見範圍（地圖座標）
+        const viewLeft = this.characterX - screenHalfW;
+        const viewRight = this.characterX + screenHalfW;
+        const viewTop = this.characterY - screenHalfH;
+        const viewBottom = this.characterY + screenHalfH;
+        // 判斷地圖邊緣是否在畫面中
+        const leftEdgeVisible = viewLeft < 0;
+        const rightEdgeVisible = viewRight > this.mapWidth;
+        const topEdgeVisible = viewTop < 0;
+        const bottomEdgeVisible = viewBottom > this.mapHeight;
+        const anyEdgeVisible = leftEdgeVisible || rightEdgeVisible || topEdgeVisible || bottomEdgeVisible;
+
+        // 高頻生成邊緣波浪脈衝
+        if (anyEdgeVisible && now - this.lastEdgePulseTime > 16) { // 每幀生成
+            this.lastEdgePulseTime = now;
+            const visibleEdges: ('left' | 'right' | 'top' | 'bottom')[] = [];
+            if (leftEdgeVisible) visibleEdges.push('left');
+            if (rightEdgeVisible) visibleEdges.push('right');
+            if (topEdgeVisible) visibleEdges.push('top');
+            if (bottomEdgeVisible) visibleEdges.push('bottom');
+
+            // 每幀生成 3-5 個脈衝
+            const pulseCount = 3 + Math.floor(Math.random() * 3);
+            for (let p = 0; p < pulseCount && visibleEdges.length > 0; p++) {
+                const edge = visibleEdges[Math.floor(Math.random() * visibleEdges.length)];
+                let px = 0, py = 0;
+                if (edge === 'left' || edge === 'right') {
+                    px = edge === 'left' ? 0 : this.mapWidth;
+                    py = viewTop + Math.random() * this.gameBounds.height;
+                    py = Math.max(0, Math.min(this.mapHeight, py));
+                } else {
+                    py = edge === 'top' ? 0 : this.mapHeight;
+                    px = viewLeft + Math.random() * this.gameBounds.width;
+                    px = Math.max(0, Math.min(this.mapWidth, px));
+                }
+                this.edgeWavePulses.push({
+                    x: px, y: py, edge,
+                    startTime: now,
+                    length: 6 + Math.floor(Math.random() * 5), // 6-10 格
+                    duration: 1000 + Math.random() * 500 // 1-1.5 秒
+                });
+            }
+        }
+
+        // 清理過期的脈衝
+        this.edgeWavePulses = this.edgeWavePulses.filter(p => now - p.startTime < p.duration);
+
         for (let i = this.floorHexChars.length - 1; i >= 0; i--) {
             const hex = this.floorHexChars[i];
             const age = now - hex.spawnTime;
@@ -4770,34 +4880,96 @@ export default class MainScene extends Phaser.Scene {
                 continue;
             }
 
+            // 計算基礎透明度
+            let baseAlpha = 0.7;
             if (!hex.fullyVisible) {
-                // 淡入階段
                 if (age < hex.fadeInDuration) {
-                    const fadeInProgress = age / hex.fadeInDuration;
-                    hex.sprite.setAlpha(0.7 * fadeInProgress);
+                    baseAlpha = 0.7 * (age / hex.fadeInDuration);
                 } else {
-                    // 完全顯現
                     hex.fullyVisible = true;
                     hex.visibleStartTime = now;
-                    hex.sprite.setAlpha(0.7);
                 }
             } else {
-                // 已完全顯現，計算存活和淡出
                 const visibleAge = now - hex.visibleStartTime;
-                const fadeOutDuration = hex.lifetime * 0.2; // 淡出時間為 lifetime 的 20%
-
+                const fadeOutDuration = hex.lifetime * 0.2;
                 if (visibleAge >= hex.lifetime) {
-                    // 時間到，回收到物件池
                     this.releaseFloorHexSprite(hex.sprite);
                     this.floorHexUsedPositions.delete(hex.gridKey);
                     this.floorHexChars.splice(i, 1);
+                    continue;
                 } else if (visibleAge > hex.lifetime - fadeOutDuration) {
-                    // 淡出階段
-                    const fadeOutProgress = (hex.lifetime - visibleAge) / fadeOutDuration;
-                    hex.sprite.setAlpha(0.7 * fadeOutProgress);
-                } else {
-                    hex.sprite.setAlpha(0.7);
+                    baseAlpha = 0.7 * ((hex.lifetime - visibleAge) / fadeOutDuration);
                 }
+            }
+
+            // 檢查是否被任何邊緣波浪脈衝影響
+            let maxPulseEffect = 0;
+            let pulseDistRatio = 0; // 用於漸層（0=邊緣紅，1=內側橘）
+
+            for (const pulse of this.edgeWavePulses) {
+                const pulseAge = now - pulse.startTime;
+                const pulseProgress = pulseAge / pulse.duration; // 0-1
+                const maxDist = pulse.length * gridSize;
+
+                // 計算字元到脈衝起點的距離（根據邊緣方向）
+                let distFromEdge = 0;
+                let lateralDist = 0; // 橫向距離（用於判斷是否在脈衝範圍內）
+
+                if (pulse.edge === 'left') {
+                    distFromEdge = spriteX;
+                    lateralDist = Math.abs(spriteY - pulse.y);
+                } else if (pulse.edge === 'right') {
+                    distFromEdge = this.mapWidth - spriteX;
+                    lateralDist = Math.abs(spriteY - pulse.y);
+                } else if (pulse.edge === 'top') {
+                    distFromEdge = spriteY;
+                    lateralDist = Math.abs(spriteX - pulse.x);
+                } else {
+                    distFromEdge = this.mapHeight - spriteY;
+                    lateralDist = Math.abs(spriteX - pulse.x);
+                }
+
+                // 波浪擴散效果：當前波峰位置
+                const waveHead = pulseProgress * maxDist * 1.5; // 波峰位置
+                const waveTail = Math.max(0, waveHead - maxDist); // 波尾位置
+
+                // 橫向範圍（隨機寬度 1-3 格）
+                const lateralRange = gridSize * (1 + Math.random() * 0.5);
+
+                // 判斷是否在波浪範圍內
+                if (distFromEdge >= waveTail && distFromEdge <= waveHead &&
+                    lateralDist < lateralRange && distFromEdge < maxDist) {
+
+                    // 計算效果強度（波峰最強，邊緣衰減）
+                    const distFromHead = Math.abs(distFromEdge - waveHead);
+                    const waveWidth = maxDist * 0.4;
+                    const effect = Math.exp(-distFromHead * distFromHead / (waveWidth * waveWidth));
+
+                    // 淡出效果
+                    const fadeOut = pulseProgress > 0.7 ? (1 - pulseProgress) / 0.3 : 1;
+                    const finalEffect = effect * fadeOut;
+
+                    if (finalEffect > maxPulseEffect) {
+                        maxPulseEffect = finalEffect;
+                        pulseDistRatio = distFromEdge / maxDist; // 用於漸層
+                    }
+                }
+            }
+
+            // 套用顏色和透明度
+            if (maxPulseEffect > 0.1) {
+                // 紅到橘漸層（邊緣紅，內側橘）
+                const r = 0xff;
+                const g = Math.floor(0x33 + pulseDistRatio * 0x55); // 33 -> 88
+                const b = 0x33;
+                const tintColor = (r << 16) | (g << 8) | b;
+
+                hex.sprite.setTint(tintColor);
+                hex.sprite.setAlpha(baseAlpha * (0.6 + maxPulseEffect * 0.4));
+            } else {
+                // 恢復正常綠色
+                hex.sprite.setTint(MainScene.HEX_TINT_NORMAL);
+                hex.sprite.setAlpha(baseAlpha);
             }
         }
 
@@ -4814,143 +4986,8 @@ export default class MainScene extends Phaser.Scene {
         // 更新橫向掃光
         this.updateScanLine();
 
-        // 更新地圖邊緣波浪警示
-        this.updateEdgeWaves();
-
         // 更新 GAME OVER 點陣字閃爍
         this.updateGameOverFlicker();
-    }
-
-    // 取得或建立邊緣波浪 sprite
-    private getEdgeWaveSprite(char: string): Phaser.GameObjects.Sprite {
-        let sprite = this.edgeWavePool.pop();
-        if (!sprite) {
-            sprite = this.add.sprite(0, 0, `hex_${char}`);
-        } else {
-            sprite.setTexture(`hex_${char}`);
-            sprite.setVisible(true);
-            sprite.setActive(true);
-        }
-        sprite.setTint(MainScene.EDGE_WAVE_TINT);
-        return sprite;
-    }
-
-    // 釋放邊緣波浪 sprite 回物件池
-    private releaseEdgeWaveSprite(sprite: Phaser.GameObjects.Sprite) {
-        sprite.setVisible(false);
-        sprite.setActive(false);
-        this.edgeWavePool.push(sprite);
-    }
-
-    // 更新地圖邊緣紅色波浪警示
-    private updateEdgeWaves() {
-        if (this.gameOverActive) return; // GAME OVER 時不顯示
-
-        const now = this.time.now;
-        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
-        // 警示距離用螢幕尺寸計算（不是地圖尺寸）
-        const warnDistX = this.gameBounds.width * MainScene.EDGE_WARN_DISTANCE;
-        const warnDistY = this.gameBounds.height * MainScene.EDGE_WARN_DISTANCE;
-
-        // 計算玩家到各邊緣的距離
-        const distToLeft = this.characterX;
-        const distToRight = this.mapWidth - this.characterX;
-        const distToTop = this.characterY;
-        const distToBottom = this.mapHeight - this.characterY;
-
-        // 清除所有現有波浪
-        for (const wave of this.edgeWaveChars) {
-            this.releaseEdgeWaveSprite(wave.sprite);
-        }
-        this.edgeWaveChars = [];
-
-        // 波浪動畫相位（0-1 循環）
-        const wavePhase = (now % 2000) / 2000;
-
-        // 檢查各邊緣並生成波浪
-        const edges: { edge: 'top' | 'bottom' | 'left' | 'right'; dist: number; warnDist: number }[] = [
-            { edge: 'left', dist: distToLeft, warnDist: warnDistX },
-            { edge: 'right', dist: distToRight, warnDist: warnDistX },
-            { edge: 'top', dist: distToTop, warnDist: warnDistY },
-            { edge: 'bottom', dist: distToBottom, warnDist: warnDistY }
-        ];
-
-        for (const { edge, dist, warnDist } of edges) {
-            if (dist < warnDist) {
-                // 計算警示強度（越近越強）
-                const intensity = 1 - (dist / warnDist);
-                const rows = Math.ceil(MainScene.EDGE_WAVE_ROWS * intensity);
-
-                this.spawnEdgeWave(edge, rows, gridSize, wavePhase, intensity);
-            }
-        }
-    }
-
-    // 生成邊緣波浪
-    private spawnEdgeWave(
-        edge: 'top' | 'bottom' | 'left' | 'right',
-        rows: number,
-        gridSize: number,
-        wavePhase: number,
-        intensity: number
-    ) {
-        const skewOffset = gridSize * 0.25;
-
-        // 只在可見區域附近生成
-        const viewPadding = gridSize * 2;
-        const viewMinX = this.characterX - this.gameBounds.width / 2 - viewPadding;
-        const viewMaxX = this.characterX + this.gameBounds.width / 2 + viewPadding;
-        const viewMinY = this.characterY - this.gameBounds.height / 2 - viewPadding;
-        const viewMaxY = this.characterY + this.gameBounds.height / 2 + viewPadding;
-
-        for (let r = 0; r < rows; r++) {
-            // 波浪效果：每行有不同的相位偏移
-            const rowPhase = (wavePhase + r * 0.15) % 1;
-            const waveAlpha = (0.3 + 0.5 * Math.sin(rowPhase * Math.PI * 2)) * intensity;
-
-            if (edge === 'left' || edge === 'right') {
-                // 左右邊緣：垂直排列
-                const baseX = edge === 'left' ? r * gridSize : this.mapWidth - (r + 1) * gridSize;
-                const startRow = Math.floor(viewMinY / gridSize);
-                const endRow = Math.ceil(viewMaxY / gridSize);
-
-                for (let row = startRow; row <= endRow; row++) {
-                    const y = row * gridSize + gridSize / 2;
-                    const x = baseX + gridSize / 2 + row * skewOffset;
-
-                    if (y >= 0 && y <= this.mapHeight) {
-                        const char = this.getRandomHexChar();
-                        const sprite = this.getEdgeWaveSprite(char);
-                        sprite.setPosition(x, y);
-                        sprite.setScale(gridSize / 80);
-                        sprite.setAlpha(waveAlpha);
-                        this.floorHexContainer.add(sprite);
-                        this.edgeWaveChars.push({ sprite, x, y, phase: rowPhase, edge });
-                    }
-                }
-            } else {
-                // 上下邊緣：水平排列
-                const baseY = edge === 'top' ? r * gridSize : this.mapHeight - (r + 1) * gridSize;
-                const startCol = Math.floor(viewMinX / gridSize);
-                const endCol = Math.ceil(viewMaxX / gridSize);
-
-                for (let col = startCol; col <= endCol; col++) {
-                    const baseRow = Math.floor(baseY / gridSize);
-                    const x = col * gridSize + gridSize / 2 + baseRow * skewOffset;
-                    const y = baseY + gridSize / 2;
-
-                    if (x >= 0 && x <= this.mapWidth) {
-                        const char = this.getRandomHexChar();
-                        const sprite = this.getEdgeWaveSprite(char);
-                        sprite.setPosition(x, y);
-                        sprite.setScale(gridSize / 80);
-                        sprite.setAlpha(waveAlpha);
-                        this.floorHexContainer.add(sprite);
-                        this.edgeWaveChars.push({ sprite, x, y, phase: rowPhase, edge });
-                    }
-                }
-            }
-        }
     }
 
     // 顯示 GAME OVER 點陣字
