@@ -12,22 +12,82 @@
  */
 
 const SHEET_NAME = 'leaderboard';
-const MAX_ENTRIES = 100; // 每種類型最多保留 100 筆
+const MAX_ENTRIES = 100;
+const GAME_SALT = 'DDT_2024_HWUDI'; // 必須與前端一致
 
-// 處理 GET 請求（讀取排行榜或新增紀錄）
+// 分數合理範圍
+const SCORE_LIMITS = {
+  time: { min: 0, max: 5999 },    // 0~99:59 秒
+  level: { min: 1, max: 999 },    // 1~999 級
+  damage: { min: 0, max: 999999 } // 0~999999 傷害
+};
+
+// 驗證 checksum
+function verifyChecksum(type, name, score, level, timestamp, checksum) {
+  const data = `${type}|${name}|${score}|${level}|${timestamp}|${GAME_SALT}`;
+  let hash = 0;
+  for (let i = 0; i < data.length; i++) {
+    const char = data.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  const hex = Math.abs(hash).toString(16).padStart(8, '0');
+  const lenCheck = (data.length % 256).toString(16).padStart(2, '0');
+  const expected = hex + lenCheck;
+  return checksum === expected;
+}
+
+// 驗證時間戳（5分鐘內有效）
+function verifyTimestamp(timestamp) {
+  const now = Date.now();
+  const diff = Math.abs(now - timestamp);
+  return diff < 5 * 60 * 1000; // 5 分鐘
+}
+
+// 驗證分數範圍
+function verifyScore(type, score) {
+  const limits = SCORE_LIMITS[type];
+  if (!limits) return false;
+  return score >= limits.min && score <= limits.max;
+}
+
+// 處理 GET 請求
 function doGet(e) {
   try {
     const action = e.parameter.action;
 
-    // 新增紀錄
     if (action === 'add') {
       const params = {
         name: e.parameter.name,
         school: e.parameter.school || '',
         type: e.parameter.type,
         score: parseFloat(e.parameter.score) || 0,
-        level: parseInt(e.parameter.level) || 0
+        level: parseInt(e.parameter.level) || 0,
+        timestamp: parseInt(e.parameter.ts) || 0,
+        checksum: e.parameter.cs || ''
       };
+
+      // 驗證 checksum
+      if (!verifyChecksum(params.type, params.name, params.score, params.level, params.timestamp, params.checksum)) {
+        return ContentService
+          .createTextOutput(JSON.stringify({ success: false, error: 'Invalid checksum' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // 驗證時間戳
+      if (!verifyTimestamp(params.timestamp)) {
+        return ContentService
+          .createTextOutput(JSON.stringify({ success: false, error: 'Request expired' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // 驗證分數範圍
+      if (!verifyScore(params.type, params.score)) {
+        return ContentService
+          .createTextOutput(JSON.stringify({ success: false, error: 'Invalid score range' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
       const result = addLeaderboardEntry(params);
       return ContentService
         .createTextOutput(JSON.stringify({ success: true, rank: result.rank }))
@@ -48,12 +108,19 @@ function doGet(e) {
   }
 }
 
-// 處理 POST 請求（新增紀錄 - 備用）
+// 處理 POST 請求（備用）
 function doPost(e) {
   try {
     const params = JSON.parse(e.postData.contents);
-    const result = addLeaderboardEntry(params);
 
+    // 同樣需要驗證
+    if (!verifyChecksum(params.type, params.name, params.score, params.level, params.timestamp, params.checksum)) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ success: false, error: 'Invalid checksum' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const result = addLeaderboardEntry(params);
     return ContentService
       .createTextOutput(JSON.stringify({ success: true, rank: result.rank }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -72,7 +139,6 @@ function getLeaderboardData(type) {
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return { time: [], level: [], damage: [] };
 
-  // 跳過標題列
   const entries = data.slice(1).map(row => ({
     timestamp: row[0],
     name: row[1],
@@ -82,12 +148,7 @@ function getLeaderboardData(type) {
     level: row[5] || 0
   }));
 
-  // 依類型分組
-  const result = {
-    time: [],
-    level: [],
-    damage: []
-  };
+  const result = { time: [], level: [], damage: [] };
 
   entries.forEach(entry => {
     if (result[entry.type]) {
@@ -96,25 +157,18 @@ function getLeaderboardData(type) {
   });
 
   // 排序
-  // time: 分數越高越好（存活秒數）
   result.time.sort((a, b) => parseFloat(b.score) - parseFloat(a.score));
-
-  // level: 分數越高越好
   result.level.sort((a, b) => parseFloat(b.score) - parseFloat(a.score));
-
-  // damage: 分數越低越好，同分時等級高的優先
   result.damage.sort((a, b) => {
     const dmgDiff = parseFloat(a.score) - parseFloat(b.score);
     if (dmgDiff !== 0) return dmgDiff;
     return parseFloat(b.level) - parseFloat(a.level);
   });
 
-  // 只保留前 100 名
   result.time = result.time.slice(0, MAX_ENTRIES);
   result.level = result.level.slice(0, MAX_ENTRIES);
   result.damage = result.damage.slice(0, MAX_ENTRIES);
 
-  // 如果指定類型，只回傳該類型
   if (type !== 'all' && result[type]) {
     return { [type]: result[type] };
   }
@@ -126,17 +180,14 @@ function getLeaderboardData(type) {
 function addLeaderboardEntry(params) {
   const { name, school, type, score, level } = params;
 
-  // 驗證必要參數
   if (!name || !type || score === undefined) {
     throw new Error('Missing required parameters');
   }
 
-  // 驗證類型
   if (!['time', 'level', 'damage'].includes(type)) {
     throw new Error('Invalid type');
   }
 
-  // 傷害榜需要 75 級以上
   if (type === 'damage' && (!level || level < 75)) {
     throw new Error('Damage leaderboard requires level 75+');
   }
@@ -146,16 +197,13 @@ function addLeaderboardEntry(params) {
     throw new Error('Leaderboard sheet not found');
   }
 
-  // 新增紀錄
   const timestamp = new Date();
   sheet.appendRow([timestamp, name, school || '', type, score, level || 0]);
 
-  // 計算排名
   const allData = getLeaderboardData(type);
   const entries = allData[type] || [];
-  let rank = entries.length; // 預設最後一名
+  let rank = entries.length;
 
-  // 根據類型計算排名
   if (type === 'damage') {
     rank = entries.filter(e => parseFloat(e.score) < parseFloat(score)).length + 1;
   } else {
@@ -165,7 +213,7 @@ function addLeaderboardEntry(params) {
   return { rank: rank };
 }
 
-// 清理舊資料（可選，手動執行或設定觸發器）
+// 清理舊資料
 function cleanupOldEntries() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   if (!sheet) return;
@@ -173,7 +221,6 @@ function cleanupOldEntries() {
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return;
 
-  // 按類型分組並排序
   const byType = { time: [], level: [], damage: [] };
 
   for (let i = 1; i < data.length; i++) {
@@ -183,22 +230,17 @@ function cleanupOldEntries() {
     }
   }
 
-  // 找出需要刪除的列（超過 100 名的）
   const rowsToDelete = [];
 
-  // time 排序：分數高的保留
   byType.time.sort((a, b) => parseFloat(b.data[4]) - parseFloat(a.data[4]));
   byType.time.slice(MAX_ENTRIES).forEach(e => rowsToDelete.push(e.row));
 
-  // level 排序：分數高的保留
   byType.level.sort((a, b) => parseFloat(b.data[4]) - parseFloat(a.data[4]));
   byType.level.slice(MAX_ENTRIES).forEach(e => rowsToDelete.push(e.row));
 
-  // damage 排序：分數低的保留
   byType.damage.sort((a, b) => parseFloat(a.data[4]) - parseFloat(b.data[4]));
   byType.damage.slice(MAX_ENTRIES).forEach(e => rowsToDelete.push(e.row));
 
-  // 從後往前刪除（避免列號偏移）
   rowsToDelete.sort((a, b) => b - a);
   rowsToDelete.forEach(row => sheet.deleteRow(row));
 }
