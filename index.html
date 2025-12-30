@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="icons/icon-96x96.png" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+  <!-- Google Fonts: Noto Sans TC -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <!-- PWA Meta Tags -->
+  <meta name="theme-color" content="#111111" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DIGI WAR" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="application-name" content="DIGI WAR" />
+  <meta name="msapplication-TileColor" content="#111111" />
+  <meta name="msapplication-tap-highlight" content="no" />
+
+  <!-- PWA Manifest (使用相對路徑支援 GitHub Pages 子目錄) -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Apple Touch Icons (使用相對路徑) -->
+  <link rel="apple-touch-icon" href="icons/icon-152x152.png" />
+  <link rel="apple-touch-icon" sizes="72x72" href="icons/icon-72x72.png" />
+  <link rel="apple-touch-icon" sizes="96x96" href="icons/icon-96x96.png" />
+  <link rel="apple-touch-icon" sizes="128x128" href="icons/icon-128x128.png" />
+  <link rel="apple-touch-icon" sizes="144x144" href="icons/icon-144x144.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152x152.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192x192.png" />
+  <link rel="apple-touch-icon" sizes="384x384" href="icons/icon-384x384.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512x512.png" />
+
+  <title>DIGI WAR</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #111;
+      overflow: hidden;
+      /* 使用 dvh 排除手機瀏覽器網址列 */
+      height: 100dvh;
+      height: 100vh; /* fallback */
+      width: 100vw;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    /* 支援 dvh 的瀏覽器 */
+    @supports (height: 100dvh) {
+      body {
+        height: 100dvh;
+      }
+    }
+
+    #app {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 右上角控制列 - 直式排列 */
+    #controls {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      display: none; /* 預設隱藏，轉場後才顯示 */
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    #controls.visible {
+      display: flex;
+    }
+
+    /* 左上角控制列 - 直式排列 */
+    #left-controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      display: none; /* 預設隱藏，轉場後才顯示 */
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    #left-controls.visible {
+      display: flex;
+    }
+
+    .ctrl-btn {
+      width: clamp(32px, 5vw, 44px);
+      height: clamp(32px, 5vw, 44px);
+      background: rgba(0, 0, 0, 0.6);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      color: #fff;
+      font-size: clamp(14px, 2.5vw, 20px);
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      box-sizing: border-box;
+      padding: 0;
+      margin: 0;
+      flex-shrink: 0;
+    }
+
+    .ctrl-btn:hover {
+      background: rgba(0, 0, 0, 0.8);
+      border-color: rgba(255, 255, 255, 0.6);
+    }
+
+    .ctrl-btn:active {
+      transform: scale(0.95);
+    }
+
+    .ctrl-btn.muted {
+      background: rgba(255, 68, 68, 0.6);
+      border-color: rgba(255, 68, 68, 0.8);
+    }
+
+    /* 彈出視窗樣式 */
+    .popup-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .popup-overlay.visible {
+      display: flex;
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .popup-content {
+      background: linear-gradient(135deg, rgba(30, 30, 50, 0.95), rgba(20, 20, 35, 0.98));
+      border: 2px solid rgba(100, 100, 255, 0.4);
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 90vw;
+      max-height: 80vh;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 0 30px rgba(100, 100, 255, 0.3);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .popup-content h2 {
+      color: #fff;
+      margin: 0 0 16px 0;
+      font-size: clamp(18px, 4vw, 24px);
+      text-align: center;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .popup-content h2 i {
+      color: #ffcc00;
+    }
+
+    .popup-body {
+      color: rgba(255, 255, 255, 0.9);
+      font-size: clamp(14px, 3vw, 16px);
+      line-height: 1.6;
+      text-align: left;
+      width: 100%;
+    }
+
+    .popup-body .coming-soon {
+      text-align: center;
+      font-size: clamp(20px, 5vw, 28px);
+      color: #ffcc00;
+      margin: 20px 0 8px 0;
+    }
+
+    .popup-body .coming-soon-sub {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.6);
+      margin: 0 0 20px 0;
+    }
+
+    .help-section {
+      margin-bottom: 16px;
+    }
+
+    .help-section h3 {
+      color: #88aaff;
+      margin: 0 0 8px 0;
+      font-size: clamp(14px, 3vw, 18px);
+      border-bottom: 1px solid rgba(136, 170, 255, 0.3);
+      padding-bottom: 4px;
+    }
+
+    .help-section ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .help-section li {
+      margin: 4px 0;
+    }
+
+    .help-section b {
+      color: #ffcc00;
+    }
+
+    .popup-close {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(255, 68, 68, 0.8);
+      border: 2px solid rgba(255, 100, 100, 0.6);
+      color: #fff;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-top: 20px;
+      transition: all 0.2s ease;
+    }
+
+    .popup-close:hover {
+      background: rgba(255, 68, 68, 1);
+      transform: scale(1.1);
+    }
+
+    .popup-close:active {
+      transform: scale(0.95);
+    }
+
+    /* 排行榜專用樣式 */
+    .leaderboard-content {
+      width: min(400px, 90vw);
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    .lb-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .lb-tab {
+      flex: 1;
+      background: rgba(50, 50, 80, 0.6);
+      border: 2px solid rgba(100, 100, 200, 0.3);
+      border-radius: 8px;
+      padding: 8px 4px;
+      color: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      transition: all 0.2s ease;
+    }
+
+    .lb-tab i {
+      font-size: clamp(16px, 4vw, 20px);
+    }
+
+    .lb-tab span {
+      font-size: clamp(10px, 2.5vw, 12px);
+      font-weight: bold;
+    }
+
+    .lb-tab small {
+      font-size: clamp(8px, 2vw, 10px);
+      opacity: 0.6;
+    }
+
+    .lb-tab:hover {
+      background: rgba(70, 70, 120, 0.7);
+      border-color: rgba(100, 100, 200, 0.5);
+    }
+
+    .lb-tab.active {
+      background: rgba(100, 100, 200, 0.5);
+      border-color: rgba(150, 150, 255, 0.7);
+      color: #fff;
+    }
+
+    .lb-tab.active i {
+      color: #ffcc00;
+    }
+
+    .lb-list {
+      width: 100%;
+      background: rgba(20, 20, 40, 0.8);
+      border-radius: 8px;
+      padding: 8px;
+      min-height: 280px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    .lb-header {
+      display: flex;
+      padding: 8px 12px;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: clamp(10px, 2.5vw, 12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      margin-bottom: 4px;
+    }
+
+    .lb-rank {
+      width: 36px;
+      text-align: center;
+    }
+
+    .lb-name {
+      flex: 1;
+    }
+
+    .lb-score {
+      width: 80px;
+      text-align: right;
+    }
+
+    .lb-entry {
+      display: flex;
+      padding: 8px 12px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: clamp(12px, 3vw, 14px);
+      border-radius: 4px;
+      transition: background 0.15s ease;
+    }
+
+    .lb-entry:nth-child(odd) {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .lb-entry:hover {
+      background: rgba(100, 100, 200, 0.2);
+    }
+
+    .lb-entry .lb-rank {
+      font-weight: bold;
+    }
+
+    .lb-entry.rank-1 .lb-rank { color: #ffd700; }
+    .lb-entry.rank-2 .lb-rank { color: #c0c0c0; }
+    .lb-entry.rank-3 .lb-rank { color: #cd7f32; }
+
+    .lb-empty {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.4);
+      padding: 40px 0;
+      font-size: clamp(14px, 3vw, 16px);
+    }
+
+    #lb-entries:not(:empty) + .lb-empty {
+      display: none;
+    }
+
+    .lb-footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .lb-page-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(80, 80, 120, 0.8);
+      border: 2px solid rgba(120, 120, 180, 0.5);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: all 0.2s ease;
+    }
+
+    .lb-page-btn:hover:not(:disabled) {
+      background: rgba(100, 100, 150, 1);
+      transform: scale(1.1);
+    }
+
+    .lb-page-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .lb-page-info {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: clamp(10px, 2.5vw, 12px);
+      margin-top: 8px;
+    }
+
+    /* 死亡結算視窗樣式 */
+    .death-content {
+      width: min(380px, 90vw);
+    }
+
+    .death-content h2 i {
+      color: #ff4444;
+    }
+
+    .death-stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+      width: 100%;
+    }
+
+    .death-stat {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 12px 8px;
+      text-align: center;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: clamp(10px, 2.5vw, 12px);
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: clamp(16px, 4vw, 20px);
+      font-weight: bold;
+      color: #ffcc00;
+    }
+
+    .death-form {
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: clamp(12px, 3vw, 14px);
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 6px;
+    }
+
+    .form-group input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: clamp(14px, 3.5vw, 16px);
+      background: rgba(0, 0, 0, 0.4);
+      border: 2px solid rgba(100, 100, 200, 0.3);
+      border-radius: 8px;
+      color: #fff;
+      outline: none;
+      box-sizing: border-box;
+      transition: border-color 0.2s ease;
+    }
+
+    .form-group input[type="text"]:focus {
+      border-color: rgba(100, 100, 255, 0.7);
+    }
+
+    .form-group input[type="text"]::placeholder {
+      color: rgba(255, 255, 255, 0.3);
+    }
+
+    .school-select-wrapper {
+      position: relative;
+    }
+
+    .school-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      overflow-y: auto;
+      background: rgba(30, 30, 50, 0.98);
+      border: 2px solid rgba(100, 100, 200, 0.5);
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      display: none;
+      z-index: 100;
+    }
+
+    .school-dropdown.visible {
+      display: block;
+    }
+
+    .school-option {
+      padding: 10px 12px;
+      font-size: clamp(12px, 3vw, 14px);
+      color: rgba(255, 255, 255, 0.9);
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .school-option:hover {
+      background: rgba(100, 100, 200, 0.3);
+    }
+
+    .school-option.selected {
+      background: rgba(100, 100, 200, 0.5);
+    }
+
+    .death-actions {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .death-btn {
+      flex: 1;
+      padding: 12px 16px;
+      font-size: clamp(14px, 3.5vw, 16px);
+      font-weight: bold;
+      border: 2px solid rgba(100, 100, 200, 0.5);
+      border-radius: 8px;
+      background: rgba(50, 50, 80, 0.6);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .death-btn:hover {
+      background: rgba(70, 70, 110, 0.8);
+      transform: translateY(-2px);
+    }
+
+    .death-btn.primary {
+      background: rgba(100, 180, 100, 0.6);
+      border-color: rgba(100, 200, 100, 0.6);
+    }
+
+    .death-btn.primary:hover {
+      background: rgba(100, 200, 100, 0.8);
+    }
+
+    .death-btn.primary i {
+      color: #ffcc00;
+    }
+
+    /* 控制區共用樣式 - 直式排列 */
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.6);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      width: clamp(32px, 5vw, 44px);
+      box-sizing: border-box;
+      padding: 6px 0;
+      gap: 2px;
+    }
+
+    .control-btn {
+      width: clamp(22px, 3.5vw, 30px);
+      height: clamp(20px, 3vw, 26px);
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: clamp(12px, 2vw, 16px);
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: all 0.15s ease;
+      border-radius: 4px;
+    }
+
+    .control-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .control-btn:active {
+      transform: scale(0.9);
+    }
+
+    /* 控制區數值顯示 */
+    .control-value {
+      font-family: monospace;
+      font-size: clamp(10px, 1.5vw, 14px);
+      color: #fff;
+      padding: 2px 0;
+    }
+
+    /* 音量條容器 */
+    #volume-bars {
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 2px;
+      padding: 2px 0;
+    }
+
+    .volume-bar {
+      width: clamp(16px, 2.5vw, 22px);
+      height: clamp(3px, 0.5vw, 5px);
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: 2px;
+      transition: background 0.1s ease;
+    }
+
+    .volume-bar.active {
+      background: #fff;
+    }
+
+    .volume-bar.muted {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    /* 全螢幕時改變圖示 */
+    body.is-fullscreen #fullscreen-btn .expand-icon {
+      display: none;
+    }
+    body.is-fullscreen #fullscreen-btn .compress-icon {
+      display: block;
+    }
+    body:not(.is-fullscreen) #fullscreen-btn .expand-icon {
+      display: block;
+    }
+    body:not(.is-fullscreen) #fullscreen-btn .compress-icon {
+      display: none;
+    }
+
+    /* 手機版隱藏全螢幕按鈕 */
+    @media screen and (max-width: 1024px) and (pointer: coarse) {
+      #fullscreen-btn {
+        display: none;
+      }
+    }
+
+    /* 強制橫向提示 */
+    #rotate-notice {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #111;
+      z-index: 9999;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      color: #fff;
+      font-family: Arial, sans-serif;
+    }
+
+    #rotate-notice .icon {
+      font-size: clamp(48px, 15vw, 80px);
+      margin-bottom: 20px;
+      animation: rotate-phone 1.5s ease-in-out infinite;
+    }
+
+    #rotate-notice .text {
+      font-size: clamp(14px, 4vw, 24px);
+    }
+
+    @keyframes rotate-phone {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(-90deg); }
+    }
+
+    /* 手機直向時顯示提示 */
+    @media screen and (max-width: 900px) and (orientation: portrait) {
+      #rotate-notice {
+        display: flex;
+      }
+      #app {
+        display: none;
+      }
+      #controls {
+        display: none;
+      }
+      #left-controls {
+        display: none;
+      }
+      #version-info {
+        display: none;
+      }
+    }
+
+    /* 右下角版本資訊 */
+    #version-info {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      font-family: monospace;
+      font-size: clamp(10px, 1.5vw, 14px);
+      color: rgba(255, 255, 255, 0.3);
+      z-index: 1000;
+      pointer-events: none;
+      user-select: none;
+    }
+  </style>
+  <script type="module" crossorigin src="/web-game/assets/index-BO90we04.js"></script>
+  <link rel="modulepreload" crossorigin href="/web-game/assets/phaser-0RJB29YE.js">
+</head>
+
+<body>
+  <div id="rotate-notice">
+    <div class="icon">📱</div>
+    <div class="text">請將裝置轉為橫向</div>
+  </div>
+
+  <!-- 右下角版本資訊（由 JS 動態設定） -->
+  <div id="version-info"></div>
+
+  <!-- 左上角控制列（預設隱藏，轉場後顯示） -->
+  <div id="left-controls">
+    <!-- 回首頁按鈕 -->
+    <a href="https://hwudigidev-creator.github.io/www/" class="ctrl-btn" title="回首頁"><i class="fa-solid fa-house"></i></a>
+    <!-- 聯繫我們按鈕 -->
+    <a href="https://hwudigidev-creator.github.io/www/#/contact" class="ctrl-btn" title="聯繫我們"><i class="fa-solid fa-envelope"></i></a>
+    <!-- 分享按鈕 -->
+    <button id="share-btn" class="ctrl-btn" title="分享"><i class="fa-solid fa-share-nodes"></i></button>
+    <!-- 排行榜按鈕 -->
+    <button id="leaderboard-btn" class="ctrl-btn" title="排行榜"><i class="fa-solid fa-ranking-star"></i></button>
+    <!-- 說明按鈕 -->
+    <button id="help-btn" class="ctrl-btn" title="說明"><i class="fa-solid fa-question"></i></button>
+  </div>
+
+  <!-- 排行榜彈出視窗 -->
+  <div id="leaderboard-popup" class="popup-overlay">
+    <div class="popup-content leaderboard-content">
+      <h2><i class="fa-solid fa-ranking-star"></i> 排行榜</h2>
+      <!-- 頁籤 -->
+      <div class="lb-tabs">
+        <button class="lb-tab active" data-tab="time">
+          <i class="fa-solid fa-hourglass-half"></i>
+          <span>不朽傳說</span>
+          <small>支撐時間</small>
+        </button>
+        <button class="lb-tab" data-tab="level">
+          <i class="fa-solid fa-crown"></i>
+          <span>巔峰霸主</span>
+          <small>最高等級</small>
+        </button>
+        <button class="lb-tab" data-tab="damage">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>無傷神話</span>
+          <small>Lv.75+ 限定</small>
+        </button>
+      </div>
+      <!-- 排行列表 -->
+      <div class="lb-list">
+        <div class="lb-header">
+          <span class="lb-rank">#</span>
+          <span class="lb-name">玩家</span>
+          <span class="lb-score">成績</span>
+        </div>
+        <div id="lb-entries">
+          <!-- 動態生成排行項目 -->
+        </div>
+        <p class="lb-empty">尚無紀錄</p>
+      </div>
+      <!-- 底部控制列 -->
+      <div class="lb-footer">
+        <button class="lb-page-btn" id="lb-prev"><i class="fa-solid fa-chevron-up"></i></button>
+        <button class="popup-close"><i class="fa-solid fa-xmark"></i></button>
+        <button class="lb-page-btn" id="lb-next"><i class="fa-solid fa-chevron-down"></i></button>
+      </div>
+      <div class="lb-page-info">第 <span id="lb-page-num">1</span> / <span id="lb-page-total">1</span> 頁</div>
+    </div>
+  </div>
+
+  <!-- 說明彈出視窗 -->
+  <div id="help-popup" class="popup-overlay">
+    <div class="popup-content">
+      <h2><i class="fa-solid fa-question-circle"></i> 遊戲說明</h2>
+      <div class="popup-body">
+        <div class="help-section">
+          <h3>操作方式</h3>
+          <ul>
+            <li><b>移動</b>：WASD 或 方向鍵 / 觸控拖曳</li>
+            <li><b>技能</b>：自動施放（冷卻完成後）</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h3>遊戲目標</h3>
+          <ul>
+            <li>消滅怪物獲取經驗值</li>
+            <li>升級解鎖新技能</li>
+            <li>盡可能存活更久</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h3>提示</h3>
+          <ul>
+            <li>護盾可以抵擋傷害</li>
+            <li>升級時 HP 會增加但不會回滿</li>
+            <li>注意閃避怪物的攻擊</li>
+          </ul>
+        </div>
+      </div>
+      <button class="popup-close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+  </div>
+
+  <!-- 死亡結算彈出視窗 -->
+  <div id="death-popup" class="popup-overlay">
+    <div class="popup-content death-content">
+      <h2><i class="fa-solid fa-skull"></i> 遊戲結束</h2>
+      <div class="death-stats">
+        <div class="death-stat">
+          <span class="stat-label">存活時間</span>
+          <span class="stat-value" id="death-time">00:00</span>
+        </div>
+        <div class="death-stat">
+          <span class="stat-label">最高等級</span>
+          <span class="stat-value" id="death-level">Lv.1</span>
+        </div>
+        <div class="death-stat">
+          <span class="stat-label">受到傷害</span>
+          <span class="stat-value" id="death-damage">0</span>
+        </div>
+      </div>
+      <div class="death-form">
+        <div class="form-group">
+          <label for="death-nickname">暱稱</label>
+          <input type="text" id="death-nickname" maxlength="12" placeholder="輸入暱稱..." value="AAA">
+        </div>
+        <div class="form-group">
+          <label for="death-school">所屬陣營</label>
+          <div class="school-select-wrapper">
+            <input type="text" id="death-school-input" placeholder="輸入或選擇學校..." autocomplete="off">
+            <div id="school-dropdown" class="school-dropdown"></div>
+          </div>
+        </div>
+      </div>
+      <div class="death-actions">
+        <button id="death-submit" class="death-btn primary">
+          <i class="fa-solid fa-trophy"></i> 登錄排行榜
+        </button>
+        <button id="death-skip" class="death-btn" style="display: none;">
+          <i class="fa-solid fa-rotate-right"></i> 跳過
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右上角控制列（預設隱藏，轉場後顯示） -->
+  <div id="controls">
+    <!-- 重整按鈕 -->
+    <button id="reload-btn" class="ctrl-btn" title="重新開始">↻</button>
+    <!-- 網格倍率控制（暫時隱藏） -->
+    <div id="grid-control" class="control-group" title="網格精細度" style="display: none;">
+      <button id="grid-up" class="control-btn">+</button>
+      <span id="grid-value" class="control-value">3X</span>
+      <button id="grid-down" class="control-btn">−</button>
+    </div>
+    <!-- 全螢幕按鈕 -->
+    <button id="fullscreen-btn" class="ctrl-btn" title="全螢幕">
+      <span class="expand-icon">⛶</span>
+      <span class="compress-icon">⛶</span>
+    </button>
+    <!-- 音量控制 -->
+    <div id="volume-control" class="control-group" title="音量">
+      <button id="volume-up" class="control-btn">+</button>
+      <div id="volume-bars"></div>
+      <button id="volume-down" class="control-btn">−</button>
+    </div>
+    <!-- 靜音按鈕 -->
+    <button id="mute-btn" class="ctrl-btn" title="靜音">
+      <i id="mute-icon" class="fa-solid fa-volume-high"></i>
+    </button>
+  </div>
+
+  <div id="app"></div>
+
+  <script>
+    // ===== 音量控制 =====
+    const volumeBars = document.getElementById('volume-bars');
+    const volumeUp = document.getElementById('volume-up');
+    const volumeDown = document.getElementById('volume-down');
+
+    const VOLUME_LEVELS = 10;
+    let currentVolume = 5; // 0-10，預設 50%
+
+    // 建立 10 個音量條
+    for (let i = 0; i < VOLUME_LEVELS; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'volume-bar';
+      bar.dataset.level = i;
+      volumeBars.appendChild(bar);
+    }
+
+    function updateVolumeBars() {
+      const bars = volumeBars.querySelectorAll('.volume-bar');
+      bars.forEach((bar, index) => {
+        bar.classList.remove('active', 'muted');
+        if (index < currentVolume) {
+          bar.classList.add('active');
+        }
+      });
+      // 發送音量變更事件給遊戲
+      window.dispatchEvent(new CustomEvent('volumechange', { detail: { volume: currentVolume / VOLUME_LEVELS } }));
+    }
+
+    // 長按持續觸發
+    let volumeInterval = null;
+    const INITIAL_DELAY = 300; // 首次觸發後的延遲
+    const REPEAT_DELAY = 100;  // 持續觸發的間隔
+
+    function startVolumeUp() {
+      if (currentVolume < VOLUME_LEVELS) {
+        currentVolume++;
+        updateVolumeBars();
+      }
+    }
+
+    function startVolumeDown() {
+      if (currentVolume > 0) {
+        currentVolume--;
+        updateVolumeBars();
+      }
+    }
+
+    function startHold(action) {
+      action(); // 立即觸發一次
+      let firstTrigger = true;
+      volumeInterval = setInterval(() => {
+        if (firstTrigger) {
+          firstTrigger = false;
+          clearInterval(volumeInterval);
+          volumeInterval = setInterval(action, REPEAT_DELAY);
+        }
+        action();
+      }, INITIAL_DELAY);
+    }
+
+    function stopHold() {
+      if (volumeInterval) {
+        clearInterval(volumeInterval);
+        volumeInterval = null;
+      }
+    }
+
+    // 滑鼠事件
+    volumeUp.addEventListener('mousedown', () => startHold(startVolumeUp));
+    volumeUp.addEventListener('mouseup', stopHold);
+    volumeUp.addEventListener('mouseleave', stopHold);
+
+    volumeDown.addEventListener('mousedown', () => startHold(startVolumeDown));
+    volumeDown.addEventListener('mouseup', stopHold);
+    volumeDown.addEventListener('mouseleave', stopHold);
+
+    // 觸控事件
+    volumeUp.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startHold(startVolumeUp);
+    });
+    volumeUp.addEventListener('touchend', stopHold);
+    volumeUp.addEventListener('touchcancel', stopHold);
+
+    volumeDown.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startHold(startVolumeDown);
+    });
+    volumeDown.addEventListener('touchend', stopHold);
+    volumeDown.addEventListener('touchcancel', stopHold);
+
+    // 初始化
+    updateVolumeBars();
+
+    // ===== 靜音按鈕 =====
+    const muteBtn = document.getElementById('mute-btn');
+    const muteIcon = document.getElementById('mute-icon');
+    let isMuted = false;
+    let volumeBeforeMute = currentVolume;
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      if (isMuted) {
+        volumeBeforeMute = currentVolume;
+        currentVolume = 0;
+        muteIcon.classList.remove('fa-volume-high');
+        muteIcon.classList.add('fa-volume-xmark');
+        muteBtn.classList.add('muted');
+      } else {
+        currentVolume = volumeBeforeMute > 0 ? volumeBeforeMute : 5;
+        muteIcon.classList.remove('fa-volume-xmark');
+        muteIcon.classList.add('fa-volume-high');
+        muteBtn.classList.remove('muted');
+      }
+      updateVolumeBars();
+    }
+
+    muteBtn.addEventListener('click', toggleMute);
+
+    // ===== 彈出視窗功能 =====
+    const leaderboardBtn = document.getElementById('leaderboard-btn');
+    const helpBtn = document.getElementById('help-btn');
+    const leaderboardPopup = document.getElementById('leaderboard-popup');
+    const helpPopup = document.getElementById('help-popup');
+
+    function openPopup(popup) {
+      popup.style.display = 'flex';
+      // 強制重繪後再添加 visible 以啟動動畫
+      requestAnimationFrame(() => {
+        popup.classList.add('visible');
+      });
+      // 通知遊戲暫停
+      window.dispatchEvent(new CustomEvent('popupStateChange', { detail: { open: true } }));
+    }
+
+    function closePopup(popup) {
+      popup.classList.remove('visible');
+      setTimeout(() => {
+        popup.style.display = 'none';
+      }, 300);
+      // 通知遊戲恢復
+      window.dispatchEvent(new CustomEvent('popupStateChange', { detail: { open: false } }));
+    }
+
+    // 開啟按鈕
+    leaderboardBtn.addEventListener('click', () => openPopup(leaderboardPopup));
+    helpBtn.addEventListener('click', () => openPopup(helpPopup));
+
+    // 關閉按鈕
+    document.querySelectorAll('.popup-close').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const popup = btn.closest('.popup-overlay');
+        if (popup) closePopup(popup);
+      });
+    });
+
+    // 點擊背景關閉
+    document.querySelectorAll('.popup-overlay').forEach(popup => {
+      popup.addEventListener('click', (e) => {
+        if (e.target === popup) closePopup(popup);
+      });
+    });
+
+    // ===== 排行榜功能 =====
+    const lbTabs = document.querySelectorAll('.lb-tab');
+    const lbEntries = document.getElementById('lb-entries');
+    const lbPrev = document.getElementById('lb-prev');
+    const lbNext = document.getElementById('lb-next');
+    const lbPageNum = document.getElementById('lb-page-num');
+    const lbPageTotal = document.getElementById('lb-page-total');
+
+    const ENTRIES_PER_PAGE = 10;
+    const MAX_ENTRIES = 100;
+    let currentTab = 'time';
+    let currentPage = 1;
+
+    // Google Sheets API URL
+    const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyjqIgHpEa9G6qR53DjAV8mLA_794Pepoc9cUJWeZJRPIC7Iqj6fTsfy2vl-a95x6aMnQ/exec';
+
+    // 排行榜資料快取
+    let leaderboardData = {
+      time: [],    // { name: 'Player', score: '12:34' }
+      level: [],   // { name: 'Player', score: 'Lv.50' }
+      damage: []   // { name: 'Player', score: '0', level: 75 }
+    };
+    let isLoadingLeaderboard = false;
+
+    // 從 Google Sheets 載入排行榜
+    async function fetchLeaderboard() {
+      if (!SHEET_API_URL) {
+        console.warn('Google Sheets API URL not configured');
+        return;
+      }
+      if (isLoadingLeaderboard) return;
+      isLoadingLeaderboard = true;
+
+      try {
+        const response = await fetch(`${SHEET_API_URL}?type=all`, {
+          method: 'GET',
+          redirect: 'follow'
+        });
+        const result = await response.json();
+        if (result.success && result.data) {
+          // 轉換格式
+          leaderboardData.time = (result.data.time || []).map(e => ({
+            name: e.name,
+            score: formatTime(e.score)
+          }));
+          leaderboardData.level = (result.data.level || []).map(e => ({
+            name: e.name,
+            score: `Lv.${e.score}`
+          }));
+          leaderboardData.damage = (result.data.damage || []).map(e => ({
+            name: e.name,
+            score: String(e.score),
+            level: e.level || 0
+          }));
+          renderLeaderboard();
+        }
+      } catch (error) {
+        console.error('Failed to fetch leaderboard:', error);
+      } finally {
+        isLoadingLeaderboard = false;
+      }
+    }
+
+    // 格式化時間（秒數轉 mm:ss）
+    function formatTime(seconds) {
+      const sec = parseFloat(seconds) || 0;
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    // 解析時間（mm:ss 轉秒數）
+    function parseTime(timeStr) {
+      const [m, s] = timeStr.split(':').map(Number);
+      return m * 60 + s;
+    }
+
+    // 提交紀錄到 Google Sheets
+    async function submitToSheet(type, name, score, school, level) {
+      if (!SHEET_API_URL) {
+        console.warn('Google Sheets API URL not configured');
+        return null;
+      }
+
+      try {
+        // 使用 URL 參數方式提交（避免 CORS 問題）
+        const params = new URLSearchParams({
+          action: 'add',
+          type,
+          name,
+          score: String(score),
+          school: school || '',
+          level: String(level || 0)
+        });
+        const response = await fetch(`${SHEET_API_URL}?${params.toString()}`, {
+          method: 'GET',
+          redirect: 'follow'
+        });
+        const result = await response.json();
+        return result;
+      } catch (error) {
+        console.error('Failed to submit to sheet:', error);
+        return null;
+      }
+    }
+
+    function renderLeaderboard() {
+      const data = leaderboardData[currentTab].slice(0, MAX_ENTRIES);
+      const totalPages = Math.max(1, Math.ceil(data.length / ENTRIES_PER_PAGE));
+
+      // 確保頁碼有效
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      const start = (currentPage - 1) * ENTRIES_PER_PAGE;
+      const end = start + ENTRIES_PER_PAGE;
+      const pageData = data.slice(start, end);
+
+      // 清空並填入資料
+      lbEntries.innerHTML = '';
+      pageData.forEach((entry, index) => {
+        const rank = start + index + 1;
+        const div = document.createElement('div');
+        div.className = 'lb-entry';
+        if (rank <= 3) div.classList.add(`rank-${rank}`);
+        div.innerHTML = `
+          <span class="lb-rank">${rank}</span>
+          <span class="lb-name">${entry.name}</span>
+          <span class="lb-score">${entry.score}</span>
+        `;
+        lbEntries.appendChild(div);
+      });
+
+      // 更新頁碼
+      lbPageNum.textContent = currentPage;
+      lbPageTotal.textContent = totalPages;
+
+      // 更新按鈕狀態
+      lbPrev.disabled = currentPage <= 1;
+      lbNext.disabled = currentPage >= totalPages;
+    }
+
+    // 頁籤切換
+    lbTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        lbTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentTab = tab.dataset.tab;
+        currentPage = 1;
+        renderLeaderboard();
+      });
+    });
+
+    // 翻頁
+    lbPrev.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderLeaderboard();
+      }
+    });
+
+    lbNext.addEventListener('click', () => {
+      const data = leaderboardData[currentTab].slice(0, MAX_ENTRIES);
+      const totalPages = Math.ceil(data.length / ENTRIES_PER_PAGE);
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderLeaderboard();
+      }
+    });
+
+    // 開啟排行榜時載入並渲染
+    leaderboardBtn.addEventListener('click', () => {
+      currentPage = 1;
+      fetchLeaderboard(); // 從 Google Sheets 載入
+      renderLeaderboard();
+    });
+
+    // 監聽遊戲結束事件以更新排行榜
+    window.addEventListener('gameRecordUpdate', (e) => {
+      const { type, name, score, level } = e.detail;
+      if (leaderboardData[type]) {
+        // 傷害榜需要額外記錄等級用於二次排序
+        if (type === 'damage') {
+          leaderboardData[type].push({ name, score, level: level || 0 });
+        } else {
+          leaderboardData[type].push({ name, score });
+        }
+        // 排序（時間和等級越大越好，傷害越小越好且等級越高越好）
+        if (type === 'damage') {
+          leaderboardData[type].sort((a, b) => {
+            const dmgA = parseFloat(a.score);
+            const dmgB = parseFloat(b.score);
+            if (dmgA !== dmgB) return dmgA - dmgB; // 傷害少的排前面
+            return (b.level || 0) - (a.level || 0); // 傷害相同時，等級高的排前面
+          });
+        } else if (type === 'level') {
+          leaderboardData[type].sort((a, b) => {
+            const lvA = parseInt(a.score.replace('Lv.', ''));
+            const lvB = parseInt(b.score.replace('Lv.', ''));
+            return lvB - lvA;
+          });
+        } else if (type === 'time') {
+          leaderboardData[type].sort((a, b) => {
+            const [mA, sA] = a.score.split(':').map(Number);
+            const [mB, sB] = b.score.split(':').map(Number);
+            return (mB * 60 + sB) - (mA * 60 + sA);
+          });
+        }
+        // 只保留前 100 名
+        leaderboardData[type] = leaderboardData[type].slice(0, MAX_ENTRIES);
+      }
+    });
+
+    // 初始渲染
+    renderLeaderboard();
+
+    // ===== 死亡結算功能 =====
+    const deathPopup = document.getElementById('death-popup');
+    const deathNickname = document.getElementById('death-nickname');
+    const deathSchoolInput = document.getElementById('death-school-input');
+    const schoolDropdown = document.getElementById('school-dropdown');
+    const deathSubmit = document.getElementById('death-submit');
+    const deathSkip = document.getElementById('death-skip');
+    const deathTime = document.getElementById('death-time');
+    const deathLevel = document.getElementById('death-level');
+    const deathDamage = document.getElementById('death-damage');
+
+    let schoolList = [];
+    let selectedSchool = '';
+
+    // 載入學校清單
+    fetch('./src/data/hslist.json')
+      .then(res => res.json())
+      .then(data => {
+        schoolList = data.filter(s => s.value !== '-1');
+      })
+      .catch(err => console.warn('無法載入學校清單:', err));
+
+    // 學校搜尋過濾
+    function filterSchools(query) {
+      if (!query) return schoolList.slice(0, 20);
+      const q = query.toLowerCase();
+      return schoolList.filter(s => s.label.toLowerCase().includes(q)).slice(0, 20);
+    }
+
+    function renderSchoolDropdown(schools) {
+      schoolDropdown.innerHTML = '';
+      schools.forEach(school => {
+        const div = document.createElement('div');
+        div.className = 'school-option';
+        if (school.value === selectedSchool) div.classList.add('selected');
+        div.textContent = school.label;
+        div.addEventListener('click', () => {
+          selectedSchool = school.value;
+          deathSchoolInput.value = school.label;
+          schoolDropdown.classList.remove('visible');
+        });
+        schoolDropdown.appendChild(div);
+      });
+    }
+
+    deathSchoolInput.addEventListener('focus', () => {
+      const filtered = filterSchools(deathSchoolInput.value);
+      renderSchoolDropdown(filtered);
+      schoolDropdown.classList.add('visible');
+    });
+
+    deathSchoolInput.addEventListener('input', () => {
+      const filtered = filterSchools(deathSchoolInput.value);
+      renderSchoolDropdown(filtered);
+      schoolDropdown.classList.add('visible');
+    });
+
+    // 點擊外部關閉下拉選單
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.school-select-wrapper')) {
+        schoolDropdown.classList.remove('visible');
+      }
+    });
+
+    // 顯示死亡彈出視窗
+    function showDeathPopup(time, level, damage) {
+      deathTime.textContent = time;
+      deathLevel.textContent = `Lv.${level}`;
+      deathDamage.textContent = damage;
+      deathNickname.value = '';
+      deathSchoolInput.value = '';
+      selectedSchool = '';
+      openPopup(deathPopup);
+    }
+
+    // 提交排行榜
+    deathSubmit.addEventListener('click', async () => {
+      const nickname = deathNickname.value.trim() || '匿名玩家';
+      const school = selectedSchool || deathSchoolInput.value.trim() || '無陣營';
+      const displayName = `${nickname}`;
+      const level = parseInt(deathLevel.textContent.replace('Lv.', '')) || 0;
+
+      // 顯示載入狀態
+      deathSubmit.disabled = true;
+      deathSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 上傳中...';
+
+      // 解析分數
+      const timeScore = parseTime(deathTime.textContent); // 轉為秒數
+      const levelScore = level;
+      const damageScore = parseFloat(deathDamage.textContent) || 0;
+
+      // 同時提交到 Google Sheets
+      const promises = [
+        submitToSheet('time', displayName, timeScore, school, level),
+        submitToSheet('level', displayName, levelScore, school, level)
+      ];
+      // 無傷神話：需達到 75 級才能入榜
+      if (level >= 75) {
+        promises.push(submitToSheet('damage', displayName, damageScore, school, level));
+      }
+
+      await Promise.all(promises);
+
+      // 也更新本地快取（供即時顯示）
+      window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
+        detail: { type: 'time', name: displayName, score: deathTime.textContent }
+      }));
+      window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
+        detail: { type: 'level', name: displayName, score: deathLevel.textContent }
+      }));
+      if (level >= 75) {
+        window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
+          detail: { type: 'damage', name: displayName, score: deathDamage.textContent, level: level }
+        }));
+      }
+
+      closePopup(deathPopup);
+      // 重新載入遊戲
+      setTimeout(() => location.reload(), 500);
+    });
+
+    // 跳過
+    deathSkip.addEventListener('click', () => {
+      closePopup(deathPopup);
+      setTimeout(() => location.reload(), 500);
+    });
+
+    // 監聽遊戲死亡事件
+    window.addEventListener('playerDeath', (e) => {
+      const { survivalTime, level, totalDamage } = e.detail;
+      showDeathPopup(survivalTime, level, totalDamage);
+    });
+
+    // ===== 全螢幕功能 =====
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+
+    function isFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+    }
+
+    function updateFullscreenState() {
+      if (isFullscreen()) {
+        document.body.classList.add('is-fullscreen');
+      } else {
+        document.body.classList.remove('is-fullscreen');
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!isFullscreen()) {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen();
+        } else if (elem.mozRequestFullScreen) {
+          elem.mozRequestFullScreen();
+        } else if (elem.msRequestFullscreen) {
+          elem.msRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          document.msExitFullscreen();
+        }
+      }
+    }
+
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+    document.addEventListener('fullscreenchange', updateFullscreenState);
+    document.addEventListener('webkitfullscreenchange', updateFullscreenState);
+    document.addEventListener('mozfullscreenchange', updateFullscreenState);
+    document.addEventListener('MSFullscreenChange', updateFullscreenState);
+
+    // ===== 重整按鈕 =====
+    const reloadBtn = document.getElementById('reload-btn');
+    reloadBtn.addEventListener('click', () => {
+      location.reload();
+    });
+
+    // ===== 分享按鈕 =====
+    const shareBtn = document.getElementById('share-btn');
+    shareBtn.addEventListener('click', async () => {
+      const shareData = {
+        title: 'DIGI WAR',
+        text: '來玩 DIGI WAR 吧！',
+        url: window.location.href
+      };
+
+      if (navigator.share) {
+        try {
+          await navigator.share(shareData);
+        } catch (err) {
+          // 用戶取消分享或發生錯誤
+          console.log('Share cancelled or failed:', err);
+        }
+      } else {
+        // 不支援 Web Share API，複製連結到剪貼簿
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          alert('連結已複製到剪貼簿！');
+        } catch (err) {
+          // 剪貼簿也不支援，顯示連結
+          prompt('請複製此連結：', window.location.href);
+        }
+      }
+    });
+
+    // ===== 網格倍率控制 =====
+    const gridUp = document.getElementById('grid-up');
+    const gridDown = document.getElementById('grid-down');
+    const gridValue = document.getElementById('grid-value');
+    // 判斷是否為手機（觸控裝置且螢幕較小）
+    const isMobileDevice = ('ontouchstart' in window) && window.innerWidth < 1024;
+    let gridScale = isMobileDevice ? 2 : 3; // 手機預設 2X，電腦預設 3X
+    gridValue.textContent = `${gridScale}X`;
+
+    function updateGridDisplay() {
+      gridValue.textContent = `${gridScale}X`;
+      window.dispatchEvent(new CustomEvent('gridscalechange', { detail: { scale: gridScale } }));
+    }
+
+    gridUp.addEventListener('click', () => {
+      if (gridScale < 3) {
+        gridScale++;
+        updateGridDisplay();
+      }
+    });
+
+    gridDown.addEventListener('click', () => {
+      if (gridScale > 1) {
+        gridScale--;
+        updateGridDisplay();
+      }
+    });
+
+    // ===== 註冊 Service Worker =====
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // 使用相對路徑，支援 GitHub Pages 子目錄部署
+        const swPath = new URL('sw.js', window.location.href).href;
+        navigator.serviceWorker.register(swPath)
+          .then((registration) => {
+            console.log('[PWA] Service Worker registered:', registration.scope);
+          })
+          .catch((error) => {
+            console.log('[PWA] Service Worker registration failed:', error);
+          });
+      });
+    }
+  </script>
+
+</body>
+
+</html>
