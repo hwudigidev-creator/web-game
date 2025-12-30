@@ -1370,11 +1370,8 @@
     // 驗證碼產生（防竄改）
     const GAME_SALT = 'DDT_2024_HWUDI';
     function generateChecksum(type, name, score, level, timestamp) {
-      // 確保數字格式一致（避免浮點數精度問題）
-      const scoreStr = String(parseFloat(score) || 0);
-      const levelStr = String(parseFloat(level) || 0);
-      // 簡單的混淆算法：將數據組合後計算特徵值
-      const data = `${type}|${name}|${scoreStr}|${levelStr}|${timestamp}|${GAME_SALT}`;
+      // 直接使用傳入的值（呼叫端需確保格式一致）
+      const data = `${type}|${name}|${score}|${level}|${timestamp}|${GAME_SALT}`;
       let hash = 0;
       for (let i = 0; i < data.length; i++) {
         const char = data.charCodeAt(i);
@@ -1395,18 +1392,24 @@
       }
 
       try {
+        // 統一數字格式（確保 checksum 和 URL 參數一致）
+        const scoreStr = String(parseFloat(score) || 0);
+        const levelStr = String(parseFloat(level) || 0);
+
         // 產生時間戳和驗證碼
         const timestamp = Date.now();
-        const checksum = generateChecksum(type, name, score, level, timestamp);
+        const checksum = generateChecksum(type, name, scoreStr, levelStr, timestamp);
+
+        console.log('Submit debug:', { type, name, scoreStr, levelStr, timestamp, checksum });
 
         // 使用 URL 參數方式提交（避免 CORS 問題）
         const params = new URLSearchParams({
           action: 'add',
           type,
           name,
-          score: String(score),
+          score: scoreStr,
           school: school || '',
-          level: String(level || 0),
+          level: levelStr,
           ts: String(timestamp),
           cs: checksum
         });
