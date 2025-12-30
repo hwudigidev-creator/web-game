@@ -773,114 +773,147 @@
       }
     }
 
-    /* 手機橫向 RWD - 小螢幕高度調整 */
+    /* 手機橫向 RWD - 固定面板大小 */
     @media screen and (max-height: 450px) {
       .popup-content {
-        max-height: 95vh;
-        padding: 12px 16px;
-        padding-bottom: 28px;
+        height: 85vh;
+        max-height: 85vh;
+        padding: 10px 14px;
+        padding-bottom: 24px;
+        box-sizing: border-box;
       }
       .popup-content h2 {
-        margin: 0 0 8px 0;
-        font-size: 16px;
+        margin: 0 0 6px 0;
+        font-size: 14px;
+        flex-shrink: 0;
       }
       .popup-close {
-        width: 32px;
-        height: 32px;
-        font-size: 14px;
+        width: 30px;
+        height: 30px;
+        font-size: 12px;
       }
       .lb-footer, .popup-footer, .death-actions {
-        gap: 8px;
+        gap: 6px;
       }
       .lb-page-btn {
-        width: 32px;
-        height: 32px;
-        font-size: 12px;
+        width: 28px;
+        height: 28px;
+        font-size: 11px;
       }
       .death-btn {
-        padding: 8px 14px;
-        font-size: 12px;
-        border-radius: 20px;
+        padding: 6px 12px;
+        font-size: 11px;
+        border-radius: 16px;
       }
+      /* 排行榜 - 固定高度 */
       .leaderboard-content {
-        width: min(480px, 98vw);
+        width: min(420px, 96vw);
+        height: 85vh;
       }
       .lb-tabs {
-        margin-bottom: 8px;
-        gap: 4px;
+        margin-bottom: 6px;
+        gap: 3px;
+        flex-shrink: 0;
       }
       .lb-tab {
-        padding: 6px 4px;
-        font-size: 11px;
+        padding: 4px 3px;
+        font-size: 10px;
       }
       .lb-tab i {
-        font-size: 14px;
+        font-size: 12px;
       }
       .lb-tab span {
-        font-size: 10px;
+        font-size: 9px;
+      }
+      .lb-tab small {
+        font-size: 8px;
       }
       .lb-list {
-        min-height: auto;
-        max-height: calc(95vh - 160px);
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        height: calc(85vh - 100px);
         overflow-y: auto;
-        padding: 4px;
+        padding: 3px;
       }
       .lb-header {
-        padding: 4px 8px;
-        font-size: 10px;
+        padding: 3px 6px;
+        font-size: 9px;
       }
       .lb-entry {
-        padding: 4px 8px;
-        font-size: 11px;
-      }
-      .lb-school {
-        width: 70px;
+        padding: 3px 6px;
         font-size: 10px;
       }
+      .lb-school {
+        width: 60px;
+        font-size: 9px;
+      }
       .lb-rank {
-        width: 28px;
+        width: 24px;
       }
       .lb-score {
-        width: 55px;
+        width: 65px;
       }
       .lb-empty, .lb-loading {
-        padding: 20px 0;
-        font-size: 12px;
+        padding: 15px 0;
+        font-size: 11px;
       }
-      /* 說明彈窗 */
-      .help-section {
-        margin-bottom: 8px;
+      .lb-page-info {
+        font-size: 9px;
+        margin-top: 4px;
       }
-      .help-section h3 {
-        font-size: 13px;
-        margin-bottom: 4px;
-      }
+      /* 說明彈窗 - 固定高度 */
       .popup-body {
-        font-size: 12px;
-        line-height: 1.4;
-        max-height: calc(95vh - 100px);
+        flex: 1;
+        min-height: 0;
+        font-size: 11px;
+        line-height: 1.3;
         overflow-y: auto;
       }
-      /* 死亡彈窗 */
-      .death-content {
-        padding: 12px 16px;
-      }
-      .death-stats {
-        font-size: 12px;
-        gap: 8px;
-        margin-bottom: 8px;
-      }
-      .leaderboard-submit h4 {
-        font-size: 13px;
+      .help-section {
         margin-bottom: 6px;
       }
-      .leaderboard-submit input {
-        padding: 6px 10px;
-        font-size: 13px;
-      }
-      .leaderboard-submit button {
-        padding: 6px 12px;
+      .help-section h3 {
         font-size: 12px;
+        margin-bottom: 3px;
+      }
+      .help-section ul {
+        padding-left: 16px;
+      }
+      .help-section li {
+        margin: 2px 0;
+      }
+      /* 死亡彈窗 - 固定高度 */
+      .death-content {
+        height: 85vh;
+        padding: 10px 14px;
+        padding-bottom: 24px;
+      }
+      .death-stats {
+        font-size: 11px;
+        gap: 6px;
+        margin-bottom: 6px;
+        flex-shrink: 0;
+      }
+      .death-stat {
+        padding: 6px 10px;
+      }
+      .leaderboard-submit {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .leaderboard-submit h4 {
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      .leaderboard-submit input {
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+      .school-select-wrapper input {
+        padding: 5px 8px;
+        font-size: 11px;
       }
     }
 
