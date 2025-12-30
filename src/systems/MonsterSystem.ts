@@ -338,6 +338,14 @@ export class MonsterManager {
         this.isSpawning = false;
     }
 
+    // 隱藏所有怪物（遊戲結束時）
+    hideAllMonsters() {
+        // 隱藏怪物網格容器
+        if (this.monsterGridContainer) {
+            this.monsterGridContainer.setVisible(false);
+        }
+    }
+
     // 更新（每幀呼叫）
     update(
         delta: number,

@@ -144,6 +144,19 @@ export default class MainScene extends Phaser.Scene {
     // GAME OVER 點陣字系統
     private gameOverActive: boolean = false;
     private gameOverSprites: Phaser.GameObjects.Sprite[] = [];
+    // GAME OVER 紅色呼吸掃光
+    private gameOverBreathScan: {
+        phase: 'expand' | 'contract' | 'burst' | 'idle';
+        radius: number;
+        targetRadius: number;
+    } = { phase: 'idle', radius: 0, targetRadius: 0 };
+    private static readonly GAMEOVER_SCAN_COLOR = 0xff4444;    // 紅色
+    private static readonly GAMEOVER_SCAN_WIDTH = 0.12;        // 掃光環寬度
+    private static readonly GAMEOVER_SCAN_EXPAND_SPEED = 0.8;  // 擴散速度（慢）
+    private static readonly GAMEOVER_SCAN_CONTRACT_SPEED = 2.0; // 收縮速度
+    private static readonly GAMEOVER_SCAN_BURST_SPEED = 2.5;   // 爆發速度
+    private static readonly GAMEOVER_SCAN_EXPAND_MAX = 0.5;    // 擴散最大（5 單位）
+    private static readonly GAMEOVER_SCAN_BURST_MAX = 1.2;     // 爆發最大（12 單位）
     // 7x9 點陣字模板（2格粗筆畫，1=有點，0=無點）
     private static readonly DOT_MATRIX_FONT: { [key: string]: number[][] } = {
         'G': [
@@ -487,8 +500,8 @@ export default class MainScene extends Phaser.Scene {
         // 判斷是否為手機裝置（觸控為主或螢幕較小）
         this.isMobile = this.sys.game.device.input.touch && window.innerWidth < 1024;
 
-        // 根據裝置設定預設網格倍率（手機 2X，電腦 3X）
-        this.gridScaleMultiplier = this.isMobile ? 2 : 3;
+        // 網格倍率統一預設 3X
+        this.gridScaleMultiplier = 3;
 
         const screenWidth = this.cameras.main.width;
         const screenHeight = this.cameras.main.height;
@@ -789,8 +802,9 @@ export default class MainScene extends Phaser.Scene {
 
     // 嘗試發動可用的技能
     private tryActivateSkills(now: number) {
-        // 如果正在受傷硬直，不能發動技能
+        // 如果正在受傷硬直或遊戲結束，不能發動技能
         if (this.isHurt) return;
+        if (this.gameOverActive) return;
 
         // 取得玩家擁有的主動技能
         const activeSkills = this.skillManager.getPlayerActiveSkills();
@@ -2523,6 +2537,7 @@ export default class MainScene extends Phaser.Scene {
 
     private handleKeyboardInput(delta: number) {
         if (!this.cursors) return;
+        if (this.gameOverActive) return; // 遊戲結束後禁止移動
 
         let dx = 0;
         let dy = 0;
@@ -2587,8 +2602,9 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private onPointerDown(pointer: Phaser.Input.Pointer) {
-        // 如果遊戲暫停，不處理點擊移動
+        // 如果遊戲暫停或結束，不處理點擊移動
         if (this.isPaused) return;
+        if (this.gameOverActive) return;
 
         // 檢查點擊是否在遊戲區域內
         if (!this.isPointerInGameArea(pointer)) {
@@ -3478,18 +3494,50 @@ export default class MainScene extends Phaser.Scene {
     private triggerGameOver() {
         if (this.gameOverActive) return; // 防止重複觸發
 
-        // 停止怪物生成和移動
+        // 停止怪物生成
         this.monsterManager.stopSpawning();
 
-        // 角色變灰並停止動畫
-        this.character.setTint(0x666666);
-        this.character.stop();
+        // 隱藏角色
+        this.character.setVisible(false);
+
+        // 隱藏所有怪物
+        this.monsterManager.hideAllMonsters();
+
+        // 隱藏 UI（HP 條、技能欄、經驗條等）
+        this.uiContainer.setVisible(false);
+
+        // 停止所有技能冷卻計時
+        this.skillCooldowns.clear();
 
         // 顯示 GAME OVER 點陣字
         this.showGameOver();
 
-        // 停止所有技能冷卻計時
-        this.skillCooldowns.clear();
+        // 啟動紅色呼吸掃光計時器（每 3 秒）
+        this.startGameOverBreathScan();
+    }
+
+    // 啟動 GAME OVER 紅色呼吸掃光
+    private startGameOverBreathScan() {
+        // 立即觸發第一次
+        this.triggerGameOverBreathScan();
+
+        // 每 5 秒觸發一次
+        this.time.addEvent({
+            delay: 5000,
+            callback: () => this.triggerGameOverBreathScan(),
+            loop: true
+        });
+    }
+
+    // 觸發紅色呼吸掃光（與升級/護盾掃光類似）
+    private triggerGameOverBreathScan() {
+        if (!this.gameOverActive) return;
+
+        this.gameOverBreathScan = {
+            phase: 'expand',
+            radius: 0,
+            targetRadius: this.gameBounds.height * 0.5 // 5 單位
+        };
     }
 
     // 護盾被擊中時的金色擴散光圈網格特效
@@ -4514,6 +4562,82 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
+    // 更新 GAME OVER 紅色呼吸掃光
+    private updateGameOverBreathScan() {
+        if (this.gameOverBreathScan.phase === 'idle') return;
+
+        const screenHeight = this.gameBounds.height;
+        const delta = this.game.loop.delta / 1000;
+        const ringWidth = screenHeight * MainScene.GAMEOVER_SCAN_WIDTH;
+
+        let speed = 0;
+        let colorFrom = MainScene.GAMEOVER_SCAN_COLOR;
+        let colorTo = 0xffffff;
+
+        switch (this.gameOverBreathScan.phase) {
+            case 'expand':
+                speed = MainScene.GAMEOVER_SCAN_EXPAND_SPEED;
+                this.gameOverBreathScan.radius += screenHeight * speed * delta;
+                colorFrom = MainScene.GAMEOVER_SCAN_COLOR;
+                colorTo = 0xffaaaa; // 淺紅
+
+                // 到達目標後轉為收縮
+                if (this.gameOverBreathScan.radius >= this.gameOverBreathScan.targetRadius) {
+                    this.gameOverBreathScan.phase = 'contract';
+                }
+                break;
+
+            case 'contract':
+                speed = MainScene.GAMEOVER_SCAN_CONTRACT_SPEED;
+                this.gameOverBreathScan.radius -= screenHeight * speed * delta;
+                colorFrom = 0xffffff; // 收縮時變白
+                colorTo = 0xffffff;
+
+                // 收縮到中心後轉為爆發
+                if (this.gameOverBreathScan.radius <= 0) {
+                    this.gameOverBreathScan.radius = 0;
+                    this.gameOverBreathScan.phase = 'burst';
+                    this.gameOverBreathScan.targetRadius = screenHeight * MainScene.GAMEOVER_SCAN_BURST_MAX;
+                }
+                break;
+
+            case 'burst':
+                speed = MainScene.GAMEOVER_SCAN_BURST_SPEED;
+                this.gameOverBreathScan.radius += screenHeight * speed * delta;
+                colorFrom = 0xffffff; // 爆發時從白開始
+                colorTo = 0x9944ff;   // 爆發變紫色
+
+                // 到達最大後結束
+                if (this.gameOverBreathScan.radius >= this.gameOverBreathScan.targetRadius) {
+                    this.gameOverBreathScan.phase = 'idle';
+                }
+                break;
+        }
+
+        // 對每個字元計算掃光亮度加成
+        if (this.gameOverBreathScan.radius > 0) {
+            const innerRadius = Math.max(0, this.gameOverBreathScan.radius - ringWidth / 2);
+            const outerRadius = this.gameOverBreathScan.radius + ringWidth / 2;
+
+            for (const hex of this.floorHexChars) {
+                const dx = hex.sprite.x - this.characterX;
+                const dy = hex.sprite.y - this.characterY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist >= innerRadius && dist <= outerRadius) {
+                    // 在掃光環內，計算亮度漸層（環中心最亮）
+                    const distFromRingCenter = Math.abs(dist - this.gameOverBreathScan.radius);
+                    const normalizedDist = distFromRingCenter / (ringWidth / 2);
+                    const intensity = 1 - normalizedDist;
+
+                    // 根據階段決定顏色過渡
+                    const scanColor = this.lerpTintColor(colorFrom, colorTo, intensity);
+                    hex.sprite.setTint(scanColor);
+                }
+            }
+        }
+    }
+
     // 生成地板隨機字元（空間定位用，只在可見區域附近生成）
     private spawnFloorHexChar() {
         if (this.floorHexChars.length >= MainScene.FLOOR_HEX_MAX) return;
@@ -4852,6 +4976,9 @@ export default class MainScene extends Phaser.Scene {
 
         // 更新升級藍色呼吸掃光
         this.updateLevelUpBreathScan();
+
+        // 更新 GAME OVER 紅色呼吸掃光
+        this.updateGameOverBreathScan();
     }
 
     // 更新圓形擴散掃光效果（從角色位置向外擴散）
@@ -5561,8 +5688,8 @@ export default class MainScene extends Phaser.Scene {
             this.updateSawBladeSpinVisual(delta);
         }
 
-        // 冷卻完成且不是暫停中，發動進階技能
-        if (progress >= 1 && !this.isPaused && !this.isHurt) {
+        // 冷卻完成且不是暫停中或遊戲結束，發動進階技能
+        if (progress >= 1 && !this.isPaused && !this.isHurt && !this.gameOverActive) {
             this.activateAdvancedSkill(equipped);
             this.advancedSkillCooldownTime = now;
         }
