@@ -1370,8 +1370,11 @@
     // 驗證碼產生（防竄改）
     const GAME_SALT = 'DDT_2024_HWUDI';
     function generateChecksum(type, name, score, level, timestamp) {
+      // 確保數字格式一致（避免浮點數精度問題）
+      const scoreStr = String(parseFloat(score) || 0);
+      const levelStr = String(parseFloat(level) || 0);
       // 簡單的混淆算法：將數據組合後計算特徵值
-      const data = `${type}|${name}|${score}|${level}|${timestamp}|${GAME_SALT}`;
+      const data = `${type}|${name}|${scoreStr}|${levelStr}|${timestamp}|${GAME_SALT}`;
       let hash = 0;
       for (let i = 0; i < data.length; i++) {
         const char = data.charCodeAt(i);
@@ -1651,7 +1654,18 @@
         promises.push(submitToSheet('damage', displayName, damageScore, school, level));
       }
 
-      await Promise.all(promises);
+      const results = await Promise.all(promises);
+      console.log('Submit results:', results);
+
+      // 檢查是否有失敗
+      const failed = results.filter(r => r && !r.success);
+      if (failed.length > 0) {
+        console.error('Some submissions failed:', failed);
+        alert('上傳失敗: ' + (failed[0]?.error || '未知錯誤'));
+        deathSubmit.disabled = false;
+        deathSubmit.innerHTML = '<i class="fa-solid fa-trophy"></i> 登錄排行榜';
+        return;
+      }
 
       // 也更新本地快取（供即時顯示）
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {

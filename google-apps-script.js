@@ -24,7 +24,10 @@ const SCORE_LIMITS = {
 
 // 驗證 checksum
 function verifyChecksum(type, name, score, level, timestamp, checksum) {
-  const data = `${type}|${name}|${score}|${level}|${timestamp}|${GAME_SALT}`;
+  // 確保數字格式一致（避免浮點數精度問題）
+  const scoreStr = String(parseFloat(score) || 0);
+  const levelStr = String(parseFloat(level) || 0);
+  const data = `${type}|${name}|${scoreStr}|${levelStr}|${timestamp}|${GAME_SALT}`;
   let hash = 0;
   for (let i = 0; i < data.length; i++) {
     const char = data.charCodeAt(i);
