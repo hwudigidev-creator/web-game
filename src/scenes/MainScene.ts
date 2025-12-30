@@ -68,6 +68,20 @@ export default class MainScene extends Phaser.Scene {
     private static readonly HEX_TINT_NORMAL = 0x1a5a1a;  // 暗駭客綠
     private static readonly HEX_TINT_HIGHLIGHT = 0xffffff; // 高亮白色
 
+    // 地圖邊緣紅色波浪警示
+    private edgeWaveChars: {
+        sprite: Phaser.GameObjects.Sprite;
+        x: number;
+        y: number;
+        phase: number;      // 波浪相位（0-1）
+        edge: 'top' | 'bottom' | 'left' | 'right';
+    }[] = [];
+    private edgeWavePool: Phaser.GameObjects.Sprite[] = [];
+    private static readonly EDGE_WAVE_TINT = 0xff3333;  // 紅色
+    private static readonly EDGE_WARN_DISTANCE = 0.15;   // 警示距離：15% 地圖寬/高
+    private static readonly EDGE_WAVE_ROWS = 5;          // 波浪行數
+    private lastEdgeWaveUpdate: number = 0;
+
     // 分身技能專用暗紫色
     private static readonly PHANTOM_COLOR = 0x5522aa;       // 主色：暗紫
     private static readonly PHANTOM_COLOR_LIGHT = 0x7744cc; // 輔色：稍亮暗紫
@@ -4800,8 +4814,142 @@ export default class MainScene extends Phaser.Scene {
         // 更新橫向掃光
         this.updateScanLine();
 
+        // 更新地圖邊緣波浪警示
+        this.updateEdgeWaves();
+
         // 更新 GAME OVER 點陣字閃爍
         this.updateGameOverFlicker();
+    }
+
+    // 取得或建立邊緣波浪 sprite
+    private getEdgeWaveSprite(char: string): Phaser.GameObjects.Sprite {
+        let sprite = this.edgeWavePool.pop();
+        if (!sprite) {
+            sprite = this.add.sprite(0, 0, `hex_${char}`);
+        } else {
+            sprite.setTexture(`hex_${char}`);
+            sprite.setVisible(true);
+            sprite.setActive(true);
+        }
+        sprite.setTint(MainScene.EDGE_WAVE_TINT);
+        return sprite;
+    }
+
+    // 釋放邊緣波浪 sprite 回物件池
+    private releaseEdgeWaveSprite(sprite: Phaser.GameObjects.Sprite) {
+        sprite.setVisible(false);
+        sprite.setActive(false);
+        this.edgeWavePool.push(sprite);
+    }
+
+    // 更新地圖邊緣紅色波浪警示
+    private updateEdgeWaves() {
+        if (this.gameOverActive) return; // GAME OVER 時不顯示
+
+        const now = this.time.now;
+        const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
+        const warnDistX = this.mapWidth * MainScene.EDGE_WARN_DISTANCE;
+        const warnDistY = this.mapHeight * MainScene.EDGE_WARN_DISTANCE;
+
+        // 計算玩家到各邊緣的距離
+        const distToLeft = this.characterX;
+        const distToRight = this.mapWidth - this.characterX;
+        const distToTop = this.characterY;
+        const distToBottom = this.mapHeight - this.characterY;
+
+        // 清除所有現有波浪
+        for (const wave of this.edgeWaveChars) {
+            this.releaseEdgeWaveSprite(wave.sprite);
+        }
+        this.edgeWaveChars = [];
+
+        // 波浪動畫相位（0-1 循環）
+        const wavePhase = (now % 2000) / 2000;
+
+        // 檢查各邊緣並生成波浪
+        const edges: { edge: 'top' | 'bottom' | 'left' | 'right'; dist: number; warnDist: number }[] = [
+            { edge: 'left', dist: distToLeft, warnDist: warnDistX },
+            { edge: 'right', dist: distToRight, warnDist: warnDistX },
+            { edge: 'top', dist: distToTop, warnDist: warnDistY },
+            { edge: 'bottom', dist: distToBottom, warnDist: warnDistY }
+        ];
+
+        for (const { edge, dist, warnDist } of edges) {
+            if (dist < warnDist) {
+                // 計算警示強度（越近越強）
+                const intensity = 1 - (dist / warnDist);
+                const rows = Math.ceil(MainScene.EDGE_WAVE_ROWS * intensity);
+
+                this.spawnEdgeWave(edge, rows, gridSize, wavePhase, intensity);
+            }
+        }
+    }
+
+    // 生成邊緣波浪
+    private spawnEdgeWave(
+        edge: 'top' | 'bottom' | 'left' | 'right',
+        rows: number,
+        gridSize: number,
+        wavePhase: number,
+        intensity: number
+    ) {
+        const skewOffset = gridSize * 0.25;
+
+        // 只在可見區域附近生成
+        const viewPadding = gridSize * 2;
+        const viewMinX = this.characterX - this.gameBounds.width / 2 - viewPadding;
+        const viewMaxX = this.characterX + this.gameBounds.width / 2 + viewPadding;
+        const viewMinY = this.characterY - this.gameBounds.height / 2 - viewPadding;
+        const viewMaxY = this.characterY + this.gameBounds.height / 2 + viewPadding;
+
+        for (let r = 0; r < rows; r++) {
+            // 波浪效果：每行有不同的相位偏移
+            const rowPhase = (wavePhase + r * 0.15) % 1;
+            const waveAlpha = (0.3 + 0.5 * Math.sin(rowPhase * Math.PI * 2)) * intensity;
+
+            if (edge === 'left' || edge === 'right') {
+                // 左右邊緣：垂直排列
+                const baseX = edge === 'left' ? r * gridSize : this.mapWidth - (r + 1) * gridSize;
+                const startRow = Math.floor(viewMinY / gridSize);
+                const endRow = Math.ceil(viewMaxY / gridSize);
+
+                for (let row = startRow; row <= endRow; row++) {
+                    const y = row * gridSize + gridSize / 2;
+                    const x = baseX + gridSize / 2 + row * skewOffset;
+
+                    if (y >= 0 && y <= this.mapHeight) {
+                        const char = this.getRandomHexChar();
+                        const sprite = this.getEdgeWaveSprite(char);
+                        sprite.setPosition(x, y);
+                        sprite.setScale(gridSize / 80);
+                        sprite.setAlpha(waveAlpha);
+                        this.floorHexContainer.add(sprite);
+                        this.edgeWaveChars.push({ sprite, x, y, phase: rowPhase, edge });
+                    }
+                }
+            } else {
+                // 上下邊緣：水平排列
+                const baseY = edge === 'top' ? r * gridSize : this.mapHeight - (r + 1) * gridSize;
+                const startCol = Math.floor(viewMinX / gridSize);
+                const endCol = Math.ceil(viewMaxX / gridSize);
+
+                for (let col = startCol; col <= endCol; col++) {
+                    const baseRow = Math.floor(baseY / gridSize);
+                    const x = col * gridSize + gridSize / 2 + baseRow * skewOffset;
+                    const y = baseY + gridSize / 2;
+
+                    if (x >= 0 && x <= this.mapWidth) {
+                        const char = this.getRandomHexChar();
+                        const sprite = this.getEdgeWaveSprite(char);
+                        sprite.setPosition(x, y);
+                        sprite.setScale(gridSize / 80);
+                        sprite.setAlpha(waveAlpha);
+                        this.floorHexContainer.add(sprite);
+                        this.edgeWaveChars.push({ sprite, x, y, phase: rowPhase, edge });
+                    }
+                }
+            }
+        }
     }
 
     // 顯示 GAME OVER 點陣字
