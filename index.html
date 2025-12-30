@@ -144,7 +144,7 @@
       display: none;
       justify-content: center;
       align-items: center;
-      z-index: 1000;
+      z-index: 10000;
       opacity: 0;
       transition: opacity 0.3s ease;
       pointer-events: none;
@@ -153,6 +153,11 @@
     .popup-overlay.visible {
       display: flex;
       opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* 阻止點擊穿透到下方遊戲 */
+    .popup-overlay.visible * {
       pointer-events: auto;
     }
 
@@ -1079,11 +1084,16 @@
       });
     });
 
-    // 點擊背景關閉
+    // 點擊背景關閉，並阻止事件穿透到遊戲
     document.querySelectorAll('.popup-overlay').forEach(popup => {
       popup.addEventListener('click', (e) => {
+        e.stopPropagation();
         if (e.target === popup) closePopup(popup);
       });
+      popup.addEventListener('pointerdown', (e) => e.stopPropagation());
+      popup.addEventListener('pointerup', (e) => e.stopPropagation());
+      popup.addEventListener('touchstart', (e) => e.stopPropagation());
+      popup.addEventListener('touchend', (e) => e.stopPropagation());
     });
 
     // ===== 排行榜功能 =====
