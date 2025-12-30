@@ -78,8 +78,8 @@ export default class MainScene extends Phaser.Scene {
     }[] = [];
     private edgeWavePool: Phaser.GameObjects.Sprite[] = [];
     private static readonly EDGE_WAVE_TINT = 0xff3333;  // 紅色
-    private static readonly EDGE_WARN_DISTANCE = 0.15;   // 警示距離：15% 地圖寬/高
-    private static readonly EDGE_WAVE_ROWS = 5;          // 波浪行數
+    private static readonly EDGE_WARN_DISTANCE = 2.0;    // 警示距離：2 倍螢幕寬/高
+    private static readonly EDGE_WAVE_ROWS = 8;          // 波浪行數
     private lastEdgeWaveUpdate: number = 0;
 
     // 分身技能專用暗紫色
@@ -4848,8 +4848,9 @@ export default class MainScene extends Phaser.Scene {
 
         const now = this.time.now;
         const gridSize = this.gameBounds.height * MainScene.FLOOR_HEX_GRID_SIZE;
-        const warnDistX = this.mapWidth * MainScene.EDGE_WARN_DISTANCE;
-        const warnDistY = this.mapHeight * MainScene.EDGE_WARN_DISTANCE;
+        // 警示距離用螢幕尺寸計算（不是地圖尺寸）
+        const warnDistX = this.gameBounds.width * MainScene.EDGE_WARN_DISTANCE;
+        const warnDistY = this.gameBounds.height * MainScene.EDGE_WARN_DISTANCE;
 
         // 計算玩家到各邊緣的距離
         const distToLeft = this.characterX;
