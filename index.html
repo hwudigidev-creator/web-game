@@ -1491,6 +1491,10 @@
       fetchLeaderboard(); // 從 Google Sheets 載入（完成後會自動 render）
     });
 
+    // 死亡狀態追蹤（用於點擊遊戲區重新打開彈窗）
+    let isPlayerDead = false;
+    let lastDeathData = null;
+
     // 監聯遊戲結束事件以更新排行榜
     window.addEventListener('gameRecordUpdate', (e) => {
       const { type, name, school, score, level, rawScore } = e.detail;
@@ -1598,7 +1602,13 @@
     });
 
     // 顯示死亡彈出視窗
-    function showDeathPopup(time, level, damage) {
+    function showDeathPopup(time, level, damage, isReopen = false) {
+      // 保存死亡資訊供重新打開用
+      if (!isReopen) {
+        lastDeathData = { time, level, damage };
+        isPlayerDead = true;
+      }
+
       deathTime.textContent = time;
       // 顯示等級含經驗百分比，例如 75.30 顯示為 "Lv.75 (30%)"
       const lvInt = Math.floor(level);
@@ -1606,9 +1616,12 @@
       deathLevel.textContent = expPercent > 0 ? `Lv.${lvInt} (${expPercent}%)` : `Lv.${lvInt}`;
       deathLevel.dataset.rawLevel = level; // 存原始值供提交用
       deathDamage.textContent = damage;
-      deathNickname.value = '';
-      deathSchoolInput.value = '';
-      selectedSchool = '';
+      // 重新打開時保留已輸入的暱稱和陣營
+      if (!isReopen) {
+        deathNickname.value = '';
+        deathSchoolInput.value = '';
+        selectedSchool = '';
+      }
       openPopup(deathPopup);
     }
 
@@ -1657,6 +1670,9 @@
         }));
       }
 
+      // 重置死亡狀態
+      isPlayerDead = false;
+      lastDeathData = null;
       closePopup(deathPopup);
       // 重新載入遊戲
       setTimeout(() => location.reload(), 500);
@@ -1664,14 +1680,24 @@
 
     // 跳過
     deathSkip.addEventListener('click', () => {
+      // 重置死亡狀態
+      isPlayerDead = false;
+      lastDeathData = null;
       closePopup(deathPopup);
       setTimeout(() => location.reload(), 500);
     });
 
-    // 監聽遊戲死亡事件
+    // 監聯遊戲死亡事件
     window.addEventListener('playerDeath', (e) => {
       const { survivalTime, level, totalDamage } = e.detail;
       showDeathPopup(survivalTime, level, totalDamage);
+    });
+
+    // 點擊遊戲區域重新打開死亡彈窗
+    document.getElementById('app').addEventListener('click', () => {
+      if (isPlayerDead && lastDeathData && deathPopup.style.display !== 'flex') {
+        showDeathPopup(lastDeathData.time, lastDeathData.level, lastDeathData.damage, true);
+      }
     });
 
     // ===== 全螢幕功能 =====
