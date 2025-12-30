@@ -58,18 +58,23 @@ function doGet(e) {
     const action = e.parameter.action;
 
     if (action === 'add') {
+      // 保留原始字串用於 checksum 驗證
+      const scoreRaw = e.parameter.score || '0';
+      const levelRaw = e.parameter.level || '0';
+      const tsRaw = e.parameter.ts || '0';
+
       const params = {
         name: e.parameter.name,
         school: e.parameter.school || '',
         type: e.parameter.type,
-        score: parseFloat(e.parameter.score) || 0,
-        level: parseInt(e.parameter.level) || 0,
-        timestamp: parseInt(e.parameter.ts) || 0,
+        score: parseFloat(scoreRaw) || 0,
+        level: parseFloat(levelRaw) || 0,
+        timestamp: parseInt(tsRaw) || 0,
         checksum: e.parameter.cs || ''
       };
 
-      // 驗證 checksum
-      if (!verifyChecksum(params.type, params.name, params.score, params.level, params.timestamp, params.checksum)) {
+      // 驗證 checksum（使用原始字串）
+      if (!verifyChecksum(params.type, params.name, scoreRaw, levelRaw, tsRaw, params.checksum)) {
         return ContentService
           .createTextOutput(JSON.stringify({ success: false, error: 'Invalid checksum' }))
           .setMimeType(ContentService.MimeType.JSON);
