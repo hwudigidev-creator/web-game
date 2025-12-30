@@ -2480,6 +2480,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private setSelectedSkill(index: number) {
+        if (this.popupPaused) return; // 彈出視窗時不處理
+
         // 取消之前的選中狀態
         this.updateSkillCardStyle(this.selectedSkillIndex, false);
 
@@ -2516,6 +2518,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private confirmSkillSelection() {
+        if (this.popupPaused) return; // 彈出視窗時不處理
+
         // 處理混合技能選擇模式（有自己的 isSkillSelecting 檢查）
         if (this.mixedSkillTypes.length > 0) {
             this.confirmMixedSkillSelection();
