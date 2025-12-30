@@ -266,6 +266,7 @@ export default class MainScene extends Phaser.Scene {
     // 技能選擇面板
     private skillPanelContainer!: Phaser.GameObjects.Container;
     private isPaused: boolean = false;
+    private popupPaused: boolean = false; // UI 彈出視窗暫停
     private isSkillSelecting: boolean = false; // 防止重複點擊
     private skillOptions: Phaser.GameObjects.Container[] = [];
     // 技能選擇按鍵 (1, 2, 3)
@@ -276,6 +277,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 遊戲計時器
     private gameTimer: number = 0; // 遊戲進行時間（毫秒）
+    private totalDamageReceived: number = 0; // 累計受到的傷害
     private timerText!: Phaser.GameObjects.Text;
     private selectedSkillIndex: number = 0; // 當前選中的技能索引
     private currentSkillChoices: SkillDefinition[] = []; // 當前可選的技能
@@ -636,6 +638,11 @@ export default class MainScene extends Phaser.Scene {
             this.monsterManager.setGridScaleMultiplier(e.detail.scale);
         }) as EventListener);
 
+        // 監聽 UI 彈出視窗狀態變更（暫停/恢復遊戲）
+        window.addEventListener('popupStateChange', ((e: CustomEvent) => {
+            this.popupPaused = e.detail.open;
+        }) as EventListener);
+
         // 把角色容器加入 UI 層，深度高於網格（50）
         this.characterContainer.setDepth(60);
         this.characterContainer.setMask(geometryMask); // 套用遊戲區域遮罩
@@ -716,8 +723,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     update(_time: number, delta: number) {
-        // 如果遊戲暫停，只處理技能選擇面板的按鍵和必要的 UI 更新
-        if (this.isPaused) {
+        // 如果遊戲暫停或彈出視窗開啟，只處理必要的 UI 更新
+        if (this.isPaused || this.popupPaused) {
             // 純視覺效果可以繼續（UI 流動動畫）
             this.updateHpBarFlow(delta);
             this.updateShieldBarFlow(delta);
@@ -802,9 +809,10 @@ export default class MainScene extends Phaser.Scene {
 
     // 嘗試發動可用的技能
     private tryActivateSkills(now: number) {
-        // 如果正在受傷硬直或遊戲結束，不能發動技能
+        // 如果正在受傷硬直或遊戲結束或彈出視窗暫停，不能發動技能
         if (this.isHurt) return;
         if (this.gameOverActive) return;
+        if (this.popupPaused) return;
 
         // 取得玩家擁有的主動技能
         const activeSkills = this.skillManager.getPlayerActiveSkills();
@@ -2404,6 +2412,7 @@ export default class MainScene extends Phaser.Scene {
 
     private handleSkillPanelInput() {
         if (!this.keyOne) return;
+        if (this.popupPaused) return; // 彈出視窗時不處理技能選擇
 
         // 計算選項數量（混合模式、進階模式、一般模式）
         let numChoices: number;
@@ -2538,6 +2547,7 @@ export default class MainScene extends Phaser.Scene {
     private handleKeyboardInput(delta: number) {
         if (!this.cursors) return;
         if (this.gameOverActive) return; // 遊戲結束後禁止移動
+        if (this.popupPaused) return; // 彈出視窗時禁止移動
 
         let dx = 0;
         let dy = 0;
@@ -2602,9 +2612,10 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private onPointerDown(pointer: Phaser.Input.Pointer) {
-        // 如果遊戲暫停或結束，不處理點擊移動
+        // 如果遊戲暫停或結束或彈出視窗，不處理點擊移動
         if (this.isPaused) return;
         if (this.gameOverActive) return;
+        if (this.popupPaused) return;
 
         // 檢查點擊是否在遊戲區域內
         if (!this.isPointerInGameArea(pointer)) {
@@ -2617,7 +2628,7 @@ export default class MainScene extends Phaser.Scene {
 
     private onPointerMove(pointer: Phaser.Input.Pointer) {
         // 只有在按住時才更新方向
-        if (!this.isPointerDown || this.isPaused) return;
+        if (!this.isPointerDown || this.isPaused || this.popupPaused) return;
 
         // 檢查是否仍在遊戲區域內
         if (this.isPointerInGameArea(pointer)) {
@@ -3419,6 +3430,7 @@ export default class MainScene extends Phaser.Scene {
         // 扣除剩餘傷害到 HP
         if (remainingDamage > 0) {
             this.currentHp -= remainingDamage;
+            this.totalDamageReceived += remainingDamage; // 累計受傷
 
             // 確保 HP 不低於 0
             if (this.currentHp < 0) {
@@ -3512,8 +3524,24 @@ export default class MainScene extends Phaser.Scene {
         // 顯示 GAME OVER 點陣字
         this.showGameOver();
 
-        // 啟動紅色呼吸掃光計時器（每 3 秒）
+        // 啟動紅色呼吸掃光計時器（每 5 秒）
         this.startGameOverBreathScan();
+
+        // 發送死亡事件到 UI 層
+        const minutes = Math.floor(this.gameTimer / 60000);
+        const seconds = Math.floor((this.gameTimer % 60000) / 1000);
+        const survivalTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+        // 延遲一點時間再顯示死亡彈出視窗，讓玩家看到 GAME OVER
+        this.time.delayedCall(2000, () => {
+            window.dispatchEvent(new CustomEvent('playerDeath', {
+                detail: {
+                    survivalTime,
+                    level: this.currentLevel,
+                    totalDamage: Math.floor(this.totalDamageReceived)
+                }
+            }));
+        });
     }
 
     // 啟動 GAME OVER 紅色呼吸掃光
@@ -5689,7 +5717,7 @@ export default class MainScene extends Phaser.Scene {
         }
 
         // 冷卻完成且不是暫停中或遊戲結束，發動進階技能
-        if (progress >= 1 && !this.isPaused && !this.isHurt && !this.gameOverActive) {
+        if (progress >= 1 && !this.isPaused && !this.popupPaused && !this.isHurt && !this.gameOverActive) {
             this.activateAdvancedSkill(equipped);
             this.advancedSkillCooldownTime = now;
         }
@@ -7586,7 +7614,7 @@ export default class MainScene extends Phaser.Scene {
             delay: skillInterval,
             repeat: repeatCount,
             callback: () => {
-                if (this.isPaused) return; // 暫停時不執行
+                if (this.isPaused || this.popupPaused) return; // 暫停時不執行
                 const phantom = this.phantoms.find(p => p.id === phantomId);
                 if (!phantom) return;
 
@@ -7611,7 +7639,7 @@ export default class MainScene extends Phaser.Scene {
             delay: tauntCycle,
             repeat: Math.floor(totalDuration / tauntCycle),
             callback: () => {
-                if (this.isPaused) return; // 暫停時不執行
+                if (this.isPaused || this.popupPaused) return; // 暫停時不執行
                 const phantom = this.phantoms.find(p => p.id === phantomId);
                 if (!phantom) return;
 
@@ -7620,7 +7648,7 @@ export default class MainScene extends Phaser.Scene {
 
                 // 2 秒後關閉嘲諷
                 this.time.delayedCall(tauntDuration, () => {
-                    if (this.isPaused) return; // 暫停時不執行
+                    if (this.isPaused || this.popupPaused) return; // 暫停時不執行
                     // 只有當這個分身還存在時才清除嘲諷
                     const stillExists = this.phantoms.find(p => p.id === phantomId);
                     if (stillExists) {
@@ -7652,7 +7680,7 @@ export default class MainScene extends Phaser.Scene {
                 delay: 500, // 0.5 秒
                 loop: true,
                 callback: () => {
-                    if (this.isPaused) return;
+                    if (this.isPaused || this.popupPaused) return;
                     if (this.phantoms.length === 0) return;
 
                     // 計算傷害

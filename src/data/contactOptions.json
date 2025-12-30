@@ -1,0 +1,40 @@
+{
+  "schools": [
+    { "value": "nhush", "label": "國立新化高中" },
+    { "value": "tnfsh", "label": "國立臺南第一高級中學" },
+    { "value": "tnssh", "label": "國立臺南女子高級中學" },
+    { "value": "tngs", "label": "國立臺南二中" },
+    { "value": "tnvs", "label": "國立臺南高商" },
+    { "value": "tnhcvs", "label": "國立臺南高工" },
+    { "value": "ptvs", "label": "國立北門農工" },
+    { "value": "cysh", "label": "國立嘉義高中" },
+    { "value": "cygsh", "label": "國立嘉義女中" },
+    { "value": "other", "label": "其他學校" }
+  ],
+  "careerTypes": [
+    {
+      "value": "animation",
+      "label": "動畫大師",
+      "description": "2/3D 動畫製作",
+      "icon": "fa-solid fa-film"
+    },
+    {
+      "value": "game",
+      "label": "遊戲先知",
+      "description": "遊戲企劃/互動/程式設計",
+      "icon": "fa-solid fa-gamepad"
+    },
+    {
+      "value": "director",
+      "label": "超級導演",
+      "description": "影視/特效合成",
+      "icon": "fa-solid fa-video"
+    },
+    {
+      "value": "leader",
+      "label": "靈魂領導",
+      "description": "AI賦能/架構規劃/團隊協作",
+      "icon": "fa-solid fa-brain"
+    }
+  ]
+}
