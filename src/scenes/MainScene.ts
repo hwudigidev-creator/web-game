@@ -492,6 +492,30 @@ export default class MainScene extends Phaser.Scene {
     private gameBgm!: Phaser.Sound.BaseSound;
     private currentBgmKey: string = '';
 
+    // Window 事件處理器（用於場景重啟時清理）
+    private gridScaleHandler?: EventListener;
+    private popupStateHandler?: EventListener;
+    private suicideHandler?: EventListener;
+    private restartHandler?: EventListener;
+
+    // 回血物品掉落系統（菁英怪死亡時掉落，永久存在直到拾取）
+    private healingItems: {
+        id: number;
+        x: number;           // 世界座標 X
+        y: number;           // 世界座標 Y
+        sprite: Phaser.GameObjects.Sprite;
+        floatPhase: number;  // 浮動動畫相位
+    }[] = [];
+    private nextHealingItemId: number = 0;
+    private healingItemContainer!: Phaser.GameObjects.Container;
+    private static readonly HEALING_ITEM_HEAL_PERCENT = 0.1;   // 每個回復 10% HP
+    private static readonly HEALING_ITEM_DROP_COUNT_MIN = 2;   // 最少掉落 2 個
+    private static readonly HEALING_ITEM_DROP_COUNT_MAX = 3;   // 最多掉落 3 個
+    private static readonly HEALING_ITEM_SCATTER_RADIUS = 0.5; // 散落半徑（單位）
+    private static readonly HEALING_ITEM_SIZE = 0.03;          // 物品大小（畫面高度比例）
+    // 拾取範圍（單位，1 單位 = 畫面高度 10%）
+    private basePickupRange: number = 1;    // 基礎拾取範圍（技能加成從 skillManager 取得）
+
     // 技能範圍格子系統（只覆蓋遊玩區域）
     private skillGridContainer!: Phaser.GameObjects.Container;
     private skillGridCells: Phaser.GameObjects.Rectangle[] = [];
@@ -617,6 +641,10 @@ export default class MainScene extends Phaser.Scene {
         // 建立角色容器（會隨鏡頭移動，但獨立於 worldContainer 以便設定深度）
         this.characterContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
 
+        // 建立回血物品容器（隨鏡頭移動，深度在角色下方、怪物上方）
+        this.healingItemContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
+        this.healingItemContainer.setDepth(52); // 在角色(60)之下、怪物網格(50)之上
+
         // 建立護盾光環圖形（在角色下方）
         this.shieldAuraGraphics = this.add.graphics();
         this.characterContainer.add(this.shieldAuraGraphics);
@@ -642,6 +670,7 @@ export default class MainScene extends Phaser.Scene {
         );
         const geometryMask = clipMask.createGeometryMask();
         this.worldContainer.setMask(geometryMask);
+        this.healingItemContainer.setMask(geometryMask); // 回血物品也套用遮罩
 
         // 建立 UI 容器（固定在螢幕上，不隨鏡頭移動）
         this.uiContainer = this.add.container(0, 0);
@@ -658,6 +687,10 @@ export default class MainScene extends Phaser.Scene {
         this.monsterManager.setGridScaleMultiplier(this.gridScaleMultiplier);
         // 套用遮罩到怪物網格
         this.monsterManager.setClipMask(geometryMask);
+        // 設定怪物死亡回調（處理掉落物）
+        this.monsterManager.setOnMonsterKilled((monster) => {
+            this.handleMonsterDeath(monster);
+        });
 
         // 建立技能範圍格子覆蓋層（放在 UI 層）
         this.createSkillGrid();
@@ -667,16 +700,31 @@ export default class MainScene extends Phaser.Scene {
         this.initLineEffectPool(); // LINE 紋理池（打擊火花用）
         this.initCircleLineEffectPool(); // CIRCLE_LINE 紋理池（圓形邊緣線用）
 
+        // 清理舊的事件監聽器（場景重啟時）
+        if (this.gridScaleHandler) {
+            window.removeEventListener('gridscalechange', this.gridScaleHandler);
+        }
+        if (this.popupStateHandler) {
+            window.removeEventListener('popupStateChange', this.popupStateHandler);
+        }
+        if (this.suicideHandler) {
+            window.removeEventListener('playerSuicide', this.suicideHandler);
+        }
+        if (this.restartHandler) {
+            window.removeEventListener('gameRestart', this.restartHandler);
+        }
+
         // 監聯網格倍率變更事件
-        window.addEventListener('gridscalechange', ((e: CustomEvent) => {
+        this.gridScaleHandler = ((e: CustomEvent) => {
             this.gridScaleMultiplier = e.detail.scale;
             this.recreateSkillGrid();
             // 同步更新怪物網格倍率
             this.monsterManager.setGridScaleMultiplier(e.detail.scale);
-        }) as EventListener);
+        }) as EventListener;
+        window.addEventListener('gridscalechange', this.gridScaleHandler);
 
         // 監聯 UI 彈出視窗狀態變更（暫停/恢復遊戲）
-        window.addEventListener('popupStateChange', ((e: CustomEvent) => {
+        this.popupStateHandler = ((e: CustomEvent) => {
             const wasPopupPaused = this.popupPaused;
             this.popupPaused = e.detail.open;
 
@@ -695,7 +743,25 @@ export default class MainScene extends Phaser.Scene {
                     this.advancedSkillCooldownTime += pausedDuration;
                 }
             }
-        }) as EventListener);
+        }) as EventListener;
+        window.addEventListener('popupStateChange', this.popupStateHandler);
+
+        // 監聯自殺事件（快速結束遊戲登入排行榜）
+        this.suicideHandler = (() => {
+            if (!this.gameOverActive) {
+                this.triggerGameOver();
+            }
+        }) as EventListener;
+        window.addEventListener('playerSuicide', this.suicideHandler);
+
+        // 監聯重新開始事件（直接重啟遊戲，不回標題畫面）
+        this.restartHandler = (() => {
+            this.cleanupBeforeRestart();
+            // 設置標誌，讓重啟後的場景跳過 reveal 動畫
+            this.registry.set('skipReveal', true);
+            this.scene.restart();
+        }) as EventListener;
+        window.addEventListener('gameRestart', this.restartHandler);
 
         // 把角色容器加入 UI 層，深度高於網格（50）
         this.characterContainer.setDepth(60);
@@ -714,6 +780,15 @@ export default class MainScene extends Phaser.Scene {
         // 監聽來自 GridScene 的揭露事件
         this.registry.events.on('reveal-update', this.updateRevealMask, this);
         this.registry.events.on('reveal-complete', this.onRevealComplete, this);
+
+        // 檢查是否需要跳過 reveal 動畫（重啟時）
+        if (this.registry.get('skipReveal')) {
+            this.registry.set('skipReveal', false); // 清除標誌
+            // 延遲一幀後直接啟動（確保場景完全初始化）
+            this.time.delayedCall(100, () => {
+                this.onRevealComplete();
+            });
+        }
 
         // 監聽點擊/觸控事件（按住持續移動）
         this.input.on('pointerdown', this.onPointerDown, this);
@@ -910,6 +985,9 @@ export default class MainScene extends Phaser.Scene {
             this.takeDamage(monsterResult.damage, monsterResult.hitMonsters);
         }
 
+        // 更新回血物品（浮動動畫、過期移除、拾取檢測）
+        this.updateHealingItems(delta);
+
         // 嘗試發動技能攻擊
         this.tryActivateSkills(now);
     }
@@ -1080,6 +1158,7 @@ export default class MainScene extends Phaser.Scene {
             if (result.totalExp > 0) {
                 this.addExp(result.totalExp);
             }
+            // 菁英怪掉落回血物品
 
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
@@ -1331,7 +1410,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 編碼者：對周圍敵人造成傷害
-    // 起始範圍 2 單位，每級 +0.5 單位（Lv.0=2單位，Lv.5=4.5單位）
+    // 起始範圍 3 單位，每級 +0.5 單位（Lv.0=3單位，Lv.5=5.5單位）
     // 起始傷害 2 單位，每級 +2 單位（Lv.0=2單位，Lv.5=12單位）- 傷害 x2、冷卻 2 秒
     private activateCoder(skill: PlayerSkill) {
         const monsters = this.monsterManager.getMonsters();
@@ -1340,8 +1419,8 @@ export default class MainScene extends Phaser.Scene {
         // 1 單位 = 畫面高度 10%
         const unitSize = this.gameBounds.height * 0.1;
 
-        // 範圍：2 單位 + 每級 0.5 單位（Lv.0=2單位，Lv.5=4.5單位）
-        const rangeUnits = 2 + skill.level * 0.5;
+        // 範圍：3 單位 + 每級 0.5 單位（Lv.0=3單位，Lv.5=5.5單位）
+        const rangeUnits = 3 + skill.level * 0.5;
         const range = unitSize * rangeUnits;
 
         // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
@@ -1385,6 +1464,7 @@ export default class MainScene extends Phaser.Scene {
             if (result.totalExp > 0) {
                 this.addExp(result.totalExp);
             }
+            // 菁英怪掉落回血物品
 
             // 擊中 10 隻以上觸發畫面震動
             this.shakeScreen(hitMonsters.length);
@@ -1473,7 +1553,7 @@ export default class MainScene extends Phaser.Scene {
                 if (result.totalExp > 0) {
                     this.addExp(result.totalExp);
                 }
-
+    
                 // 擊中多隻觸發畫面震動
                 this.shakeScreen(hitMonsters.length);
 
@@ -1593,7 +1673,7 @@ export default class MainScene extends Phaser.Scene {
                     if (result.totalExp > 0) {
                         this.addExp(result.totalExp);
                     }
-
+        
                     this.shakeScreen(hitMonsters.length);
 
                     for (const m of hitMonstersData) {
@@ -2590,10 +2670,10 @@ export default class MainScene extends Phaser.Scene {
         this.displayedHp = this.currentHp;
 
         // 更新怪物管理器的玩家等級（影響新生成怪物的血量）
-        const shouldSpawnBoss = this.monsterManager.setPlayerLevel(this.currentLevel);
-        if (shouldSpawnBoss) {
-            // 每 10 級生成 BOSS
-            this.monsterManager.spawnBoss(this.cameraOffsetX, this.cameraOffsetY);
+        const shouldSpawnElite = this.monsterManager.setPlayerLevel(this.currentLevel);
+        if (shouldSpawnElite) {
+            // 每 10 級生成菁英怪
+            this.monsterManager.spawnElite(this.cameraOffsetX, this.cameraOffsetY);
         }
 
         // 更新等級顯示
@@ -3015,6 +3095,12 @@ export default class MainScene extends Phaser.Scene {
 
         // 同步移動角色容器
         this.characterContainer.setPosition(
+            this.gameBounds.x - this.cameraOffsetX,
+            this.gameBounds.y - this.cameraOffsetY
+        );
+
+        // 同步移動回血物品容器
+        this.healingItemContainer.setPosition(
             this.gameBounds.x - this.cameraOffsetX,
             this.gameBounds.y - this.cameraOffsetY
         );
@@ -6253,7 +6339,7 @@ export default class MainScene extends Phaser.Scene {
                 if (hitMonsters.length > 0) {
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
-
+        
                     // 打擊火花（藍色，靈魂渲染系）
                     for (const pos of hitPositions) {
                         this.showHitSparkEffect(pos.x, pos.y, 0x4488ff, currentAngle);
@@ -6391,7 +6477,7 @@ export default class MainScene extends Phaser.Scene {
                 // 造成傷害
                 const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                 if (result.totalExp > 0) this.addExp(result.totalExp);
-
+    
                 // 被炸到的怪物噴出爆炸火花（紫色）
                 for (const pos of hitPositions) {
                     const screenPos = this.worldToScreen(pos.x, pos.y);
@@ -6842,7 +6928,7 @@ export default class MainScene extends Phaser.Scene {
                         const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                         const result = this.monsterManager.damageMonsters([monster.id], finalDamage);
                         if (result.totalExp > 0) this.addExp(result.totalExp);
-
+            
                         // 擊退（1 單位）
                         const sawKnockback = this.gameBounds.height * 0.1;
                         this.monsterManager.knockbackMonsters([monster.id], this.characterX, this.characterY, sawKnockback);
@@ -6926,6 +7012,272 @@ export default class MainScene extends Phaser.Scene {
         this.dismissAllPhantoms(true);
     }
 
+    // 場景重啟前清理（回收物件池、重置狀態）
+    private cleanupBeforeRestart() {
+        // 重置怪物系統
+        this.monsterManager.reset();
+
+        // 重置技能系統
+        this.skillManager.reset();
+
+        // 清除進階技能效果（輪鋸、井字線、分身）
+        this.clearAdvancedSkillEffects();
+
+        // 停用零信任防禦協定
+        this.deactivateZeroTrust();
+
+        // 隱藏輪鋸 Sprites（不 destroy，讓 scene.restart 處理）
+        for (const blade of this.sawBladeSprites) {
+            blade.outer.setVisible(false);
+            blade.inner.setVisible(false);
+        }
+
+        // 重置輪鋸狀態
+        this.sawBladeAngle = 0;
+        this.sawBladeSpinAngle = 0;
+        this.sawBladeLastHitTime.clear();
+        this.currentSawBladePositions = [];
+
+        // 回收技能特效物件池（隱藏所有活躍的特效）
+        for (const sprite of this.skillEffectPool) {
+            sprite.setVisible(false);
+            sprite.setActive(false);
+        }
+        for (const sprite of this.lineEffectPool) {
+            sprite.setVisible(false);
+            sprite.setActive(false);
+        }
+        for (const sprite of this.circleLineEffectPool) {
+            sprite.setVisible(false);
+            sprite.setActive(false);
+        }
+
+        // 回收地板 Hex 物件池
+        for (const sprite of this.floorHexPool) {
+            sprite.setVisible(false);
+            sprite.setActive(false);
+        }
+
+        // 清除回血物品
+        for (const item of this.healingItems) {
+            item.sprite.destroy();
+        }
+        this.healingItems = [];
+        this.nextHealingItemId = 0;
+
+        // 隱藏角色
+        if (this.character) {
+            this.character.setVisible(false);
+        }
+
+        // 停止 BGM
+        if (this.gameBgm && this.gameBgm.isPlaying) {
+            this.gameBgm.stop();
+        }
+
+        // 重置遊戲狀態標誌
+        this.gameOverActive = false;
+        this.isHurt = false;
+        this.isAttacking = false;
+        this.popupPaused = false;
+        this.isPaused = false;
+
+        // 清空技能冷卻
+        this.skillCooldowns.clear();
+
+        // 重置遊戲計時器
+        this.gameTimer = 0;
+
+        // 重置玩家狀態
+        this.currentLevel = 0;
+        this.currentExp = 0;
+        this.currentHp = 200;
+        this.currentShield = 0;
+        this.totalDamageReceived = 0;
+
+        // 清空 GAME OVER 字樣
+        for (const sprite of this.gameOverSprites) {
+            sprite.setVisible(false);
+        }
+
+        // 顯示 UI 容器（遊戲結束時會隱藏）
+        if (this.uiContainer) {
+            this.uiContainer.setVisible(true);
+        }
+
+        // 重置掃光效果
+        this.scanLineX = -1;
+        this.scanLineActive = false;
+        this.circularScanRadius = 0;
+        this.circularScanActive = false;
+        this.damageScanRings = [];
+        this.shieldBreathScan = { phase: 'idle', radius: 0, targetRadius: 0 };
+        this.levelUpBreathScan = { phase: 'idle', radius: 0, targetRadius: 0 };
+        this.gameOverBreathScan = { phase: 'idle', radius: 0, targetRadius: 0 };
+
+        // 清空技能選項面板
+        if (this.skillPanelContainer) {
+            this.skillPanelContainer.setVisible(false);
+        }
+
+        // 清空技能資訊面板
+        if (this.skillInfoPanel) {
+            this.skillInfoPanel.setVisible(false);
+        }
+    }
+
+    // ========== 回血物品系統 ==========
+
+    // 菁英怪死亡時生成回血物品（2-3 個散落在死亡位置附近）
+    private spawnHealingItems(worldX: number, worldY: number) {
+        const dropCount = Phaser.Math.Between(
+            MainScene.HEALING_ITEM_DROP_COUNT_MIN,
+            MainScene.HEALING_ITEM_DROP_COUNT_MAX
+        );
+        const unitSize = this.gameBounds.height * 0.1;
+        const scatterRadius = MainScene.HEALING_ITEM_SCATTER_RADIUS * unitSize;
+        const itemSize = MainScene.HEALING_ITEM_SIZE * this.gameBounds.height;
+
+        for (let i = 0; i < dropCount; i++) {
+            // 隨機散落位置（圓形分佈）
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * scatterRadius;
+            const itemX = worldX + Math.cos(angle) * radius;
+            const itemY = worldY + Math.sin(angle) * radius;
+
+            // 創建愛心形狀的 sprite（使用 Graphics 繪製）
+            const graphics = this.add.graphics();
+            // 愛心繪製在紋理中心（itemSize/2, itemSize/2）
+            const centerX = itemSize / 2;
+            const centerY = itemSize / 2;
+            const heartSize = itemSize * 0.4;
+
+            graphics.fillStyle(0xcc66ff, 1); // 粉紫色愛心
+            // 簡易愛心形狀（兩個圓 + 一個三角形）
+            graphics.fillCircle(centerX - heartSize * 0.3, centerY - heartSize * 0.2, heartSize * 0.4);
+            graphics.fillCircle(centerX + heartSize * 0.3, centerY - heartSize * 0.2, heartSize * 0.4);
+            graphics.fillTriangle(
+                centerX - heartSize * 0.65, centerY,
+                centerX + heartSize * 0.65, centerY,
+                centerX, centerY + heartSize * 0.7
+            );
+            // 加上白色高光
+            graphics.fillStyle(0xffffff, 0.4);
+            graphics.fillCircle(centerX - heartSize * 0.2, centerY - heartSize * 0.3, heartSize * 0.15);
+
+            // 生成紋理
+            const textureKey = `healing_item_${this.nextHealingItemId}`;
+            graphics.generateTexture(textureKey, itemSize, itemSize);
+            graphics.destroy();
+
+            // 創建 sprite
+            const sprite = this.add.sprite(itemX, itemY, textureKey);
+            sprite.setOrigin(0.5, 0.5);
+            this.healingItemContainer.add(sprite);
+
+            this.healingItems.push({
+                id: this.nextHealingItemId++,
+                x: itemX,
+                y: itemY,
+                sprite,
+                floatPhase: Math.random() * Math.PI * 2
+            });
+        }
+    }
+
+    // 更新回血物品（浮動動畫 + 拾取檢測）
+    private updateHealingItems(delta: number) {
+        if (this.healingItems.length === 0) return;
+
+        const unitSize = this.gameBounds.height * 0.1;
+        // 拾取範圍 = 基礎 1 單位 + 視網膜增強模組加成
+        const pickupBonus = this.skillManager.getRetinaModulePickupBonus();
+        const pickupRange = (this.basePickupRange + pickupBonus) * unitSize;
+        const itemsToRemove: number[] = [];
+
+        for (const item of this.healingItems) {
+            // 浮動動畫
+            item.floatPhase += delta * 0.003;
+            const floatOffset = Math.sin(item.floatPhase) * 5;
+            item.sprite.setY(item.y + floatOffset);
+
+            // 拾取檢測
+            const dx = this.characterX - item.x;
+            const dy = this.characterY - item.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist <= pickupRange) {
+                // 拾取物品：回復 10% 最大 HP
+                const healAmount = Math.floor(this.maxHp * MainScene.HEALING_ITEM_HEAL_PERCENT);
+                this.currentHp = Math.min(this.maxHp, this.currentHp + healAmount);
+                this.displayedHp = this.currentHp;
+                this.drawHpBarFill();
+                this.updateHpText();
+
+                // 拾取特效（綠色光環）
+                this.playPickupEffect(item.x, item.y);
+
+                itemsToRemove.push(item.id);
+            }
+        }
+
+        // 移除過期或被拾取的物品
+        for (const id of itemsToRemove) {
+            const index = this.healingItems.findIndex(i => i.id === id);
+            if (index !== -1) {
+                const item = this.healingItems[index];
+                // 刪除紋理
+                this.textures.remove(`healing_item_${item.id}`);
+                item.sprite.destroy();
+                this.healingItems.splice(index, 1);
+            }
+        }
+    }
+
+    // 拾取特效（綠色上升光點）
+    private playPickupEffect(x: number, y: number) {
+        // 獲取或創建一個特效 sprite
+        const sprite = this.getSkillEffectSprite();
+        if (!sprite) return;
+
+        sprite.setTexture(MainScene.TEXTURE_CIRCLE);
+        sprite.setPosition(x, y);
+        sprite.setScale(0.1);
+        sprite.setTint(0x66ff66); // 綠色
+        sprite.setAlpha(1);
+        sprite.setVisible(true);
+        sprite.setActive(true);
+
+        // 上升 + 縮小 + 淡出
+        this.tweens.add({
+            targets: sprite,
+            y: y - 50,
+            scaleX: 0.3,
+            scaleY: 0.3,
+            alpha: 0,
+            duration: 400,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                this.releaseSkillEffectSprite(sprite);
+            }
+        });
+    }
+
+    // 處理怪物死亡（掉落系統入口）
+    private handleMonsterDeath(monster: { x: number; y: number; isElite: boolean; isBoss: boolean }) {
+        // 菁英怪掉落血球
+        if (monster.isElite) {
+            this.spawnHealingItems(monster.x, monster.y);
+        }
+        // BOSS 掉落（未來擴展）
+        if (monster.isBoss) {
+            // TODO: BOSS 專屬掉落
+        }
+        // 未來可以在這裡加入其他掉落邏輯
+    }
+
+    // ========== 結束回血物品系統 ==========
+
     // 完美像素審判：井字線 + 四焦點隨機輪流爆炸（1秒內全部炸完）
     private executePerfectPixel(skillLevel: number) {
         // 傷害單位 = 角色等級 + 技能等級
@@ -7004,7 +7356,7 @@ export default class MainScene extends Phaser.Scene {
 
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
-
+        
                     // 被炸到的怪物噴出爆炸火花（青綠色）
                     const monsters = this.monsterManager.getMonsters();
                     for (const monsterId of hitMonsters) {
@@ -7290,7 +7642,7 @@ export default class MainScene extends Phaser.Scene {
                         if (hitTarget) {
                             const result = this.monsterManager.damageMonsters([hitTarget.id], finalDamage);
                             if (result.totalExp > 0) this.addExp(result.totalExp);
-                        }
+                                        }
 
                         // 第二段：3 單位範圍爆炸傷害（包含已受傷目標）
                         const explosionRadius = 3; // 3 單位
@@ -7308,7 +7660,7 @@ export default class MainScene extends Phaser.Scene {
                         if (hitMonsterIds.length > 0) {
                             const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
                             if (result.totalExp > 0) this.addExp(result.totalExp);
-
+                
                             // 被炸到的怪物噴出爆炸火花（橘色）
                             for (const monsterId of hitMonsterIds) {
                                 const monster = currentMonsters.find(m => m.id === monsterId);
@@ -7636,7 +7988,7 @@ export default class MainScene extends Phaser.Scene {
                     const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(boostedDamage, this.currentLevel);
                     const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
-
+        
                     // 命中時顯示小爆炸效果（倍率高時效果更大）
                     this.showZeroTrustHitEffect(point.currentX, point.currentY, isCrit);
                 }
@@ -8609,7 +8961,7 @@ export default class MainScene extends Phaser.Scene {
                     const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
-                }
+                        }
 
                 // 視覺效果
                 this.flashSkillEffectSector(phantomX, phantomY, range, targetAngle, halfAngleDeg, color);
@@ -8666,7 +9018,7 @@ export default class MainScene extends Phaser.Scene {
                         const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                         const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                         if (result.totalExp > 0) this.addExp(result.totalExp);
-                    }
+                                }
 
                     this.showExplosionEffect(targetX, targetY, explosionRadius, MainScene.PHANTOM_COLOR, beamAngle);
                 });
@@ -8718,7 +9070,7 @@ export default class MainScene extends Phaser.Scene {
                     const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
-                }
+                        }
 
                 // 顯示完整爆炸視覺效果（暗紫色版）
                 const screenPos = this.worldToScreen(point.x, point.y);
@@ -8926,7 +9278,7 @@ export default class MainScene extends Phaser.Scene {
                             const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                             const result = this.monsterManager.damageMonsters([hitTarget.id], finalDamage);
                             if (result.totalExp > 0) this.addExp(result.totalExp);
-                        }
+                                        }
 
                         this.showMissileExplosion(state.screenX, state.screenY, false);
                         missile.destroy();
@@ -9661,7 +10013,7 @@ export default class MainScene extends Phaser.Scene {
                 break;
             }
             case 'active_coder': {
-                const rangeUnits = 2 + level * 0.5;
+                const rangeUnits = 3 + level * 0.5;
                 // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
                 const damageUnits = (1 + level) * 2;
                 const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
@@ -9745,7 +10097,9 @@ export default class MainScene extends Phaser.Scene {
             }
             case 'passive_retina_module': {
                 const expBonus = this.skillManager.getRetinaModuleExpBonus();
+                const pickupBonus = this.skillManager.getRetinaModulePickupBonus();
                 lines.push(`經驗加成: +${Math.round(expBonus * 100)}%`);
+                lines.push(`拾取範圍: +${pickupBonus} 單位`);
                 break;
             }
             case 'passive_ai_enhancement': {

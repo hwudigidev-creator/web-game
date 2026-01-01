@@ -150,6 +150,16 @@
       border-color: rgba(255, 68, 68, 0.8);
     }
 
+    #suicide-btn {
+      background: rgba(80, 30, 30, 0.6);
+      border-color: rgba(180, 80, 80, 0.5);
+    }
+
+    #suicide-btn:hover {
+      background: rgba(120, 40, 40, 0.8);
+      border-color: rgba(255, 100, 100, 0.8);
+    }
+
     /* 彈出視窗樣式 */
     .popup-overlay {
       position: fixed;
@@ -1173,6 +1183,10 @@
     <button id="mute-btn" class="ctrl-btn" title="靜音">
       <i id="mute-icon" class="fa-solid fa-volume-high"></i>
     </button>
+    <!-- 自殺按鈕（快速登入排行榜） -->
+    <button id="suicide-btn" class="ctrl-btn" title="放棄本局">
+      <i class="fa-solid fa-skull-crossbones"></i>
+    </button>
   </div>
 
   <div id="app"></div>
@@ -1297,6 +1311,14 @@
 
     muteBtn.addEventListener('click', toggleMute);
 
+    // ===== 自殺按鈕（快速結束並登入排行榜） =====
+    const suicideBtn = document.getElementById('suicide-btn');
+    suicideBtn.addEventListener('click', () => {
+      if (confirm('確定要放棄本局嗎？')) {
+        window.dispatchEvent(new CustomEvent('playerSuicide'));
+      }
+    });
+
     // ===== 彈出視窗功能 =====
     const leaderboardBtn = document.getElementById('leaderboard-btn');
     const helpBtn = document.getElementById('help-btn');
@@ -1420,12 +1442,22 @@
               rawScore: lv
             };
           });
-          leaderboardData.damage = (result.data.damage || []).map(e => ({
-            name: e.name,
-            school: e.school || '',
-            score: String(e.score),
-            level: e.level || 0
-          }));
+          leaderboardData.damage = (result.data.damage || []).map(e => {
+            const dmg = parseFloat(e.score) || 0;
+            const lv = e.level || 1;
+            const rate = dmg / (lv * lv);
+            const ratePercent = (rate * 100).toFixed(2);
+            return {
+              name: e.name,
+              school: e.school || '',
+              score: `${dmg} (${ratePercent}%)`, // 顯示格式: "總傷 (損傷率%)"
+              damageRate: rate, // 用於排序
+              rawDamage: dmg,
+              level: lv
+            };
+          });
+          // 依損傷率排序（越低越好）
+          leaderboardData.damage.sort((a, b) => a.damageRate - b.damageRate);
         }
         renderLeaderboard();
       } catch (error) {
@@ -1596,22 +1628,30 @@
     window.addEventListener('gameRecordUpdate', (e) => {
       const { type, name, school, score, level, rawScore } = e.detail;
       if (leaderboardData[type]) {
-        // 傷害榜需要額外記錄等級用於二次排序
+        // 傷害榜需要計算損傷率 (damage / level²)
         if (type === 'damage') {
-          leaderboardData[type].push({ name, school: school || '', score, level: level || 0 });
+          const dmg = parseFloat(score) || 0;
+          const lv = level || 1;
+          const rate = dmg / (lv * lv);
+          const ratePercent = (rate * 100).toFixed(2);
+          leaderboardData[type].push({
+            name,
+            school: school || '',
+            score: `${dmg} (${ratePercent}%)`, // 顯示格式: "總傷 (損傷率%)"
+            damageRate: rate,
+            rawDamage: dmg,
+            level: lv
+          });
         } else if (type === 'level') {
           // 等級榜需要 rawScore 用於排序
           leaderboardData[type].push({ name, school: school || '', score, rawScore: rawScore || 0 });
         } else {
           leaderboardData[type].push({ name, school: school || '', score });
         }
-        // 排序（時間和等級越大越好，傷害越小越好且等級越高越好）
+        // 排序（時間和等級越大越好，損傷率越低越好）
         if (type === 'damage') {
           leaderboardData[type].sort((a, b) => {
-            const dmgA = parseFloat(a.score);
-            const dmgB = parseFloat(b.score);
-            if (dmgA !== dmgB) return dmgA - dmgB; // 傷害少的排前面
-            return (b.level || 0) - (a.level || 0); // 傷害相同時，等級高的排前面
+            return (a.damageRate || 0) - (b.damageRate || 0); // 損傷率低的排前面
           });
         } else if (type === 'level') {
           leaderboardData[type].sort((a, b) => {
@@ -1782,8 +1822,10 @@
       isPlayerDead = false;
       lastDeathData = null;
       closePopup(deathPopup);
-      // 重新載入遊戲
-      setTimeout(() => location.reload(), 500);
+      // 重新開始遊戲（不回標題畫面）
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('gameRestart'));
+      }, 500);
     });
 
     // 跳過
@@ -1792,7 +1834,10 @@
       isPlayerDead = false;
       lastDeathData = null;
       closePopup(deathPopup);
-      setTimeout(() => location.reload(), 500);
+      // 重新開始遊戲（不回標題畫面）
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('gameRestart'));
+      }, 500);
     });
 
     // 監聯遊戲死亡事件

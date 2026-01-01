@@ -28,9 +28,12 @@ export interface Monster {
     isBat?: boolean;
     directionX?: number; // 移動方向 X（單位向量）
     directionY?: number; // 移動方向 Y（單位向量）
-    // BOSS 專用
+    // 菁英怪專用（每 10 級生成）
+    isElite?: boolean;
+    eliteHpMultiplier?: number; // 菁英怪 HP 倍率（等於生成時的玩家等級）
+    // BOSS 專用（未來設計）
     isBoss?: boolean;
-    bossHpMultiplier?: number; // BOSS HP 倍率（等於生成時的玩家等級）
+    bossHpMultiplier?: number; // BOSS HP 倍率
     // 暈眩/癱瘓狀態
     stunEndTime?: number; // 暈眩結束時間，0 或 undefined 表示未暈眩
 }
@@ -55,8 +58,8 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         exp: 20
     },
     {
-        id: 'boss_slime',
-        name: 'BOSS 史萊姆',
+        id: 'elite_slime',
+        name: '菁英史萊姆',
         color: 0x4a1a6b, // 暗紫色
         speed: 1.0, // 較慢但比之前快
         damage: 3, // 3 倍傷害
@@ -103,11 +106,14 @@ export class MonsterManager {
     private static readonly BAT_FIXED_HP = 10; // 固定 1 單位 HP
     private static readonly BAT_FIXED_EXP = 5; // 固定經驗
 
-    // BOSS 生成追蹤（記錄已生成 BOSS 的等級）
-    private bossSpawnedAtLevels: Set<number> = new Set();
+    // 菁英怪生成追蹤（記錄已生成菁英怪的等級）
+    private eliteSpawnedAtLevels: Set<number> = new Set();
 
     // 嘲諷目標（幻影分身）
     private tauntTarget: { x: number; y: number; active: boolean } = { x: 0, y: 0, active: false };
+
+    // 怪物死亡回調（用於掉落系統等）
+    private onMonsterKilledCallback: ((monster: { x: number; y: number; isElite: boolean; isBoss: boolean; definition: MonsterDefinition }) => void) | null = null;
 
     // 遊戲區域
     private gameBounds: { x: number; y: number; width: number; height: number };
@@ -157,24 +163,24 @@ export class MonsterManager {
     }
 
     // 設定玩家等級（用於怪物血量成長）
-    // 返回是否需要生成 BOSS
+    // 返回是否需要生成菁英怪
     setPlayerLevel(level: number): boolean {
         this.playerLevel = level;
 
-        // 檢查是否達到 BOSS 生成等級（每 10 級：10, 20, 30...）
-        if (level >= 10 && level % 10 === 0 && !this.bossSpawnedAtLevels.has(level)) {
+        // 檢查是否達到菁英怪生成等級（每 10 級：10, 20, 30...）
+        if (level >= 10 && level % 10 === 0 && !this.eliteSpawnedAtLevels.has(level)) {
             // 標記已生成，避免重複
-            this.bossSpawnedAtLevels.add(level);
+            this.eliteSpawnedAtLevels.add(level);
             return true;
         }
         return false;
     }
 
-    // 生成 BOSS（由外部呼叫，傳入生成位置）
-    spawnBoss(cameraOffsetX: number, cameraOffsetY: number) {
-        const bossLevel = this.playerLevel;
-        const bossDef = MONSTER_TYPES.find(m => m.id === 'boss_slime');
-        if (!bossDef) return;
+    // 生成菁英怪（由外部呼叫，傳入生成位置）
+    spawnElite(cameraOffsetX: number, cameraOffsetY: number) {
+        const eliteLevel = this.playerLevel;
+        const eliteDef = MONSTER_TYPES.find(m => m.id === 'elite_slime');
+        if (!eliteDef) return;
 
         // 隨機選擇生成點（畫面外的 3 個方向：上、左、右）
         const spawnPoints: SpawnPoint[] = ['top', 'left', 'right'];
@@ -182,7 +188,7 @@ export class MonsterManager {
 
         let spawnX: number;
         let spawnY: number;
-        const margin = 150; // BOSS 較大，需要更大的間距
+        const margin = 150; // 菁英怪較大，需要更大的間距
 
         const viewLeft = cameraOffsetX;
         const viewRight = cameraOffsetX + this.gameBounds.width;
@@ -203,24 +209,24 @@ export class MonsterManager {
                 break;
         }
 
-        // BOSS HP = 基礎 HP * 等級成長 * 等級倍率
-        // 例如：10 級 BOSS HP = 基礎 * 成長^10 * 10
-        const baseHp = this.calculateMonsterHp(bossDef.hp);
-        const bossHp = baseHp * bossLevel;
+        // 菁英怪 HP = 基礎 HP * 等級成長 * 等級倍率
+        // 例如：10 級菁英怪 HP = 基礎 * 成長^10 * 10
+        const baseHp = this.calculateMonsterHp(eliteDef.hp);
+        const eliteHp = baseHp * eliteLevel;
 
         const monster: Monster = {
             id: this.nextMonsterId++,
-            definition: bossDef,
+            definition: eliteDef,
             x: spawnX,
             y: spawnY,
-            hp: bossHp,
+            hp: eliteHp,
             lastDamageTime: 0,
             bouncePhase: Math.random() * Math.PI * 2,
-            bounceSpeed: 1.5 + Math.random() * 0.5, // BOSS 彈跳較慢但更穩重
+            bounceSpeed: 1.5 + Math.random() * 0.5, // 菁英怪彈跳較慢但更穩重
             squashStretch: 1,
             flashStartTime: 0,
-            isBoss: true,
-            bossHpMultiplier: bossLevel
+            isElite: true,
+            eliteHpMultiplier: eliteLevel
         };
 
         this.monsters.push(monster);
@@ -348,6 +354,43 @@ export class MonsterManager {
         // 隱藏怪物網格容器
         if (this.monsterGridContainer) {
             this.monsterGridContainer.setVisible(false);
+        }
+    }
+
+    // 完全清理所有怪物和重置狀態（場景重啟時）
+    reset() {
+        // 停止生成
+        this.isSpawning = false;
+
+        // 清空怪物陣列
+        this.monsters = [];
+        this.nextMonsterId = 0;
+
+        // 重置生成時間
+        this.lastSpawnTime = 0;
+        this.lastBatSwarmTime = 0;
+
+        // 重置菁英怪追蹤
+        this.eliteSpawnedAtLevels.clear();
+
+        // 重置嘲諷目標
+        this.tauntTarget = { x: 0, y: 0, active: false };
+
+        // 重置減速區域
+        this.slowZone = { active: false, centerX: 0, centerY: 0, radius: 0, multiplier: 1 };
+
+        // 重置玩家等級
+        this.playerLevel = 0;
+
+        // 清空網格單元的填充（保留網格本身）
+        for (const cell of this.monsterGridCells) {
+            cell.rect.setFillStyle(0x000000, 0);
+            cell.rect.setVisible(false);
+        }
+
+        // 顯示怪物容器（之前可能被隱藏）
+        if (this.monsterGridContainer) {
+            this.monsterGridContainer.setVisible(true);
         }
     }
 
@@ -527,6 +570,8 @@ export class MonsterManager {
         for (const monster of this.monsters) {
             // 蝙蝠不傳送（它們會自然飛出畫面並被移除）
             if (monster.isBat) continue;
+            // 菁英怪不傳送
+            if (monster.isElite) continue;
             // BOSS 不傳送
             if (monster.isBoss) continue;
 
@@ -1066,10 +1111,10 @@ export class MonsterManager {
         this.spawnInterval = interval;
     }
 
-    // 對怪物造成傷害，返回是否死亡和經驗值
-    damageMonster(monsterId: number, damage: number): { killed: boolean; exp: number } {
+    // 對怪物造成傷害，返回是否死亡、經驗值和是否為菁英怪
+    damageMonster(monsterId: number, damage: number): { killed: boolean; exp: number; isElite: boolean; x: number; y: number } {
         const monster = this.monsters.find(m => m.id === monsterId);
-        if (!monster) return { killed: false, exp: 0 };
+        if (!monster) return { killed: false, exp: 0, isElite: false, x: 0, y: 0 };
 
         monster.hp -= damage;
 
@@ -1081,13 +1126,16 @@ export class MonsterManager {
             const exp = monster.isBat
                 ? MonsterManager.BAT_FIXED_EXP
                 : this.calculateMonsterExp(monster.definition.exp);
+            const isElite = monster.isElite || false;
+            const deathX = monster.x;
+            const deathY = monster.y;
             // 播放死亡煙霧效果
             this.playDeathSmoke(monster.x, monster.y);
             this.removeMonster(monsterId);
-            return { killed: true, exp };
+            return { killed: true, exp, isElite, x: deathX, y: deathY };
         }
 
-        return { killed: false, exp: 0 };
+        return { killed: false, exp: 0, isElite: false, x: monster.x, y: monster.y };
     }
 
     // 怪物受傷閃紅白效果（設定閃爍開始時間，由 drawMonster 處理動畫）
@@ -1111,15 +1159,25 @@ export class MonsterManager {
         const killedPositions: { x: number; y: number }[] = [];
 
         for (const id of monsterIds) {
-            // 先取得怪物位置（在造成傷害前）
+            // 先取得怪物資料（在造成傷害前）
             const monster = this.monsters.find(m => m.id === id);
-            const posBeforeDamage = monster ? { x: monster.x, y: monster.y } : null;
+            const monsterData = monster ? {
+                x: monster.x,
+                y: monster.y,
+                isElite: monster.isElite || false,
+                isBoss: monster.isBoss || false,
+                definition: monster.definition
+            } : null;
 
             const result = this.damageMonster(id, damage);
-            if (result.killed && posBeforeDamage) {
+            if (result.killed && monsterData) {
                 totalExp += result.exp;
                 killCount++;
-                killedPositions.push(posBeforeDamage);
+                killedPositions.push({ x: monsterData.x, y: monsterData.y });
+                // 觸發怪物死亡回調（掉落系統用）
+                if (this.onMonsterKilledCallback) {
+                    this.onMonsterKilledCallback(monsterData);
+                }
             }
         }
 
@@ -1211,5 +1269,10 @@ export class MonsterManager {
     // 取得嘲諷目標
     getTauntTarget(): { x: number; y: number; active: boolean } {
         return this.tauntTarget;
+    }
+
+    // 設定怪物死亡回調（用於掉落系統）
+    setOnMonsterKilled(callback: (monster: { x: number; y: number; isElite: boolean; isBoss: boolean; definition: MonsterDefinition }) => void) {
+        this.onMonsterKilledCallback = callback;
     }
 }

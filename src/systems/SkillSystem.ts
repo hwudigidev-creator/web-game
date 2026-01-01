@@ -202,7 +202,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'active_coder',
         name: '咒言幻象',
         subtitle: '遊戲先知',
-        description: '對周圍 2 單位敵人造成傷害，每級增加 0.5 單位範圍',
+        description: '對周圍 3 單位敵人造成傷害，每級增加 0.5 單位範圍',
         type: 'active',
         color: 0xaa66ff, // 紫色
         flashColor: 0xcc88ff, // 閃紫光
@@ -210,12 +210,12 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         maxLevel: 5,
         iconPrefix: 'C', // C00.png ~ C05.png
         levelUpMessages: [
-            '2 單位範圍、2 傷害',
-            '2.5 單位範圍、4 傷害',
-            '3 單位範圍、6 傷害',
-            '3.5 單位範圍、8 傷害',
-            '4 單位範圍、10 傷害',
-            '4.5 單位範圍、12 傷害，已達最大等級！'
+            '3 單位範圍、2 傷害',
+            '3.5 單位範圍、4 傷害',
+            '4 單位範圍、6 傷害',
+            '4.5 單位範圍、8 傷害',
+            '5 單位範圍、10 傷害',
+            '5.5 單位範圍、12 傷害，已達最大等級！'
         ],
         levelUpQuotes: [
             '你參透了互動設計的原理，同時了解遊戲企劃架構', // LV0
@@ -463,6 +463,13 @@ export class SkillManager {
     // 進階技能系統
     private advancedSkillLevels: Map<string, number> = new Map();  // 所有進階技能的等級記錄（切換後保留）
     private equippedAdvancedSkillId: string | null = null;  // 當前裝備的進階技能 ID
+
+    // 重置所有技能狀態（場景重啟時）
+    reset() {
+        this.playerSkills.clear();
+        this.advancedSkillLevels.clear();
+        this.equippedAdvancedSkillId = null;
+    }
 
     // 取得所有攻擊型技能定義
     getActiveSkillDefinitions(): SkillDefinition[] {
@@ -743,6 +750,13 @@ export class SkillManager {
         const skill = this.playerSkills.get('passive_retina_module');
         if (!skill) return 0;
         return (skill.level + 1) * 0.30; // Lv.0=30%, Lv.5=180%
+    }
+
+    // 取得視網膜增強模組的拾取範圍加成（每級 +0.5 單位，Lv.0=0.5，Lv.5=3）
+    getRetinaModulePickupBonus(): number {
+        const skill = this.playerSkills.get('passive_retina_module');
+        if (!skill) return 0;
+        return (skill.level + 1) * 0.5; // Lv.0=0.5, Lv.5=3
     }
 
     // 取得AI賦能強化的攻擊傷害加成百分比（每級 25%，Lv.0 也有效果）
