@@ -64,32 +64,84 @@ function checkOrientation() {
     }
 }
 
+// 防抖動 resize 函數
+let resizeTimeout: number | null = null;
+function handleGameResize() {
+    if (resizeTimeout) {
+        clearTimeout(resizeTimeout);
+    }
+    resizeTimeout = window.setTimeout(() => {
+        if (game) {
+            const newWidth = window.innerWidth;
+            const newHeight = getViewportHeight();
+            game.scale.resize(newWidth, newHeight);
+            // 強制更新 canvas 尺寸
+            const canvas = game.canvas;
+            if (canvas) {
+                canvas.style.width = `${newWidth}px`;
+                canvas.style.height = `${newHeight}px`;
+            }
+        }
+        resizeTimeout = null;
+    }, 50);
+}
+
 // 初始檢查
 checkOrientation();
 
-// 監聽方向變化
-window.addEventListener('resize', checkOrientation);
-window.addEventListener('orientationchange', () => {
-    setTimeout(checkOrientation, 100);
+// 監聽方向變化 - 同時處理 resize
+window.addEventListener('resize', () => {
+    checkOrientation();
+    handleGameResize();
 });
 
-// 監聽 visualViewport 變化（手機瀏覽器網址列顯示/隱藏）
+// 手機旋轉事件
+window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+        checkOrientation();
+        handleGameResize();
+    }, 150);
+});
+
+// 監聽 visualViewport 變化（手機瀏覽器網址列顯示/隱藏、PWA 模式切換）
 if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => {
-        if (game) {
-            game.scale.resize(window.innerWidth, getViewportHeight());
-        }
-    });
+    window.visualViewport.addEventListener('resize', handleGameResize);
+    window.visualViewport.addEventListener('scroll', handleGameResize);
 }
 
 // 監聽全螢幕變化
 document.addEventListener('fullscreenchange', () => {
-    if (game) {
-        setTimeout(() => {
-            game!.scale.resize(window.innerWidth, getViewportHeight());
-        }, 100);
-    }
+    setTimeout(handleGameResize, 100);
 });
+document.addEventListener('webkitfullscreenchange', () => {
+    setTimeout(handleGameResize, 100);
+});
+
+// PWA 顯示模式變化（從瀏覽器拖曳到視窗等）
+if (window.matchMedia) {
+    const displayModeQuery = window.matchMedia('(display-mode: standalone)');
+    displayModeQuery.addEventListener('change', () => {
+        setTimeout(handleGameResize, 200);
+    });
+}
+
+// 視窗獲得焦點時重新檢查尺寸（處理 PWA 視窗拖曳後）
+window.addEventListener('focus', () => {
+    setTimeout(handleGameResize, 100);
+});
+
+// 防止頁面滾動（PWA 模式下可能因觸控而滾動）
+document.addEventListener('touchmove', (e) => {
+    // 只有在遊戲畫面上才阻止（彈窗內的捲動不阻止）
+    if (!(e.target as HTMLElement).closest('.popup-overlay')) {
+        e.preventDefault();
+    }
+}, { passive: false });
+
+// 防止雙擊縮放
+document.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+}, { passive: false });
 
 // 監聽音量變化事件
 window.addEventListener('volumechange', ((event: CustomEvent) => {

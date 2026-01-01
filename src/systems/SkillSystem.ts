@@ -121,15 +121,15 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
     {
         id: 'advanced_phantom_iteration',
         name: '幻影迭代模式',
-        subtitle: '無限分身的創作者',
-        description: '【咒言幻象＋AI強化】\n召喚影分身施放燃燒賽璐珞(3格)、技美大神(2發)、完美像素(±2格)，每5秒嘲諷怪物2秒',
+        subtitle: '咒言幻象的創作者',
+        description: '【咒言幻象＋AI強化】\n召喚最多3隻強力分身支援戰鬥',
         color: 0x9966ff,  // 紫藍色（幻影感）
         flashColor: 0xbb88ff,
-        cooldown: 15000,  // 15 秒
+        cooldown: 8000,  // 8 秒
         maxLevel: -1,  // 無上限
         iconPrefix: 'X06',
         requiredSkills: ['active_coder', 'passive_ai_enhancement'],  // 咒言幻象（遊戲先知）+ AI 賦能強化
-        levelUpQuotes: ['影分身現身，無限迭代的創作者']
+        levelUpQuotes: ['影分身現身，咒言幻象的創作者']
     },
     {
         id: 'advanced_zero_trust',
@@ -179,7 +179,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '80° 扇形、4 傷害',
             '90° 扇形、5 傷害',
             '100° 扇形、6 傷害',
-            '110° 扇形、7 傷害，已達最大等級！'
+            '3 向衝擊波（0°/120°/240°）、10 傷害、10 單位射程，已達最大等級！'
         ],
         levelUpQuotes: [
             '你練習了繪畫技法，動畫美術的能力提升了', // LV0
@@ -190,12 +190,12 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '你成為了動畫大師，解鎖了進階技能組合', // LV5/MAX
         ],
         maxExtraAbility: {
-            name: '穿透',
-            description: '攻擊後 {value} 機率發射扇形波（每 0.3 秒傷害一次）',
+            name: '三向衝擊',
+            description: '改為 3 向衝擊波（0°/120°/240°），飛行 10 單位',
             baseValue: 0,
-            perLevel: 0.007, // 每級 +0.7%
-            unit: '%',
-            isPercentage: true
+            perLevel: 0,
+            unit: '',
+            isPercentage: false
         }
     },
     {
@@ -281,20 +281,20 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         cooldown: 10000, // 10 秒
         maxLevel: 5,
         levelUpMessages: [
-            '30% HP 護盾、1 反傷＋擊退',
-            '30% HP 護盾、2.5 反傷＋擊退',
-            '30% HP 護盾、4 反傷＋擊退',
-            '30% HP 護盾、5.5 反傷＋擊退',
-            '30% HP 護盾、7 反傷＋擊退',
-            '30% HP 護盾、8.5 反傷＋擊退，已達最大等級！'
+            '30% HP 護盾、2 反傷',
+            '30% HP 護盾、4 反傷',
+            '30% HP 護盾、6 反傷',
+            '30% HP 護盾、8 反傷',
+            '30% HP 護盾、10 反傷',
+            '30% HP 護盾、20 反傷＋擊退，已達最大等級！'
         ],
         maxExtraAbility: {
-            name: '堅守',
-            description: '護盾覆蓋時 100% 炸開並擊退敵人',
-            baseValue: 0,
-            perLevel: 0.01, // 每級 +1%（用於判斷 MAX 狀態）
-            unit: '%',
-            isPercentage: true
+            name: '八角爆盾',
+            description: '冷卻刷新時護盾殘值×10 傷害、4 單位範圍金色八角盾爆炸並擊退',
+            baseValue: 1, // 需要 > 0 才能觸發爆盾
+            perLevel: 0,
+            unit: '',
+            isPercentage: false
         }
     },
     // 被動型技能 (4個，但玩家最多持有3個)
@@ -371,25 +371,25 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'passive_retina_module',
         name: '視網膜增強模組',
         subtitle: '血輪眼',
-        description: '提升 30% 經驗取得，每級再 +30%',
+        description: '提升 0.5 單位拾取範圍，每級再 +0.5 單位',
         type: 'passive',
         color: 0x992233, // 暗紅色
         maxLevel: 5,
         iconPrefix: 'P03', // 固定圖示，不隨等級變換
         levelUpMessages: [
-            '+30% 經驗',
-            '+60% 經驗',
-            '+90% 經驗',
-            '+120% 經驗',
-            '+150% 經驗',
-            '+180% 經驗，已達最大等級！'
+            '+0.5 單位拾取範圍',
+            '+1 單位拾取範圍',
+            '+1.5 單位拾取範圍',
+            '+2 單位拾取範圍',
+            '+2.5 單位拾取範圍',
+            '+3 單位拾取範圍，已達最大等級！'
         ],
         levelUpQuotes: [
-            '敏銳的觀察力，提高獲取經驗的速度', // LV0
-            '敏銳的觀察力，提高獲取經驗的速度', // LV1
-            '敏銳的觀察力，提高獲取經驗的速度', // LV2
-            '敏銳的觀察力，提高獲取經驗的速度', // LV3
-            '敏銳的觀察力，提高獲取經驗的速度', // LV4
+            '敏銳的觀察力，視野範圍擴大了', // LV0
+            '敏銳的觀察力，視野範圍擴大了', // LV1
+            '敏銳的觀察力，視野範圍擴大了', // LV2
+            '敏銳的觀察力，視野範圍擴大了', // LV3
+            '敏銳的觀察力，視野範圍擴大了', // LV4
             '千錘百鍊的敏銳觀察，再沒什麼看不穿、看不清', // LV5/MAX
         ],
         maxExtraAbility: {
