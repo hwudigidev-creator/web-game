@@ -501,7 +501,7 @@ export default class GridScene extends Phaser.Scene {
         }
 
         // 預載入技能圖示
-        const skillIconPrefixes = ['A', 'B', 'C'];
+        const skillIconPrefixes = ['A', 'B', 'C', 'D'];
         for (const prefix of skillIconPrefixes) {
             for (let i = 0; i <= 5; i++) {
                 this.load.image(`skill_icon_${prefix}${i.toString().padStart(2, '0')}`, `icons/skills/${prefix}${i.toString().padStart(2, '0')}.png`);
@@ -510,6 +510,10 @@ export default class GridScene extends Phaser.Scene {
         // P 系列（被動技能）
         for (let i = 1; i <= 4; i++) {
             this.load.image(`skill_icon_P${i.toString().padStart(2, '0')}`, `icons/skills/P${i.toString().padStart(2, '0')}.png`);
+        }
+        // SA, SB, SC, SD 系列（組合技能，固定圖示）
+        for (const icon of ['SA0', 'SA1', 'SB0', 'SB1', 'SC0', 'SC1', 'SD0', 'SD1']) {
+            this.load.image(`skill_icon_${icon}`, `icons/skills/${icon}.png`);
         }
 
         // 開始載入

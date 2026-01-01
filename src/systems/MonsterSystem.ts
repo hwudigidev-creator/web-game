@@ -1159,11 +1159,9 @@ export class MonsterManager {
                     monster.x += nx * distance;
                     monster.y += ny * distance;
 
-                    // 確保不超出地圖邊界
-                    const halfWidth = this.mapWidth / 2;
-                    const halfHeight = this.mapHeight / 2;
-                    monster.x = Math.max(-halfWidth, Math.min(halfWidth, monster.x));
-                    monster.y = Math.max(-halfHeight, Math.min(halfHeight, monster.y));
+                    // 確保不超出地圖邊界（座標系統：0 到 mapWidth/mapHeight）
+                    monster.x = Math.max(0, Math.min(this.mapWidth, monster.x));
+                    monster.y = Math.max(0, Math.min(this.mapHeight, monster.y));
                 }
             }
         }

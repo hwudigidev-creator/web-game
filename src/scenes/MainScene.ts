@@ -363,6 +363,8 @@ export default class MainScene extends Phaser.Scene {
         pointSprite: Phaser.GameObjects.Sprite; // 光點（sector_360）
         beamSprite: Phaser.GameObjects.Sprite;  // 向上射線（裝飾）
         flickerPhase: number;           // 閃爍相位
+        lockStartTime: number;          // 開始鎖定此目標的時間
+        beamMultiplier: number;         // 光束倍率（每秒+1，從1開始）
     }[] = []; // 8 個光點
 
     // 幻影迭代模式：影分身系統（支援多個幻影，最多 3 個）
@@ -504,10 +506,12 @@ export default class MainScene extends Phaser.Scene {
     private skillEffectPool: Phaser.GameObjects.Sprite[] = []; // 可用的 Sprite 池
     private activeSkillEffects: Phaser.GameObjects.Sprite[] = []; // 正在使用的 Sprite
     private static readonly SKILL_EFFECT_POOL_SIZE = 50; // 物件池初始大小
+    private static readonly MAX_ACTIVE_SKILL_EFFECTS = 80; // 最大同時活躍數（防止卡頓）
     // LINE 紋理物件池（用於打擊火花效果）
     private lineEffectPool: Phaser.GameObjects.Sprite[] = [];
     private activeLineEffects: Phaser.GameObjects.Sprite[] = [];
     private static readonly LINE_EFFECT_POOL_SIZE = 80; // LINE 物件池大小
+    private static readonly MAX_ACTIVE_LINE_EFFECTS = 120; // 最大同時活躍數（防止卡頓）
     // CIRCLE_LINE 紋理物件池（用於圓形邊緣線效果）
     private circleLineEffectPool: Phaser.GameObjects.Sprite[] = [];
     private activeCircleLineEffects: Phaser.GameObjects.Sprite[] = [];
@@ -860,8 +864,12 @@ export default class MainScene extends Phaser.Scene {
         const now = this.time.now;
         if (this.isHurt && now >= this.hurtEndTime) {
             this.isHurt = false;
-            // 硬直結束，恢復待機動畫
-            this.setCharacterState('idle');
+            // 硬直結束，根據輸入狀態恢復動畫
+            if (this.isPointerDown || this.isKeyboardMoving) {
+                this.setCharacterState('run');
+            } else {
+                this.setCharacterState('idle');
+            }
             this.updateCharacterSprite();
         }
 
@@ -3495,8 +3503,9 @@ export default class MainScene extends Phaser.Scene {
         // 轉換為螢幕座標
         const screen = this.worldToScreen(startX, startY);
 
-        // 取得 LINE sprite
+        // 取得 LINE sprite（超過上限則跳過）
         const particle = this.getLineEffectSprite();
+        if (!particle) return;
 
         // 網格大小（使用與地板網格相同的比例）
         const unitSize = this.gameBounds.height / 10;
@@ -3740,11 +3749,9 @@ export default class MainScene extends Phaser.Scene {
             this.drawHpBarFill();
             this.updateHpText();
 
-            // 進入受傷硬直狀態
+            // 進入受傷硬直狀態（不中斷拖曳/鍵盤狀態，硬直結束後自動恢復移動）
             this.isHurt = true;
             this.hurtEndTime = this.time.now + MainScene.HURT_DURATION;
-            this.isPointerDown = false; // 停止移動
-            this.isKeyboardMoving = false;
 
             // 播放受傷動畫
             this.setCharacterState('hurt');
@@ -5845,8 +5852,11 @@ export default class MainScene extends Phaser.Scene {
             this.advancedSkillLevelText.setColor('#ffffff');
         }
 
-        // 更新圖示
-        const iconKey = `skill_${def.iconPrefix}0${equipped.level}`;
+        // 更新圖示（檢查是否為固定圖示，如 SA0, SB1）
+        const isFixedIcon = /\d$/.test(def.iconPrefix);
+        const iconKey = isFixedIcon
+            ? `skill_icon_${def.iconPrefix}`
+            : `skill_${def.iconPrefix}0${equipped.level}`;
         if (this.textures.exists(iconKey)) {
             if (this.advancedSkillIconSprite) {
                 this.advancedSkillIconSprite.setTexture(iconKey);
@@ -6569,10 +6579,9 @@ export default class MainScene extends Phaser.Scene {
         const bladeRadius = bladeRadiusUnits * unitSize; // 像素（視覺用）
         this.sawBladeRadius = bladeRadius; // 儲存輪鋸半徑
 
-        // 輪鋸數量根據護盾比例：滿盾 6 個，按比例減少
-        const shieldRatio = this.currentShield / this.maxShield;
+        // 輪鋸數量：基本 3 個，每 10 技能等級 +1，最多 6 個
         const maxBladeCount = 6;
-        const bladeCount = Math.max(1, Math.ceil(shieldRatio * maxBladeCount)); // 至少 1 個
+        const bladeCount = Math.min(maxBladeCount, 3 + Math.floor(skillLevel / 10));
 
         // 固定轉速：2 秒一圈
         const rotationTime = 2000;
@@ -6631,17 +6640,29 @@ export default class MainScene extends Phaser.Scene {
         }
 
         if (hitMonsters.length > 0) {
-            // 造成傷害
+            // 先擊退（避免怪物死亡後找不到）
+            const knockbackDistance = this.gameBounds.height * 0.1; // 1 單位
+            this.monsterManager.knockbackMonsters(hitMonsters, this.characterX, this.characterY, knockbackDistance);
+
+            // 再造成傷害
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) this.addExp(result.totalExp);
 
-            // 擊退被掃中的目標（從角色位置向外推 1 單位）
-            this.monsterManager.knockbackMonsters(hitMonsters, this.characterX, this.characterY, 1);
-
-            // 每次命中消耗護盾值（每隻怪物消耗 2% 最大護盾）
-            const shieldCostPerHit = Math.ceil(this.maxShield * 0.02);
-            const shieldCost = shieldCostPerHit * hitMonsters.length;
-            this.currentShield = Math.max(0, this.currentShield - shieldCost);
+            // 每次命中消耗護盾值（2%，升滿 6 個後每技能級 -0.1%，可降至負數變回血）
+            let costRate = 0.02;
+            if (bladeCount >= maxBladeCount) {
+                const levelsAbove30 = skillLevel - 30;
+                costRate = 0.02 - levelsAbove30 * 0.001; // 可以變負數
+            }
+            const shieldChangePerHit = Math.ceil(this.maxShield * Math.abs(costRate));
+            const totalChange = shieldChangePerHit * hitMonsters.length;
+            if (costRate >= 0) {
+                // 消耗護盾
+                this.currentShield = Math.max(0, this.currentShield - totalChange);
+            } else {
+                // 補充護盾
+                this.currentShield = Math.min(this.maxShield, this.currentShield + totalChange);
+            }
             this.drawShieldBarFill();
 
             // 輪鋸火花效果（金色）
@@ -6822,8 +6843,9 @@ export default class MainScene extends Phaser.Scene {
                         const result = this.monsterManager.damageMonsters([monster.id], finalDamage);
                         if (result.totalExp > 0) this.addExp(result.totalExp);
 
-                        // 擊退
-                        this.monsterManager.knockbackMonsters([monster.id], this.characterX, this.characterY, 1);
+                        // 擊退（1 單位）
+                        const sawKnockback = this.gameBounds.height * 0.1;
+                        this.monsterManager.knockbackMonsters([monster.id], this.characterX, this.characterY, sawKnockback);
 
                         // 輪鋸火花效果（金色）
                         this.showHitSparkEffect(monster.x, monster.y, 0xffcc00);
@@ -6863,10 +6885,13 @@ export default class MainScene extends Phaser.Scene {
         const orbitRadius = this.gameBounds.height * 0.2; // 2 單位距離
         const bladeRadius = this.gameBounds.height * 0.05; // 0.5 單位範圍
 
-        // 輪鋸數量根據護盾比例：滿盾 6 個，按比例減少
-        const shieldRatio = this.currentShield / this.maxShield;
+        // 取得技能等級
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        const skillLevel = equipped ? equipped.level : 1;
+
+        // 輪鋸數量：基本 3 個，每 10 技能等級 +1，最多 6 個
         const maxBladeCount = 6;
-        const bladeCount = Math.max(1, Math.ceil(shieldRatio * maxBladeCount));
+        const bladeCount = Math.min(maxBladeCount, 3 + Math.floor(skillLevel / 10));
 
         const bladePositions: { x: number; y: number }[] = [];
         for (let i = 0; i < bladeCount; i++) {
@@ -7404,7 +7429,9 @@ export default class MainScene extends Phaser.Scene {
                 lastDamageTime: 0,
                 pointSprite: pointSprite,
                 beamSprite: beamSprite,
-                flickerPhase: Math.random() * Math.PI * 2 // 隨機初始相位
+                flickerPhase: Math.random() * Math.PI * 2, // 隨機初始相位
+                lockStartTime: 0,
+                beamMultiplier: 1
             });
         }
 
@@ -7470,9 +7497,11 @@ export default class MainScene extends Phaser.Scene {
                 const targetInRange = targetMonster && monstersInRange.some(m => m.id === point.targetMonsterId);
 
                 if (!targetAlive || !targetInRange) {
-                    // 目標死亡或離開範圍，釋放追蹤
+                    // 目標死亡或離開範圍，釋放追蹤並重置倍率
                     this.zeroTrustTrackedMonsters.delete(point.targetMonsterId);
                     point.targetMonsterId = null;
+                    point.lockStartTime = 0;
+                    point.beamMultiplier = 1;
                 }
             }
 
@@ -7494,6 +7523,8 @@ export default class MainScene extends Phaser.Scene {
                 if (nearestMonster) {
                     point.targetMonsterId = nearestMonster.id;
                     this.zeroTrustTrackedMonsters.add(nearestMonster.id);
+                    point.lockStartTime = now; // 記錄鎖定開始時間
+                    point.beamMultiplier = 1;  // 重置倍率
                 }
             }
 
@@ -7556,22 +7587,36 @@ export default class MainScene extends Phaser.Scene {
             }
             point.pointSprite.setAlpha(0.7 + flickerValue * 0.3);
 
-            // 更新向上射線
+            // 計算光束倍率（鎖定目標時，每秒+1倍，從1開始）
+            if (point.targetMonsterId !== null && point.lockStartTime > 0) {
+                const lockDuration = now - point.lockStartTime;
+                point.beamMultiplier = 1 + Math.floor(lockDuration / 1000); // 每秒+1
+            } else {
+                point.beamMultiplier = 1;
+            }
+
+            // 更新向上射線（寬度隨倍率增加）
             const beamHeight = this.gameBounds.height * 0.8; // 射線長度
             const beamStartY = pointScreen.y - beamHeight;
             point.beamSprite.setPosition(pointScreen.x, (beamStartY + pointScreen.y) / 2);
             const beamScaleX = beamHeight / MainScene.EFFECT_TEXTURE_SIZE;
-            const beamScaleY = 12 / MainScene.EFFECT_LINE_HEIGHT; // 射線寬度
+            const baseBeamWidth = 12;
+            const beamWidth = baseBeamWidth * point.beamMultiplier; // 寬度隨倍率增加
+            const beamScaleY = beamWidth / MainScene.EFFECT_LINE_HEIGHT;
             point.beamSprite.setScale(beamScaleX, beamScaleY);
 
-            // 射線閃爍（金白色，裝飾用）
+            // 射線閃爍（金白色，裝飾用，高倍率時更亮）
             const beamFlickerColor = flickerValue > 0.5 ? 0xffdd44 : 0xffffff;
             point.beamSprite.setTint(beamFlickerColor);
-            point.beamSprite.setAlpha(0.3 + flickerValue * 0.4);
+            const beamAlpha = Math.min(0.9, 0.3 + flickerValue * 0.4 + (point.beamMultiplier - 1) * 0.1);
+            point.beamSprite.setAlpha(beamAlpha);
 
             // 每 0.5 秒造成範圍傷害（只有在追蹤怪物時）
             if (point.targetMonsterId !== null && now - point.lastDamageTime >= damageInterval) {
                 point.lastDamageTime = now;
+
+                // 傷害範圍隨倍率增加（基礎1單位，每倍+0.5單位）
+                const actualDamageRadius = damageRadius + (point.beamMultiplier - 1) * 0.5;
 
                 // 檢測傷害範圍內的怪物
                 const hitMonsterIds: number[] = [];
@@ -7579,17 +7624,20 @@ export default class MainScene extends Phaser.Scene {
                     const mdx = monster.x - point.currentX;
                     const mdy = monster.y - point.currentY;
                     const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
-                    if (mdist <= damageRadius * unitSize) {
+                    if (mdist <= actualDamageRadius * unitSize) {
                         hitMonsterIds.push(monster.id);
                     }
                 }
 
                 if (hitMonsterIds.length > 0) {
-                    const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+                    // 傷害加成：每秒 +技能等級% 傷害
+                    const damageBonus = (point.beamMultiplier - 1) * skillLevel * 0.01;
+                    const boostedDamage = Math.floor(baseDamage * (1 + damageBonus));
+                    const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(boostedDamage, this.currentLevel);
                     const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
 
-                    // 命中時顯示小爆炸效果
+                    // 命中時顯示小爆炸效果（倍率高時效果更大）
                     this.showZeroTrustHitEffect(point.currentX, point.currentY, isCrit);
                 }
             }
@@ -8216,8 +8264,10 @@ export default class MainScene extends Phaser.Scene {
 
         // 飛行參數
         const speed = unitSize * 8; // 每秒飛行8單位
-        const flyDuration = 2500; // 2.5 秒飛行時間
+        const maxFlyDuration = 4000; // 最長 4 秒（安全上限）
+        const fadeDuration = 600; // 到達後淡出時間
         const rotationSpeed = Math.PI * 8; // 高速旋轉
+        const arrivalThreshold = unitSize * 0.5; // 到達判定距離（0.5 單位）
 
         // 創建咒言圓圈 sprite（使用 CIRCLE 紋理）
         const startScreen = this.worldToScreen(this.characterX, this.characterY);
@@ -8248,52 +8298,94 @@ export default class MainScene extends Phaser.Scene {
         let currentWorldX = this.characterX;
         let currentWorldY = this.characterY;
 
-        // 動畫：曲線飛行 + 放大 + 淡出
+        // 狀態追蹤
         let elapsed = 0;
+        let hasArrived = false; // 是否已到達目標
+        let fadeElapsed = 0; // 淡出經過時間
+        let currentRadius = startRadius;
+
         const updateEvent = this.time.addEvent({
             delay: 16, // 約 60fps
             loop: true,
             callback: () => {
                 elapsed += 16;
-                const progress = Math.min(1, elapsed / flyDuration);
                 const dt = 16 / 1000; // 秒
 
-                // 曲線追蹤：逐漸轉向目標
+                // 計算到目標的距離
                 const toTargetX = targetX - currentWorldX;
                 const toTargetY = targetY - currentWorldY;
                 const toTargetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
 
-                if (toTargetDist > 0.1) {
-                    const targetDirX = toTargetX / toTargetDist;
-                    const targetDirY = toTargetY / toTargetDist;
+                // 檢查是否到達目標
+                if (!hasArrived && toTargetDist <= arrivalThreshold) {
+                    hasArrived = true;
+                }
 
-                    // 追蹤強度隨進度增加（前0.3秒直線，之後開始追蹤）
-                    const trackingStrength = progress < 0.12 ? 0 : Math.min(1, (progress - 0.12) * 3);
-                    const turnRate = 3 * trackingStrength; // 轉向速率
+                // 飛行階段（未到達時）
+                if (!hasArrived) {
+                    const flyProgress = Math.min(1, elapsed / maxFlyDuration);
 
-                    // 平滑轉向
-                    dirX += (targetDirX - dirX) * turnRate * dt;
-                    dirY += (targetDirY - dirY) * turnRate * dt;
+                    if (toTargetDist > 0.1) {
+                        const targetDirX = toTargetX / toTargetDist;
+                        const targetDirY = toTargetY / toTargetDist;
 
-                    // 正規化方向
-                    const dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
-                    if (dirLen > 0) {
-                        dirX /= dirLen;
-                        dirY /= dirLen;
+                        // 追蹤強度隨進度增加（前0.3秒直線，之後開始追蹤）
+                        const trackingStrength = flyProgress < 0.08 ? 0 : Math.min(1, (flyProgress - 0.08) * 4);
+                        const turnRate = 4 * trackingStrength; // 轉向速率
+
+                        // 平滑轉向
+                        dirX += (targetDirX - dirX) * turnRate * dt;
+                        dirY += (targetDirY - dirY) * turnRate * dt;
+
+                        // 正規化方向
+                        const dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
+                        if (dirLen > 0) {
+                            dirX /= dirLen;
+                            dirY /= dirLen;
+                        }
+                    }
+
+                    // 更新位置
+                    currentWorldX += dirX * speed * dt;
+                    currentWorldY += dirY * speed * dt;
+
+                    // 放大（飛行中緩慢放大到一半）
+                    currentRadius = startRadius + (endRadius - startRadius) * 0.5 * flyProgress;
+
+                    // 超時強制進入淡出
+                    if (flyProgress >= 1) {
+                        hasArrived = true;
                     }
                 }
 
-                // 更新位置
-                currentWorldX += dirX * speed * dt;
-                currentWorldY += dirY * speed * dt;
-                const currentScreen = this.worldToScreen(currentWorldX, currentWorldY);
+                // 淡出階段（到達後）
+                if (hasArrived) {
+                    fadeElapsed += 16;
+                    const fadeProgress = Math.min(1, fadeElapsed / fadeDuration);
 
-                // 更新 sprite 位置
+                    // 到達後快速放大到最終尺寸
+                    currentRadius = startRadius + (endRadius - startRadius) * (0.5 + 0.5 * fadeProgress);
+
+                    // 淡出
+                    const alphaMultiplier = 1 - fadeProgress;
+                    circleSprite.setAlpha(0.8 * alphaMultiplier);
+                    innerCircle.setAlpha(0.9 * alphaMultiplier);
+
+                    // 結束
+                    if (fadeProgress >= 1) {
+                        updateEvent.destroy();
+                        circleSprite.destroy();
+                        innerCircle.destroy();
+                        return;
+                    }
+                }
+
+                // 更新螢幕位置
+                const currentScreen = this.worldToScreen(currentWorldX, currentWorldY);
                 circleSprite.setPosition(currentScreen.x, currentScreen.y);
                 innerCircle.setPosition(currentScreen.x, currentScreen.y);
 
-                // 計算當前半徑（線性放大）
-                const currentRadius = startRadius + (endRadius - startRadius) * progress;
+                // 更新尺寸
                 const currentScale = (currentRadius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
                 circleSprite.setScale(currentScale);
                 innerCircle.setScale(currentScale * 0.7);
@@ -8302,14 +8394,6 @@ export default class MainScene extends Phaser.Scene {
                 const rotation = (elapsed / 1000) * rotationSpeed;
                 circleSprite.setRotation(rotation);
                 innerCircle.setRotation(-rotation * 0.5);
-
-                // 淡出（後半段開始淡出）
-                if (progress > 0.5) {
-                    const fadeProgress = (progress - 0.5) / 0.5;
-                    const alphaMultiplier = 1 - fadeProgress;
-                    circleSprite.setAlpha(0.8 * alphaMultiplier);
-                    innerCircle.setAlpha(0.9 * alphaMultiplier);
-                }
 
                 // 碰撞檢測
                 const monsters = this.monsterManager.getMonsters();
@@ -8328,13 +8412,6 @@ export default class MainScene extends Phaser.Scene {
                         const hitScreen = this.worldToScreen(monster.x, monster.y);
                         this.showExplosionSparkEffect(hitScreen.x, hitScreen.y, MainScene.PHANTOM_COLOR_LIGHT, 0.6);
                     }
-                }
-
-                // 結束
-                if (progress >= 1) {
-                    updateEvent.destroy();
-                    circleSprite.destroy();
-                    innerCircle.destroy();
                 }
             }
         });
@@ -9453,14 +9530,23 @@ export default class MainScene extends Phaser.Scene {
             const damageUnits = this.currentLevel + level;
             const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
             const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
-            const shieldRatio = this.currentShield / this.maxShield;
-            const bladeCount = Math.max(1, Math.ceil(shieldRatio * 6));
-            const shieldCost = Math.ceil(this.maxShield * 0.02);
+            // 輪鋸數量：基本 3 個，每 10 技能等級 +1，最多 6 個
+            const maxBladeCount = 6;
+            const bladeCount = Math.min(maxBladeCount, 3 + Math.floor(level / 10));
+            // 護盾消耗：2%，升滿後每技能級 -0.1%，可變負數回血
+            let costRate = 0.02;
+            if (bladeCount >= maxBladeCount) {
+                const levelsAbove30 = level - 30;
+                costRate = 0.02 - levelsAbove30 * 0.001;
+            }
+            const shieldChange = Math.ceil(this.maxShield * Math.abs(costRate));
+            const costPercent = (costRate * 100).toFixed(1) + '%';
+            const costLabel = costRate >= 0 ? '撞敵耗盾' : '撞敵回盾';
 
             infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
-            infoLines.push(`輪鋸數量: ${bladeCount} / 6`);
+            infoLines.push(`輪鋸數量: ${bladeCount} / 6（技能Lv${level}）`);
             infoLines.push(`旋轉速度: 2 秒/圈`);
-            infoLines.push(`撞敵耗盾: ${shieldCost} (2%)`);
+            infoLines.push(`${costLabel}: ${shieldChange} (${costPercent})`);
             infoLines.push(`當前護盾: ${this.currentShield}/${this.maxShield}`);
         } else if (def.id === 'advanced_perfect_pixel') {
             // 完美像素審判
@@ -9493,14 +9579,10 @@ export default class MainScene extends Phaser.Scene {
             const damageUnits = this.currentLevel + level;
             const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
             const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
-            const dps = finalDamage * 5; // 每 0.2 秒一次 = 每秒 5 次
-            const maxBeams = 4 + Math.floor(level / 5);
-
-            infoLines.push(`傷害: ${damageUnits} 單位（${finalDamage}）`);
-            infoLines.push(`每秒傷害: ${dps}（0.2秒/次）`);
-            infoLines.push(`光束數量: ${maxBeams} 發（4+Lv/5）`);
-            infoLines.push(`傷害範圍: 1 單位`);
-            infoLines.push(`矩陣半徑: 5 單位`);
+            infoLines.push(`基礎傷害: ${damageUnits} 單位（${finalDamage}）`);
+            infoLines.push(`鎖敵加成: 每秒 +${level}% 傷害`);
+            infoLines.push(`光束加粗: 每秒 x2, x3, x4...`);
+            infoLines.push(`傷害範圍: 1 + 每秒 +0.5 單位`);
             infoLines.push(`減速效果: 50%`);
         } else if (def.id === 'advanced_phantom_iteration') {
             // 幻影迭代模式
@@ -10810,9 +10892,12 @@ export default class MainScene extends Phaser.Scene {
             iconBg.setStrokeStyle(2, advSkillDef.color);
             optionContainer.add(iconBg);
 
-            // 如果有技能圖示
+            // 如果有技能圖示（檢查是否為固定圖示）
             if (advSkillDef.iconPrefix) {
-                const iconKey = `skill_${advSkillDef.iconPrefix}0${Math.min(nextLevel, advSkillDef.maxLevel)}`;
+                const isFixedIcon = /\d$/.test(advSkillDef.iconPrefix);
+                const iconKey = isFixedIcon
+                    ? `skill_icon_${advSkillDef.iconPrefix}`
+                    : `skill_${advSkillDef.iconPrefix}0${Math.min(nextLevel, advSkillDef.maxLevel)}`;
                 if (this.textures.exists(iconKey)) {
                     const iconSprite = this.add.sprite(0, iconY, iconKey);
                     iconSprite.setOrigin(0.5, 0.5);
@@ -11164,9 +11249,12 @@ export default class MainScene extends Phaser.Scene {
                 iconBg.setStrokeStyle(2, advSkillDef.color);
                 optionContainer.add(iconBg);
 
-                // 如果有技能圖示
+                // 如果有技能圖示（檢查是否為固定圖示）
                 if (advSkillDef.iconPrefix) {
-                    const iconKey = `skill_${advSkillDef.iconPrefix}0${Math.min(nextLevel, advSkillDef.maxLevel < 0 ? nextLevel : advSkillDef.maxLevel)}`;
+                    const isFixedIcon = /\d$/.test(advSkillDef.iconPrefix);
+                    const iconKey = isFixedIcon
+                        ? `skill_icon_${advSkillDef.iconPrefix}`
+                        : `skill_${advSkillDef.iconPrefix}0${Math.min(nextLevel, advSkillDef.maxLevel < 0 ? nextLevel : advSkillDef.maxLevel)}`;
                     if (this.textures.exists(iconKey)) {
                         const iconSprite = this.add.sprite(0, iconY, iconKey);
                         iconSprite.setOrigin(0.5, 0.5);
@@ -11730,6 +11818,10 @@ export default class MainScene extends Phaser.Scene {
 
     // 從物件池取得 Sprite
     private getSkillEffectSprite(): Phaser.GameObjects.Sprite | null {
+        // 檢查是否超過最大活躍數
+        if (this.activeSkillEffects.length >= MainScene.MAX_ACTIVE_SKILL_EFFECTS) {
+            return null; // 超過上限，跳過此特效
+        }
         // 優先從池中取用
         let sprite = this.skillEffectPool.pop();
         if (!sprite) {
@@ -11775,8 +11867,12 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 從 LINE 池取得 Sprite
-    private getLineEffectSprite(): Phaser.GameObjects.Sprite {
+    // 從 LINE 池取得 Sprite（超過上限時返回 null）
+    private getLineEffectSprite(): Phaser.GameObjects.Sprite | null {
+        // 檢查是否超過最大活躍數
+        if (this.activeLineEffects.length >= MainScene.MAX_ACTIVE_LINE_EFFECTS) {
+            return null; // 超過上限，跳過此粒子
+        }
         let sprite = this.lineEffectPool.pop();
         if (!sprite) {
             sprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
@@ -11913,6 +12009,8 @@ export default class MainScene extends Phaser.Scene {
             }
 
             const lineSprite = this.getLineEffectSprite();
+            if (!lineSprite) continue; // 超過上限則跳過
+
             lineSprite.setPosition(startX, startY);
             lineSprite.setTint(sparkColors[i % sparkColors.length]);
             lineSprite.setRotation(angle);
@@ -11987,6 +12085,8 @@ export default class MainScene extends Phaser.Scene {
             const startY = screenY + Math.sin(angle) * tailOffset;
 
             const lineSprite = this.getLineEffectSprite();
+            if (!lineSprite) continue; // 超過上限則跳過
+
             lineSprite.setPosition(startX, startY);
             lineSprite.setTint(sparkColors[i % sparkColors.length]);
             lineSprite.setRotation(angle);
@@ -12200,6 +12300,7 @@ export default class MainScene extends Phaser.Scene {
 
         for (let i = 0; i < particleCount; i++) {
             const particle = this.getLineEffectSprite();
+            if (!particle) continue; // 超過上限則跳過
 
             // 隨機起始位置（角色周圍橢圓分布）
             const angle = (i / particleCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
@@ -12364,15 +12465,20 @@ export default class MainScene extends Phaser.Scene {
             }
         });
 
-        // === 5. 金色火花粒子向外輻射 ===
-        const sparkCount = 12;
+        // === 5. 金色火花粒子向外輻射（使用物件池）===
+        const sparkCount = 8; // 減少至 8 個
         for (let i = 0; i < sparkCount; i++) {
+            // 使用技能特效池來限制總數
+            const spark = this.getSkillEffectSprite();
+            if (!spark) continue; // 超過上限則跳過
+
+            spark.setTexture(MainScene.TEXTURE_CIRCLE);
+
             const angle = (Math.PI * 2 * i) / sparkCount + Math.random() * 0.3;
             const sparkDist = radius * (0.8 + Math.random() * 0.4);
             const startScreen = this.worldToScreen(worldX, worldY);
 
-            const spark = this.add.sprite(startScreen.x, startScreen.y, MainScene.TEXTURE_CIRCLE);
-            this.skillGridContainer.add(spark);
+            spark.setPosition(startScreen.x, startScreen.y);
             spark.setTint(i % 2 === 0 ? color : 0xffffff);
             spark.setAlpha(1);
             spark.setScale(0.08 + Math.random() * 0.04);
@@ -12397,7 +12503,7 @@ export default class MainScene extends Phaser.Scene {
                     const currentScreen = this.worldToScreen(currentWorldX, currentWorldY);
                     spark.setPosition(currentScreen.x, currentScreen.y);
                 },
-                onComplete: () => spark.destroy()
+                onComplete: () => this.releaseSkillEffectSprite(spark)
             });
         }
     }

@@ -62,7 +62,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         flashColor: 0xff9933,
         cooldown: 2000,  // 2 秒
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X01',
+        iconPrefix: 'SA0',  // SA0.png（固定圖示）
         requiredSkills: ['active_soul_render', 'passive_titanium_liver'],  // 靈魂渲染（動畫大師）+ 鈦金肝
         levelUpQuotes: ['你選擇成為傳統手繪動畫師、逐幀動畫師']
     },
@@ -75,7 +75,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         flashColor: 0xbb99ff,
         cooldown: 1000,  // 1 秒
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X02',
+        iconPrefix: 'SC0',  // SC0.png（固定圖示）
         requiredSkills: ['active_coder', 'passive_retina_module'],  // 咒言幻象（遊戲先知）+ 視網膜增強模組
         levelUpQuotes: ['左手寫 Code，右手畫圖，一人成軍的遊戲開發者']
     },
@@ -83,12 +83,12 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_absolute_defense',
         name: '絕對邏輯防禦',
         subtitle: '無懈可擊的系統架構',
-        description: '【靈魂統領＋同步率】\n有護盾時輪鋸繞身，滿盾6個，撞敵耗盾並擊退',
+        description: '【靈魂統領＋同步率】\n輪鋸2+每10技能級1個(max6)，滿後-0.1%→回盾',
         color: 0xffdd00,  // 金黃色（防禦感）
         flashColor: 0xffee66,
         cooldown: 100,  // 0.1 秒（持續效果，高頻更新）
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X03',
+        iconPrefix: 'SD0',  // SD0.png（固定圖示）
         requiredSkills: ['active_architect', 'passive_sync_rate'],  // 靈魂統領（架構師）+ 精神同步率強化
         levelUpQuotes: ['系統架構固若金湯，邏輯防線無懈可擊']
     },
@@ -101,7 +101,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         flashColor: 0x88ffee,
         cooldown: 3000,  // 3 秒
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X04',
+        iconPrefix: 'SB0',  // SB0.png（固定圖示）
         requiredSkills: ['active_vfx', 'passive_retina_module'],  // 疾光狙擊 + 視網膜增強模組
         levelUpQuotes: ['構圖的黃金法則，像素的完美審判']
     },
@@ -114,7 +114,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         flashColor: 0xff6633,
         cooldown: 3500,  // 3.5 秒
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X05',
+        iconPrefix: 'SB1',  // SB1.png（固定圖示）
         requiredSkills: ['active_vfx', 'passive_ai_enhancement'],  // 疾光狙擊 + AI 賦能強化
         levelUpQuotes: ['好萊塢級的視覺轟炸，每一幀都是藝術']
     },
@@ -127,7 +127,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         flashColor: 0xbb88ff,
         cooldown: 8000,  // 8 秒
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X06',
+        iconPrefix: 'SC1',  // SC1.png（固定圖示）
         requiredSkills: ['active_coder', 'passive_ai_enhancement'],  // 咒言幻象（遊戲先知）+ AI 賦能強化
         levelUpQuotes: ['影分身現身，咒言幻象的創作者']
     },
@@ -135,12 +135,12 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_zero_trust',
         name: '零信任防禦協定',
         subtitle: '絕對安全的系統架構',
-        description: '【靈魂統領＋AI強化】\n8角矩陣光束掃描，敵人減速50%',
+        description: '【靈魂統領＋AI強化】\n光束鎖敵每秒+1倍寬&+Lv%傷，減速50%',
         color: 0xffcc00,  // 金黃色
         flashColor: 0xffee66,
         cooldown: 0,  // 持續效果，無冷卻
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X07',
+        iconPrefix: 'SD1',  // SD1.png（固定圖示）
         requiredSkills: ['active_architect', 'passive_ai_enhancement'],  // 靈魂統領（架構師）+ AI 賦能強化
         levelUpQuotes: ['零信任，驗證一切，絕不妥協']
     },
@@ -153,7 +153,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         flashColor: 0xff6699,
         cooldown: 500,  // 0.5 秒
         maxLevel: -1,  // 無上限
-        iconPrefix: 'X08',
+        iconPrefix: 'SA1',  // SA1.png（固定圖示）
         requiredSkills: ['active_soul_render', 'passive_ai_enhancement'],  // 靈魂渲染（動畫大師）+ AI 賦能強化
         levelUpQuotes: ['向量運算，次元切割']
     }
@@ -280,6 +280,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         flashColor: 0xffdd44, // 閃金光
         cooldown: 10000, // 10 秒
         maxLevel: 5,
+        iconPrefix: 'D', // D00.png ~ D05.png
         levelUpMessages: [
             '30% HP 護盾、2 反傷',
             '30% HP 護盾、4 反傷',
