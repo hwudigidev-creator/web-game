@@ -48,7 +48,7 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         id: 'slime',
         name: '史萊姆',
         color: 0x66ff66,
-        speed: 1, // 每秒 1 單位
+        speed: 1.8, // 每秒 1.8 單位（加速）
         damage: 1,
         size: 0.05, // 畫面高度的 5%（縮小）
         hp: 30,
@@ -58,7 +58,7 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         id: 'boss_slime',
         name: 'BOSS 史萊姆',
         color: 0x4a1a6b, // 暗紫色
-        speed: 0.6, // 較慢
+        speed: 1.0, // 較慢但比之前快
         damage: 3, // 3 倍傷害
         size: 0.15, // 3 倍大（5% * 3）
         hp: 30, // 基礎 HP（會根據等級倍數計算）
@@ -85,6 +85,11 @@ export class MonsterManager {
     private monsters: Monster[] = [];
     private nextMonsterId: number = 0;
     private clipMask: Phaser.Display.Masks.GeometryMask | null = null;
+
+    // 效能優化：怪物數量上限與距離傳送（1 單位 = 遊戲區高度 10%）
+    private static readonly MAX_MONSTERS = 200;           // 最大怪物數量
+    private static readonly TELEPORT_UNITS = 2;           // 超出可視區域幾單位才傳送
+    private static readonly SPAWN_EDGE_UNITS = 1;         // 傳送到可視區域外幾單位
 
     // 生成設定
     private spawnInterval: number = 2000; // 每 2 秒生成一隻
@@ -113,7 +118,7 @@ export class MonsterManager {
     private playerLevel: number = 0;
 
     // 怪物成長曲線常數
-    private static readonly HP_GROWTH_RATE = 1.10; // 每級血量成長 10%
+    private static readonly HP_GROWTH_RATE = 1.12; // 每級血量成長 12%（配合動態生成速率）
 
     // 基礎攻擊單位（1 單位 = 10 傷害）
     private static readonly DAMAGE_UNIT = 10;
@@ -299,11 +304,11 @@ export class MonsterManager {
         this.createMonsterGrid();
     }
 
-    // 計算 70 級後的強化倍率（每 5 級 +10%）
+    // 計算 70 級後的強化倍率（每 5 級 +15%，配合動態生成補償）
     private getHighLevelMultiplier(): number {
         if (this.playerLevel <= 70) return 1;
         const extraTiers = Math.floor((this.playerLevel - 70) / 5);
-        return 1 + 0.1 * extraTiers;
+        return 1 + 0.15 * extraTiers;
     }
 
     // 計算怪物血量（根據玩家等級，70 級後額外強化）
@@ -358,23 +363,38 @@ export class MonsterManager {
         let totalDamage = 0;
         const hitMonsters: Monster[] = [];
 
-        // 檢查是否需要生成新怪物
-        if (this.isSpawning && now - this.lastSpawnTime >= this.spawnInterval) {
+        // 檢查是否需要生成新怪物（動態生成速率）
+        const monsterGap = MonsterManager.MAX_MONSTERS - this.monsters.length;
+        // 根據缺口動態調整生成間隔
+        let dynamicInterval = this.spawnInterval; // 預設 2000ms
+        if (monsterGap > 100) {
+            dynamicInterval = 500;  // 缺口大：每 0.5 秒
+        } else if (monsterGap > 50) {
+            dynamicInterval = 1000; // 缺口中：每 1 秒
+        }
+
+        if (this.isSpawning && now - this.lastSpawnTime >= dynamicInterval && monsterGap > 0) {
             // 每5級多生成1隻怪物，70級後不再增加（最多15隻）
-            // 70級後改為強化怪物血量和傷害
             const effectiveLevel = Math.min(this.playerLevel, 70);
             const spawnCount = 1 + Math.floor(effectiveLevel / 5);
-            for (let i = 0; i < spawnCount; i++) {
+            const actualSpawnCount = Math.min(spawnCount, monsterGap);
+            for (let i = 0; i < actualSpawnCount; i++) {
                 this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
             }
             this.lastSpawnTime = now;
         }
 
-        // 檢查是否需要生成蝙蝠群
+        // 檢查是否需要生成蝙蝠群（受數量上限限制）
         if (this.isSpawning && now - this.lastBatSwarmTime >= this.batSwarmInterval) {
-            this.spawnBatSwarm(cameraOffsetX, cameraOffsetY);
+            const availableSlots = MonsterManager.MAX_MONSTERS - this.monsters.length;
+            if (availableSlots > 0) {
+                this.spawnBatSwarm(cameraOffsetX, cameraOffsetY, availableSlots);
+            }
             this.lastBatSwarmTime = now;
         }
+
+        // 檢查遠離玩家的怪物並傳送到邊緣
+        this.teleportDistantMonsters(playerX, playerY, cameraOffsetX, cameraOffsetY);
 
         // 玩家碰撞範圍（1 個單位 = 畫面高度 10%）
         const collisionRange = this.gameBounds.height * 0.10;
@@ -486,6 +506,71 @@ export class MonsterManager {
         return { damage: totalDamage, hitMonsters };
     }
 
+    // 將超出可視區域的怪物傳送回畫面邊緣
+    private teleportDistantMonsters(
+        _playerX: number,
+        _playerY: number,
+        cameraOffsetX: number,
+        cameraOffsetY: number
+    ) {
+        // 1 單位 = 遊戲區高度 10%
+        const unit = this.gameBounds.height * 0.1;
+        const teleportDist = unit * MonsterManager.TELEPORT_UNITS;  // 超出 2 單位才傳送
+        const spawnDist = unit * MonsterManager.SPAWN_EDGE_UNITS;   // 傳送到外 1 單位
+
+        // 可視區域邊界
+        const viewLeft = cameraOffsetX;
+        const viewRight = cameraOffsetX + this.gameBounds.width;
+        const viewTop = cameraOffsetY;
+        const viewBottom = cameraOffsetY + this.gameBounds.height;
+
+        for (const monster of this.monsters) {
+            // 蝙蝠不傳送（它們會自然飛出畫面並被移除）
+            if (monster.isBat) continue;
+            // BOSS 不傳送
+            if (monster.isBoss) continue;
+
+            // 計算怪物距離可視區域的距離
+            let distanceOutside = 0;
+            if (monster.x < viewLeft) {
+                distanceOutside = Math.max(distanceOutside, viewLeft - monster.x);
+            } else if (monster.x > viewRight) {
+                distanceOutside = Math.max(distanceOutside, monster.x - viewRight);
+            }
+            if (monster.y < viewTop) {
+                distanceOutside = Math.max(distanceOutside, viewTop - monster.y);
+            } else if (monster.y > viewBottom) {
+                distanceOutside = Math.max(distanceOutside, monster.y - viewBottom);
+            }
+
+            // 如果超出可視區域 2 單位以上，傳送到邊緣
+            if (distanceOutside > teleportDist) {
+                // 隨機選擇邊緣方向（上、下、左、右）
+                const edges = ['top', 'bottom', 'left', 'right'];
+                const edge = edges[Math.floor(Math.random() * edges.length)];
+
+                switch (edge) {
+                    case 'top':
+                        monster.x = viewLeft + Math.random() * this.gameBounds.width;
+                        monster.y = viewTop - spawnDist;
+                        break;
+                    case 'bottom':
+                        monster.x = viewLeft + Math.random() * this.gameBounds.width;
+                        monster.y = viewBottom + spawnDist;
+                        break;
+                    case 'left':
+                        monster.x = viewLeft - spawnDist;
+                        monster.y = viewTop + Math.random() * this.gameBounds.height;
+                        break;
+                    case 'right':
+                        monster.x = viewRight + spawnDist;
+                        monster.y = viewTop + Math.random() * this.gameBounds.height;
+                        break;
+                }
+            }
+        }
+    }
+
     // 生成怪物
     private spawnMonster(
         _playerX: number,
@@ -553,7 +638,7 @@ export class MonsterManager {
     }
 
     // 生成蝙蝠群（從斜對角衝向對角，穿過整個畫面）
-    private spawnBatSwarm(cameraOffsetX: number, cameraOffsetY: number) {
+    private spawnBatSwarm(cameraOffsetX: number, cameraOffsetY: number, maxCount: number = this.batSwarmCount) {
         // 隨機選擇生成角落（四個角落之一）
         const corners = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
         const corner = corners[Math.floor(Math.random() * corners.length)];
@@ -604,11 +689,12 @@ export class MonsterManager {
         // 取得蝙蝠定義
         const batDef = MONSTER_TYPES.find(m => m.id === 'bat') || MONSTER_TYPES[0];
 
-        // 生成 8 隻蝙蝠，在圓形範圍內隨機分散（不重疊）
+        // 生成蝙蝠，在圓形範圍內隨機分散（不重疊）
         const spawnedPositions: { x: number; y: number }[] = [];
         const minDistance = this.gameBounds.height * 0.04; // 最小間距，避免重疊
+        const actualCount = Math.min(this.batSwarmCount, maxCount);
 
-        for (let i = 0; i < this.batSwarmCount; i++) {
+        for (let i = 0; i < actualCount; i++) {
             let spawnX: number;
             let spawnY: number;
             let attempts = 0;

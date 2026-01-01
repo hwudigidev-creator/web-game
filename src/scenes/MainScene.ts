@@ -292,6 +292,12 @@ export default class MainScene extends Phaser.Scene {
     private isPaused: boolean = false;
     private popupPaused: boolean = false; // UI 彈出視窗暫停
     private isSkillSelecting: boolean = false; // 防止重複點擊
+    private pendingSkillPoints: number = 0; // 待分配的技能點數
+
+    // DEBUG 模式
+    private debugMode: boolean = false;
+    private debugText!: Phaser.GameObjects.Text;
+    private debugKey!: Phaser.Input.Keyboard.Key;
     private skillOptions: Phaser.GameObjects.Container[] = [];
     // 技能選擇按鍵 (1, 2, 3)
     private keyOne!: Phaser.Input.Keyboard.Key;
@@ -724,7 +730,13 @@ export default class MainScene extends Phaser.Scene {
             this.keyF10 = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F10);
             this.keyF11 = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F11);
             this.keyF12 = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F12);
+
+            // DEBUG 模式按鍵（~ 反引號）
+            this.debugKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.BACKTICK);
         }
+
+        // 建立 DEBUG 顯示文字（左下角）
+        this.createDebugDisplay();
 
         // 初始化鏡頭位置
         this.updateCamera(true); // 強制更新鏡頭
@@ -782,6 +794,15 @@ export default class MainScene extends Phaser.Scene {
     }
 
     update(_time: number, delta: number) {
+        // DEBUG 模式切換（Ctrl + ~）
+        if (this.debugKey && this.keyCtrl &&
+            Phaser.Input.Keyboard.JustDown(this.debugKey) && this.keyCtrl.isDown) {
+            this.toggleDebugMode();
+        }
+
+        // 更新 DEBUG 顯示
+        this.updateDebugDisplay();
+
         // 如果遊戲暫停或彈出視窗開啟，只處理必要的 UI 更新
         if (this.isPaused || this.popupPaused) {
             // 純視覺效果可以繼續（UI 流動動畫）
@@ -2438,8 +2459,9 @@ export default class MainScene extends Phaser.Scene {
         // 更新低血量紅暈效果
         this.updateLowHpVignette();
 
-        // 顯示技能選擇面板
-        this.showSkillPanel();
+        // 累加待分配技能點數，並嘗試顯示面板（如果面板未顯示）
+        this.pendingSkillPoints++;
+        this.tryShowSkillPanel();
 
         // 更新經驗條
         this.drawExpBarFill();
@@ -2876,8 +2898,9 @@ export default class MainScene extends Phaser.Scene {
             leftControls.classList.add('visible');
         }
 
-        // 轉場完成後顯示技能選擇面板
-        this.showSkillPanel();
+        // 轉場完成後顯示技能選擇面板（初始 1 點技能點數）
+        this.pendingSkillPoints = 1;
+        this.tryShowSkillPanel();
 
         // 開始生成怪物
         this.monsterManager.startSpawning();
@@ -2946,6 +2969,61 @@ export default class MainScene extends Phaser.Scene {
             0x000000 // 黑色填充
         );
         this.boundsBorder.setStrokeStyle(2, 0x444444);
+    }
+
+    // ===== DEBUG 顯示系統 =====
+
+    private createDebugDisplay() {
+        // 左下角 DEBUG 資訊文字
+        const fontSize = Math.max(12, Math.floor(this.gameBounds.height * 0.02));
+        this.debugText = this.add.text(
+            this.gameBounds.x + 10,
+            this.gameBounds.y + this.gameBounds.height - 10,
+            '',
+            {
+                fontFamily: 'monospace',
+                fontSize: `${fontSize}px`,
+                color: '#00ff00',
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                padding: { x: 6, y: 4 }
+            }
+        );
+        this.debugText.setOrigin(0, 1);
+        this.debugText.setDepth(9999); // 最上層
+        this.debugText.setVisible(false);
+    }
+
+    private updateDebugDisplay() {
+        if (!this.debugMode || !this.debugText) return;
+
+        const fps = Math.round(this.game.loop.actualFps);
+        const monsterCount = this.monsterManager ? this.monsterManager.getMonsters().length : 0;
+        const playerPos = `(${Math.round(this.characterX)}, ${Math.round(this.characterY)})`;
+        const cameraPos = `(${Math.round(this.cameraOffsetX)}, ${Math.round(this.cameraOffsetY)})`;
+        const gameTime = Math.floor(this.gameTimer / 1000);
+        const minutes = Math.floor(gameTime / 60);
+        const seconds = gameTime % 60;
+
+        const debugInfo = [
+            `FPS: ${fps}`,
+            `怪物數量: ${monsterCount} / 200`,
+            `玩家位置: ${playerPos}`,
+            `鏡頭位置: ${cameraPos}`,
+            `遊戲時間: ${minutes}:${String(seconds).padStart(2, '0')}`,
+            `等級: ${this.currentLevel}`,
+            `HP: ${Math.round(this.currentHp)} / ${Math.round(this.maxHp)}`,
+            `護盾: ${Math.round(this.currentShield)} / ${Math.round(this.maxShield)}`,
+            `待分配點數: ${this.pendingSkillPoints}`
+        ].join('\n');
+
+        this.debugText.setText(debugInfo);
+    }
+
+    private toggleDebugMode() {
+        this.debugMode = !this.debugMode;
+        if (this.debugText) {
+            this.debugText.setVisible(this.debugMode);
+        }
     }
 
     // ===== HP 條系統 =====
@@ -10300,13 +10378,32 @@ export default class MainScene extends Phaser.Scene {
         this.selectedSkillIndex = 0;
     }
 
+    // 嘗試顯示技能面板（如果面板未顯示且有待分配點數）
+    private tryShowSkillPanel() {
+        // 如果面板已經顯示，不重複顯示
+        if (this.skillPanelContainer && this.skillPanelContainer.visible) {
+            return;
+        }
+        // 如果沒有待分配點數，不顯示
+        if (this.pendingSkillPoints <= 0) {
+            return;
+        }
+        this.showSkillPanel();
+    }
+
     private showSkillPanel() {
+        // 如果面板已經顯示，不重複顯示（防止快速連點造成狀態混亂）
+        if (this.skillPanelContainer && this.skillPanelContainer.visible) {
+            return;
+        }
+
         // 檢查是否有可升級的技能（包含進階技能）
         const hasNormalSkills = this.skillManager.hasUpgradeableSkills();
         const hasAdvancedSkills = this.skillManager.getUpgradeableAdvancedSkills().length > 0;
 
         if (!hasNormalSkills && !hasAdvancedSkills) {
-            // 技能全滿後不暫停遊戲，但仍享有升級帶來的 HP 成長
+            // 技能全滿後不暫停遊戲，消耗所有待分配點數
+            this.pendingSkillPoints = 0;
             return;
         }
 
@@ -10319,6 +10416,7 @@ export default class MainScene extends Phaser.Scene {
                            this.mixedSkillTypes.length > 0 ||
                            (this.isSelectingAdvancedSkill && this.currentAdvancedSkillChoices.length > 0);
         if (!hasOptions) {
+            this.pendingSkillPoints = 0;
             return;
         }
 
@@ -10368,8 +10466,11 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private hideSkillPanel() {
-        // 選完技能卡後立即恢復遊戲（CUT IN 期間不暫停）
-        this.isPaused = false;
+        // 消耗一個待分配技能點數
+        this.pendingSkillPoints = Math.max(0, this.pendingSkillPoints - 1);
+
+        // 立即重置選擇狀態，避免快速連點時卡住
+        this.isSkillSelecting = false;
 
         // 淡出動畫
         this.tweens.add({
@@ -10378,6 +10479,17 @@ export default class MainScene extends Phaser.Scene {
             duration: 200,
             onComplete: () => {
                 this.skillPanelContainer.setVisible(false);
+
+                // 檢查是否還有待分配的技能點數
+                if (this.pendingSkillPoints > 0) {
+                    // 延遲一小段時間後顯示下一個面板
+                    this.time.delayedCall(100, () => {
+                        this.tryShowSkillPanel();
+                    });
+                } else {
+                    // 沒有待分配點數時才恢復遊戲
+                    this.isPaused = false;
+                }
             }
         });
     }

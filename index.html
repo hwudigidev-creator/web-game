@@ -275,9 +275,11 @@
       gap: 12px;
     }
 
-    /* 排行榜專用樣式 */
+    /* 排行榜專用樣式 - 固定螢幕 padding */
     .leaderboard-content {
-      width: min(520px, 95vw);
+      width: min(520px, calc(100vw - 40px));
+      height: calc(100vh - 80px);
+      max-height: calc(100vh - 80px);
       overflow: visible;
       box-sizing: border-box;
     }
@@ -288,6 +290,7 @@
       margin-bottom: 16px;
       width: 100%;
       box-sizing: border-box;
+      flex-shrink: 0;
     }
 
     .lb-tab {
@@ -339,9 +342,12 @@
       background: rgba(20, 20, 40, 0.8);
       border-radius: 8px;
       padding: 8px;
-      min-height: 280px;
+      flex: 1;
+      min-height: 0;
       box-sizing: border-box;
-      overflow: hidden;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }
 
     .lb-header {
@@ -351,6 +357,7 @@
       font-size: clamp(10px, 2.5vw, 12px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
       margin-bottom: 4px;
+      flex-shrink: 0;
     }
 
     .lb-rank {
@@ -425,6 +432,11 @@
       color: #ffcc00;
     }
 
+    #lb-entries {
+      flex: 1;
+      overflow-y: auto;
+    }
+
     #lb-entries:not(:empty) + .lb-empty {
       display: none;
     }
@@ -471,6 +483,7 @@
       color: rgba(255, 255, 255, 0.5);
       font-size: clamp(10px, 2.5vw, 12px);
       margin-top: 8px;
+      flex-shrink: 0;
     }
 
     /* 死亡結算視窗樣式 */
@@ -1283,10 +1296,21 @@
     const lbPageNum = document.getElementById('lb-page-num');
     const lbPageTotal = document.getElementById('lb-page-total');
 
-    const ENTRIES_PER_PAGE = 10;
     const MAX_ENTRIES = 100;
     let currentTab = 'time';
     let currentPage = 1;
+
+    // 動態計算每頁顯示數量
+    function calculateEntriesPerPage() {
+      const lbList = document.querySelector('.lb-list');
+      if (!lbList) return 10;
+      // 取得列表可用高度（扣除 header 約 30px 和 padding）
+      const availableHeight = lbList.clientHeight - 40;
+      // 每個 entry 約 30px 高度（含 padding）
+      const entryHeight = 30;
+      const count = Math.floor(availableHeight / entryHeight);
+      return Math.max(5, Math.min(20, count)); // 最少5筆，最多20筆
+    }
 
     // Google Sheets API URL
     const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyjqIgHpEa9G6qR53DjAV8mLA_794Pepoc9cUJWeZJRPIC7Iqj6fTsfy2vl-a95x6aMnQ/exec';
@@ -1426,15 +1450,16 @@
     }
 
     function renderLeaderboard() {
+      const entriesPerPage = calculateEntriesPerPage();
       const data = leaderboardData[currentTab].slice(0, MAX_ENTRIES);
-      const totalPages = Math.max(1, Math.ceil(data.length / ENTRIES_PER_PAGE));
+      const totalPages = Math.max(1, Math.ceil(data.length / entriesPerPage));
 
       // 確保頁碼有效
       if (currentPage > totalPages) currentPage = totalPages;
       if (currentPage < 1) currentPage = 1;
 
-      const start = (currentPage - 1) * ENTRIES_PER_PAGE;
-      const end = start + ENTRIES_PER_PAGE;
+      const start = (currentPage - 1) * entriesPerPage;
+      const end = start + entriesPerPage;
       const pageData = data.slice(start, end);
 
       // 清空並填入資料
@@ -1483,10 +1508,18 @@
     });
 
     lbNext.addEventListener('click', () => {
+      const entriesPerPage = calculateEntriesPerPage();
       const data = leaderboardData[currentTab].slice(0, MAX_ENTRIES);
-      const totalPages = Math.ceil(data.length / ENTRIES_PER_PAGE);
+      const totalPages = Math.ceil(data.length / entriesPerPage);
       if (currentPage < totalPages) {
         currentPage++;
+        renderLeaderboard();
+      }
+    });
+
+    // 視窗大小變更時重新渲染（調整每頁數量）
+    window.addEventListener('resize', () => {
+      if (leaderboardPopup.classList.contains('visible')) {
         renderLeaderboard();
       }
     });
