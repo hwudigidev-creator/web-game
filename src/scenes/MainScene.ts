@@ -12256,7 +12256,60 @@ export default class MainScene extends Phaser.Scene {
         const finalScale = (radius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
         const initialScale = finalScale * 0.05; // 從 5% 開始
 
-        // 建立外層八角盾（金色，高速旋轉）
+        // === 1. 中央閃光爆發 ===
+        const flash = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_CIRCLE);
+        this.skillGridContainer.add(flash);
+        flash.setTint(0xffffff);
+        flash.setAlpha(1);
+        flash.setScale(0.1);
+        flash.setDepth(252);
+
+        this.tweens.add({
+            targets: flash,
+            scaleX: finalScale * 0.8,
+            scaleY: finalScale * 0.8,
+            alpha: 0,
+            duration: 300,
+            ease: 'Cubic.easeOut',
+            onUpdate: () => {
+                const updatedScreen = this.worldToScreen(worldX, worldY);
+                flash.setPosition(updatedScreen.x, updatedScreen.y);
+            },
+            onComplete: () => flash.destroy()
+        });
+
+        // === 2. 多層衝擊波環（延遲產生） ===
+        const ringDelays = [0, 80, 160];
+        const ringColors = [color, 0xffee88, 0xffffff];
+        const ringAlphas = [0.9, 0.7, 0.5];
+
+        ringDelays.forEach((delay, i) => {
+            this.time.delayedCall(delay, () => {
+                const ring = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
+                this.skillGridContainer.add(ring);
+                ring.setTint(ringColors[i]);
+                ring.setAlpha(ringAlphas[i]);
+                ring.setScale(initialScale * (1 + i * 0.3));
+                ring.setDepth(249 - i);
+
+                this.tweens.add({
+                    targets: ring,
+                    scaleX: finalScale * (1.2 + i * 0.15),
+                    scaleY: finalScale * (1.2 + i * 0.15),
+                    rotation: Math.PI * (4 - i), // 各層不同旋轉速度
+                    alpha: 0,
+                    duration: 600 + i * 100,
+                    ease: 'Cubic.easeOut',
+                    onUpdate: () => {
+                        const updatedScreen = this.worldToScreen(worldX, worldY);
+                        ring.setPosition(updatedScreen.x, updatedScreen.y);
+                    },
+                    onComplete: () => ring.destroy()
+                });
+            });
+        });
+
+        // === 3. 主八角盾（金色，高速旋轉） ===
         const outer = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
         this.skillGridContainer.add(outer);
         outer.setTint(color);
@@ -12265,11 +12318,11 @@ export default class MainScene extends Phaser.Scene {
         outer.setDepth(250);
         outer.setRotation(0);
 
-        // 建立內層八角盾（白色高光，反向旋轉）
+        // === 4. 內層八角盾（白色高光，反向旋轉） ===
         const inner = this.add.sprite(screen.x, screen.y, MainScene.TEXTURE_SHIELD);
         this.skillGridContainer.add(inner);
         inner.setTint(0xffffff);
-        inner.setAlpha(0.8);
+        inner.setAlpha(0.9);
         inner.setScale(initialScale * 0.5);
         inner.setDepth(251);
         inner.setRotation(0);
@@ -12310,6 +12363,43 @@ export default class MainScene extends Phaser.Scene {
                 inner.destroy();
             }
         });
+
+        // === 5. 金色火花粒子向外輻射 ===
+        const sparkCount = 12;
+        for (let i = 0; i < sparkCount; i++) {
+            const angle = (Math.PI * 2 * i) / sparkCount + Math.random() * 0.3;
+            const sparkDist = radius * (0.8 + Math.random() * 0.4);
+            const startScreen = this.worldToScreen(worldX, worldY);
+
+            const spark = this.add.sprite(startScreen.x, startScreen.y, MainScene.TEXTURE_CIRCLE);
+            this.skillGridContainer.add(spark);
+            spark.setTint(i % 2 === 0 ? color : 0xffffff);
+            spark.setAlpha(1);
+            spark.setScale(0.08 + Math.random() * 0.04);
+            spark.setDepth(253);
+
+            // 火花目標位置（世界座標）
+            const targetWorldX = worldX + Math.cos(angle) * sparkDist;
+            const targetWorldY = worldY + Math.sin(angle) * sparkDist;
+
+            this.tweens.add({
+                targets: spark,
+                scaleX: 0.02,
+                scaleY: 0.02,
+                alpha: 0,
+                duration: 400 + Math.random() * 200,
+                ease: 'Cubic.easeOut',
+                onUpdate: (tween) => {
+                    // 計算當前進度並更新螢幕位置
+                    const progress = tween.progress;
+                    const currentWorldX = worldX + (targetWorldX - worldX) * progress;
+                    const currentWorldY = worldY + (targetWorldY - worldY) * progress;
+                    const currentScreen = this.worldToScreen(currentWorldX, currentWorldY);
+                    spark.setPosition(currentScreen.x, currentScreen.y);
+                },
+                onComplete: () => spark.destroy()
+            });
+        }
     }
 
     // 直線特效（使用物件池）

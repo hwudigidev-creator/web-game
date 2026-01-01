@@ -96,7 +96,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_perfect_pixel',
         name: '完美像素審判',
         subtitle: '構圖之神的鐵律',
-        description: '【疾光狙擊＋視網膜】\n每3秒產生井字線，四焦點輪流爆炸\n命中敵人暈眩1秒',
+        description: '【疾光狙擊＋視網膜】\n井字線四焦點爆炸，敵人暈眩1秒',
         color: 0x66ffcc,  // 青綠色（疾光狙擊系）
         flashColor: 0x88ffee,
         cooldown: 3000,  // 3 秒
@@ -135,7 +135,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_zero_trust',
         name: '零信任防禦協定',
         subtitle: '絕對安全的系統架構',
-        description: '【靈魂統領＋AI強化】\n展開8角矩陣，持續光束掃描範圍內敵人\n範圍內敵人移動速度減半',
+        description: '【靈魂統領＋AI強化】\n8角矩陣光束掃描，敵人減速50%',
         color: 0xffcc00,  // 金黃色
         flashColor: 0xffee66,
         cooldown: 0,  // 持續效果，無冷卻
@@ -148,7 +148,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_soul_slash',
         name: '次元向量疾劃',
         subtitle: '貫穿次元的向量之刃',
-        description: '【靈魂渲染＋AI強化】\n朝最近敵人揮出貫穿全螢幕的直線斬擊\n每級 1% 機率從擊中敵人觸發連鎖斬擊',
+        description: '【靈魂渲染＋AI強化】\n全螢幕直線斬擊，每級1%連鎖機率',
         color: 0xff3366,  // 紅紫色（斬擊感）
         flashColor: 0xff6699,
         cooldown: 500,  // 0.5 秒
@@ -288,6 +288,14 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
             '30% HP 護盾、10 反傷',
             '30% HP 護盾、20 反傷＋擊退，已達最大等級！'
         ],
+        levelUpQuotes: [
+            '你開始學習系統架構，建立了基礎的防禦機制', // LV0
+            '你理解了模組化設計，防禦層級變得更有條理', // LV1
+            '你掌握了負載平衡，系統承受能力大幅提升', // LV2
+            '你建構了冗餘備援，任何攻擊都能被有效分散', // LV3
+            '你精通了高可用架構，防禦系統近乎無懈可擊', // LV4
+            '你成為了頂尖架構師，解鎖了進階技能組合', // LV5/MAX
+        ],
         maxExtraAbility: {
             name: '八角爆盾',
             description: '冷卻刷新時護盾殘值×10 傷害、4 單位範圍金色八角盾爆炸並擊退',
@@ -302,7 +310,7 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'passive_titanium_liver',
         name: '鈦金屬賽博肝臟',
         subtitle: '超級肝',
-        description: '提升 10% HP 總量並每 15 秒回復 1% 最大 HP，每級再 +10% HP、回復間隔 -1 秒',
+        description: '每級 +10% HP，回血間隔 -1 秒',
         type: 'passive',
         color: 0xaabbcc, // 銀灰色
         maxLevel: 5,
