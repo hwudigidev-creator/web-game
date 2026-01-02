@@ -77,6 +77,28 @@ export default class MainScene extends Phaser.Scene {
     private static readonly HEX_TINT_NORMAL = 0x1a5a1a;  // 暗駭客綠
     private static readonly HEX_TINT_HIGHLIGHT = 0xffffff; // 高亮白色
 
+    // 地板障礙物系統（水坑）
+    private floorObstacles: {
+        sprite: Phaser.GameObjects.Sprite;
+        x: number;          // 世界座標
+        y: number;          // 世界座標
+        radius: number;     // 碰撞半徑（不透明區域）
+        imageRadius: number; // 圖片顯示半徑
+        textureKey: string; // 水坑圖片 key
+        scale: number;      // 縮放比例
+        overlaySprite?: Phaser.GameObjects.Sprite; // 城市背景疊層
+    }[] = [];
+    private floorObstacleContainer!: Phaser.GameObjects.Container;
+    private floorOverlayContainer!: Phaser.GameObjects.Container; // 疊層容器
+
+    // 視差背景系統
+    private parallaxBackground!: Phaser.GameObjects.Sprite;
+    private static readonly PARALLAX_BG_SCALE = 4; // 背景是可視區的 4 倍
+    private static readonly FLOOR_OBSTACLE_COUNT_MIN = 15;
+    private static readonly FLOOR_OBSTACLE_COUNT_MAX = 20;
+    private static readonly FLOOR_OBSTACLE_SIZE_MIN = 3;   // 障礙物最小大小（單位）
+    private static readonly FLOOR_OBSTACLE_SIZE_MAX = 8;   // 障礙物最大大小（單位）
+
     // 邊緣波浪脈衝系統（紅到橘漸層）
     private edgeWavePulses: {
         x: number;           // 起點 X（地圖座標）
@@ -626,7 +648,7 @@ export default class MainScene extends Phaser.Scene {
         // 建立世界容器（會隨鏡頭移動的內容）
         this.worldContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
 
-        // 繪製地板格子（測試用）
+        // 繪製地板格子（灰底 + 紅色邊框）
         this.floorGrid = this.add.graphics();
         this.drawFloorGrid();
         this.worldContainer.add(this.floorGrid);
@@ -634,6 +656,19 @@ export default class MainScene extends Phaser.Scene {
         // 建立地板字元容器（在 floorGrid 之上）
         this.floorHexContainer = this.add.container(0, 0);
         this.worldContainer.add(this.floorHexContainer);
+
+        // 視差背景已移除，改用每個水坑單獨的疊層
+
+        // 建立疊層容器（在視差背景之上，用於顯示被水坑遮罩的背景片段）
+        this.floorOverlayContainer = this.add.container(0, 0);
+        this.worldContainer.add(this.floorOverlayContainer);
+
+        // 建立地板障礙物容器（在疊層之上）
+        this.floorObstacleContainer = this.add.container(0, 0);
+        this.worldContainer.add(this.floorObstacleContainer);
+
+        // 生成隨機障礙物
+        this.generateFloorObstacles();
 
         // 建立角色動畫
         this.createCharacterAnimations();
@@ -927,6 +962,7 @@ export default class MainScene extends Phaser.Scene {
         this.updatePhantomVisual(delta);
         this.updateZeroTrustVisual(delta);
         this.updateFloorHexChars();
+        this.updateBurningMonsters();
 
         // 更新遊戲計時器（只在非暫停時累加）
         this.gameTimer += delta;
@@ -2889,21 +2925,40 @@ export default class MainScene extends Phaser.Scene {
             // 計算移動距離
             const moveDistance = (this.moveSpeed * delta) / 1000;
 
-            // 更新角色位置
-            this.characterX += dx * moveDistance;
-            this.characterY += dy * moveDistance;
+            // 計算新位置
+            let newX = this.characterX + dx * moveDistance;
+            let newY = this.characterY + dy * moveDistance;
 
             // 限制在地圖範圍內
-            this.characterX = Phaser.Math.Clamp(
-                this.characterX,
-                this.characterSize,
-                this.mapWidth - this.characterSize
-            );
-            this.characterY = Phaser.Math.Clamp(
-                this.characterY,
-                this.characterSize,
-                this.mapHeight - this.characterSize
-            );
+            newX = Phaser.Math.Clamp(newX, this.characterSize, this.mapWidth - this.characterSize);
+            newY = Phaser.Math.Clamp(newY, this.characterSize, this.mapHeight - this.characterSize);
+
+            // 障礙物碰撞檢測
+            const characterRadius = this.characterSize * 0.4;
+            if (!this.checkObstacleCollision(newX, newY, characterRadius)) {
+                this.characterX = newX;
+                this.characterY = newY;
+            } else {
+                // 嘗試只移動 X 軸
+                const testX = Phaser.Math.Clamp(
+                    this.characterX + dx * moveDistance,
+                    this.characterSize,
+                    this.mapWidth - this.characterSize
+                );
+                if (!this.checkObstacleCollision(testX, this.characterY, characterRadius)) {
+                    this.characterX = testX;
+                } else {
+                    // 嘗試只移動 Y 軸
+                    const testY = Phaser.Math.Clamp(
+                        this.characterY + dy * moveDistance,
+                        this.characterSize,
+                        this.mapHeight - this.characterSize
+                    );
+                    if (!this.checkObstacleCollision(this.characterX, testY, characterRadius)) {
+                        this.characterY = testY;
+                    }
+                }
+            }
 
             // 切換到跑步動畫
             this.setCharacterState('run');
@@ -3009,12 +3064,40 @@ export default class MainScene extends Phaser.Scene {
         const moveDistance = (this.moveSpeed * delta) / 1000;
 
         // 根據方向移動
-        const newX = this.characterX + this.moveDirX * moveDistance;
-        const newY = this.characterY + this.moveDirY * moveDistance;
+        let newX = this.characterX + this.moveDirX * moveDistance;
+        let newY = this.characterY + this.moveDirY * moveDistance;
 
         // 限制在地圖範圍內
-        this.characterX = Phaser.Math.Clamp(newX, this.characterSize, this.mapWidth - this.characterSize);
-        this.characterY = Phaser.Math.Clamp(newY, this.characterSize, this.mapHeight - this.characterSize);
+        newX = Phaser.Math.Clamp(newX, this.characterSize, this.mapWidth - this.characterSize);
+        newY = Phaser.Math.Clamp(newY, this.characterSize, this.mapHeight - this.characterSize);
+
+        // 障礙物碰撞檢測（角色碰撞半徑）
+        const characterRadius = this.characterSize * 0.4;
+        if (!this.checkObstacleCollision(newX, newY, characterRadius)) {
+            // 沒有碰撞，可以移動
+            this.characterX = newX;
+            this.characterY = newY;
+        } else {
+            // 嘗試只移動 X 軸
+            const testX = Phaser.Math.Clamp(
+                this.characterX + this.moveDirX * moveDistance,
+                this.characterSize,
+                this.mapWidth - this.characterSize
+            );
+            if (!this.checkObstacleCollision(testX, this.characterY, characterRadius)) {
+                this.characterX = testX;
+            } else {
+                // 嘗試只移動 Y 軸
+                const testY = Phaser.Math.Clamp(
+                    this.characterY + this.moveDirY * moveDistance,
+                    this.characterSize,
+                    this.mapHeight - this.characterSize
+                );
+                if (!this.checkObstacleCollision(this.characterX, testY, characterRadius)) {
+                    this.characterY = testY;
+                }
+            }
+        }
 
         // 更新角色面向（根據移動方向）
         if (this.moveDirX !== 0) {
@@ -3104,6 +3187,7 @@ export default class MainScene extends Phaser.Scene {
             this.gameBounds.x - this.cameraOffsetX,
             this.gameBounds.y - this.cameraOffsetY
         );
+
     }
 
     private updateRevealMask(data: { x: number; y: number; radius: number }) {
@@ -4689,13 +4773,217 @@ export default class MainScene extends Phaser.Scene {
     private drawFloorGrid() {
         this.floorGrid.clear();
 
-        // 純色背景（深灰色 #111111）
-        this.floorGrid.fillStyle(0x111111, 1);
+        // 繪製灰色背景（以防萬一，背景圖還沒載好時有灰底）
+        this.floorGrid.fillStyle(0x1a1a1a, 1);
         this.floorGrid.fillRect(0, 0, this.mapWidth, this.mapHeight);
 
         // 繪製地圖邊界（紅色框線）
         this.floorGrid.lineStyle(4, 0xff4444, 1);
         this.floorGrid.strokeRect(0, 0, this.mapWidth, this.mapHeight);
+    }
+
+    // 建立視差背景（在文字地板和水坑之間，被水坑形狀遮罩）
+    private createParallaxBackground() {
+        // 背景大小 = 4 倍可視區
+        const bgWidth = this.gameBounds.width * MainScene.PARALLAX_BG_SCALE;
+        const bgHeight = this.gameBounds.height * MainScene.PARALLAX_BG_SCALE;
+
+        // 建立背景 Sprite（世界座標系）
+        this.parallaxBackground = this.add.sprite(
+            this.mapWidth / 2,
+            this.mapHeight / 2,
+            'bg_city'
+        );
+
+        // 縮放到目標大小
+        const scaleX = bgWidth / this.parallaxBackground.width;
+        const scaleY = bgHeight / this.parallaxBackground.height;
+        this.parallaxBackground.setScale(Math.max(scaleX, scaleY));
+        this.parallaxBackground.setOrigin(0.5, 0.5);
+
+        // 加入世界容器（在 floorHexContainer 之後，floorObstacleContainer 之前）
+        this.worldContainer.add(this.parallaxBackground);
+    }
+
+    // 更新視差背景位置（世界座標系）
+    private updateParallaxBackground() {
+        if (!this.parallaxBackground) return;
+
+        // 背景大小
+        const bgWidth = this.gameBounds.width * MainScene.PARALLAX_BG_SCALE;
+        const bgHeight = this.gameBounds.height * MainScene.PARALLAX_BG_SCALE;
+
+        // 計算視差移動比例
+        // 當相機從左邊移到右邊（0 到 mapWidth-visible），背景中心從 bgWidth/2 移到 mapWidth-bgWidth/2
+        // 比例 = (mapSize - bgSize) / (mapSize - visible)
+        const parallaxRatioX = (this.mapWidth - bgWidth) / (this.mapWidth - this.gameBounds.width);
+        const parallaxRatioY = (this.mapHeight - bgHeight) / (this.mapHeight - this.gameBounds.height);
+
+        // 背景中心位置（世界座標）
+        const bgCenterX = bgWidth / 2 + this.cameraOffsetX * parallaxRatioX;
+        const bgCenterY = bgHeight / 2 + this.cameraOffsetY * parallaxRatioY;
+
+        // 設定背景位置
+        this.parallaxBackground.setPosition(bgCenterX, bgCenterY);
+    }
+
+    // 生成隨機地板障礙物（水坑）
+    private generateFloorObstacles() {
+        const unitSize = this.gameBounds.height / 10;
+        const count = Phaser.Math.Between(
+            MainScene.FLOOR_OBSTACLE_COUNT_MIN,
+            MainScene.FLOOR_OBSTACLE_COUNT_MAX
+        );
+
+        // 計算安全區域（避免生成在地圖邊緣和角色起始位置）
+        const maxSize = unitSize * MainScene.FLOOR_OBSTACLE_SIZE_MAX;
+        const margin = maxSize * 2;
+        const spawnStartX = this.characterX;
+        const spawnStartY = this.characterY;
+        const safeZone = maxSize * 3;
+
+        for (let i = 0; i < count; i++) {
+            let attempts = 0;
+            const maxAttempts = 50;
+            let placed = false;
+
+            // 隨機大小（2-3 單位）
+            const obstacleSize = unitSize * Phaser.Math.FloatBetween(
+                MainScene.FLOOR_OBSTACLE_SIZE_MIN,
+                MainScene.FLOOR_OBSTACLE_SIZE_MAX
+            );
+
+            while (!placed && attempts < maxAttempts) {
+                attempts++;
+
+                // 隨機位置
+                const x = Phaser.Math.FloatBetween(margin, this.mapWidth - margin);
+                const y = Phaser.Math.FloatBetween(margin, this.mapHeight - margin);
+
+                // 檢查是否在角色起始位置安全區域內
+                const distToSpawn = Math.sqrt(
+                    (x - spawnStartX) ** 2 + (y - spawnStartY) ** 2
+                );
+                if (distToSpawn < safeZone) continue;
+
+                // 檢查是否與其他障礙物重疊
+                let overlaps = false;
+                for (const obstacle of this.floorObstacles) {
+                    const dist = Math.sqrt(
+                        (x - obstacle.x) ** 2 + (y - obstacle.y) ** 2
+                    );
+                    const minDist = obstacleSize / 2 + obstacle.imageRadius;
+                    if (dist < minDist) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if (overlaps) continue;
+
+                // 隨機選擇水坑圖片（1-5）
+                const waterIndex = Phaser.Math.Between(1, 5);
+                const textureKey = `floor_water_${waterIndex}`;
+
+                // 建立 sprite
+                const sprite = this.add.sprite(x, y, textureKey);
+                sprite.setOrigin(0.5, 0.5);
+
+                // 設定大小（縮放到目標尺寸）
+                const scale = obstacleSize / Math.max(sprite.width, sprite.height);
+                sprite.setScale(scale);
+
+                // 設定 30% 透明度（視覺效果，alpha = 0.7）
+                sprite.setAlpha(0.7);
+
+                const imageRadius = obstacleSize / 2;
+                // 碰撞半徑 = 圖片半徑的 70%（對應不透明區域）
+                const collisionRadius = imageRadius * 0.7;
+
+                // 加入容器
+                this.floorObstacleContainer.add(sprite);
+
+                // 為每個水坑建立城市背景疊層
+                const overlaySprite = this.add.sprite(x, y, 'bg_city');
+                overlaySprite.setOrigin(0.5, 0.5);
+                // 縮放城市背景到水坑大小
+                const bgScale = obstacleSize / Math.max(overlaySprite.width, overlaySprite.height);
+                overlaySprite.setScale(bgScale);
+                overlaySprite.setAlpha(0.3); // 30% 透明度
+
+                // 使用水坑 sprite 本身作為遮罩來源（它已經在場景中可見）
+                const bitmapMask = sprite.createBitmapMask();
+                overlaySprite.setMask(bitmapMask);
+
+                // 把疊層加到容器
+                this.floorOverlayContainer.add(overlaySprite);
+
+                // 記錄障礙物資料
+                this.floorObstacles.push({
+                    sprite,
+                    x,
+                    y,
+                    radius: collisionRadius,
+                    imageRadius,
+                    textureKey,
+                    scale,
+                    overlaySprite
+                });
+
+                placed = true;
+            }
+        }
+
+        // 測試用：在起始點附近生成一個水坑
+        this.createTestWaterPit(spawnStartX + unitSize * 3, spawnStartY, unitSize * 5);
+    }
+
+    // 建立測試用水坑
+    private createTestWaterPit(x: number, y: number, size: number) {
+        const textureKey = 'floor_water_1';
+        const sprite = this.add.sprite(x, y, textureKey);
+        sprite.setOrigin(0.5, 0.5);
+        const scale = size / Math.max(sprite.width, sprite.height);
+        sprite.setScale(scale);
+        sprite.setAlpha(0.7);
+
+        this.floorObstacleContainer.add(sprite);
+
+        // 建立疊層
+        const overlaySprite = this.add.sprite(x, y, 'bg_city');
+        overlaySprite.setOrigin(0.5, 0.5);
+        const bgScale = size / Math.max(overlaySprite.width, overlaySprite.height);
+        overlaySprite.setScale(bgScale);
+        overlaySprite.setAlpha(0.3);
+
+        // 使用水坑 sprite 作為遮罩
+        const bitmapMask = sprite.createBitmapMask();
+        overlaySprite.setMask(bitmapMask);
+        this.floorOverlayContainer.add(overlaySprite);
+
+        const imageRadius = size / 2;
+        this.floorObstacles.push({
+            sprite,
+            x,
+            y,
+            radius: imageRadius * 0.7,
+            imageRadius,
+            textureKey,
+            scale,
+            overlaySprite
+        });
+    }
+
+    // 檢查位置是否與障礙物碰撞
+    private checkObstacleCollision(x: number, y: number, radius: number): boolean {
+        for (const obstacle of this.floorObstacles) {
+            const dist = Math.sqrt(
+                (x - obstacle.x) ** 2 + (y - obstacle.y) ** 2
+            );
+            if (dist < radius + obstacle.radius) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // 從物件池取得或建立 hex sprite
@@ -6339,12 +6627,27 @@ export default class MainScene extends Phaser.Scene {
                 if (hitMonsters.length > 0) {
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
-        
+
                     // 打擊火花（藍色，靈魂渲染系）
                     for (const pos of hitPositions) {
                         this.showHitSparkEffect(pos.x, pos.y, 0x4488ff, currentAngle);
                     }
 
+                    // 燃燒機率：10% + 每級 1%
+                    const burnChance = 0.10 + skillLevel * 0.01;
+                    const burnDamage = Math.floor(baseDamage * 0.2); // 原始傷害的 20%
+                    const burnDuration = 5000; // 5 秒燃燒
+                    const monstersToBurn: number[] = [];
+
+                    for (const monsterId of hitMonsters) {
+                        if (Math.random() < burnChance) {
+                            monstersToBurn.push(monsterId);
+                        }
+                    }
+
+                    if (monstersToBurn.length > 0) {
+                        this.monsterManager.burnMonsters(monstersToBurn, burnDuration, burnDamage);
+                    }
                 }
 
                 // 顯示旋轉扇形特效（使用和分身相同的圖片特效）
@@ -6356,6 +6659,90 @@ export default class MainScene extends Phaser.Scene {
         // 震動效果（旋轉結束時）
         this.time.delayedCall(rotationDuration, () => {
             this.shakeScreen(hitMonsterSet.size);
+        });
+    }
+
+    // 更新燃燒中的怪物（每秒觸發 AOE 傷害）
+    private updateBurningMonsters() {
+        const now = this.time.now;
+        const burningMonsters = this.monsterManager.getBurningMonsters();
+
+        for (const monster of burningMonsters) {
+            // 取得燃燒狀態效果
+            const burnEffect = this.monsterManager.getStatusEffect(monster, 'burn');
+            if (!burnEffect) continue;
+
+            const tickInterval = burnEffect.tickInterval || 1000;
+            const lastTick = burnEffect.lastTickTime || now;
+
+            // 檢查是否該觸發這一秒的傷害
+            if (now - lastTick >= tickInterval) {
+                // 更新最後觸發時間
+                burnEffect.lastTickTime = now;
+
+                // AOE 傷害
+                const aoeDamage = burnEffect.damage || 0;
+                if (aoeDamage <= 0) continue;
+
+                const aoeRadius = this.gameBounds.height * (burnEffect.aoeRadius || 0.1);
+
+                // 找出範圍內的所有怪物
+                const monsters = this.monsterManager.getMonsters();
+                const hitMonsters: number[] = [];
+
+                for (const m of monsters) {
+                    const dx = m.x - monster.x;
+                    const dy = m.y - monster.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const monsterRadius = this.gameBounds.height * m.definition.size * 0.5;
+
+                    if (dist <= aoeRadius + monsterRadius) {
+                        hitMonsters.push(m.id);
+                    }
+                }
+
+                // 造成傷害
+                if (hitMonsters.length > 0) {
+                    const result = this.monsterManager.damageMonsters(hitMonsters, aoeDamage);
+                    if (result.totalExp > 0) this.addExp(result.totalExp);
+                }
+
+                // 顯示圓形爆炸效果（橘紅色）
+                this.showBurnExplosionEffect(monster.x, monster.y, aoeRadius);
+            }
+        }
+
+        // 清理過期的狀態效果
+        this.monsterManager.cleanupExpiredEffects();
+    }
+
+    // 燃燒 AOE 爆炸效果（簡單圓形）
+    private showBurnExplosionEffect(worldX: number, worldY: number, radius: number) {
+        const screen = this.worldToScreen(worldX, worldY);
+
+        // 圓形爆炸圖（橘色半透明圓）
+        const explosion = this.add.circle(screen.x, screen.y, radius, 0xff6600, 0.3);
+        explosion.setDepth(60);
+        this.skillGridContainer.add(explosion);
+
+        // 記錄世界座標
+        const startWorldX = worldX;
+        const startWorldY = worldY;
+
+        // 淡出動畫
+        this.tweens.add({
+            targets: explosion,
+            alpha: 0,
+            scale: 1.3,
+            duration: 250,
+            ease: 'Cubic.easeOut',
+            onUpdate: () => {
+                const newScreen = this.worldToScreen(startWorldX, startWorldY);
+                explosion.setPosition(newScreen.x, newScreen.y);
+            },
+            onComplete: () => {
+                explosion.destroy();
+            }
         });
     }
 
@@ -8172,8 +8559,9 @@ export default class MainScene extends Phaser.Scene {
                         const newAngle = angle + (Math.random() < 0.5 ? offsetRad : -offsetRad);
 
                         // 延遲一點時間再觸發連鎖，有視覺效果
+                        // 連鎖斬擊傷害 2 倍
                         this.time.delayedCall(50, () => {
-                            this.performSoulSlash(hitPos.x, hitPos.y, newAngle, baseDamage, skillLevel, true);
+                            this.performSoulSlash(hitPos.x, hitPos.y, newAngle, baseDamage * 2, skillLevel, true);
                         });
                     }
                 }
@@ -8560,7 +8948,7 @@ export default class MainScene extends Phaser.Scene {
 
         switch (skillId) {
             case 'advanced_burning_celluloid':
-                this.phantomCastBurningCelluloidAt(baseDamage, phantomX, phantomY);
+                this.phantomCastBurningCelluloidAt(baseDamage, phantomX, phantomY, level);
                 break;
             case 'advanced_tech_artist':
                 this.phantomCastTechArtistAt(baseDamage, phantomX, phantomY);
@@ -8923,7 +9311,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 分身版燃燒的賽璐珞（指定座標，範圍 3 單位）- 保留供其他用途
-    private phantomCastBurningCelluloidAt(baseDamage: number, phantomX: number, phantomY: number) {
+    private phantomCastBurningCelluloidAt(baseDamage: number, phantomX: number, phantomY: number, skillLevel: number) {
         const range = this.gameBounds.height * 0.3; // 3 單位（本尊 7 單位）
         const halfAngleDeg = 15; // 30 度扇形
         const halfAngle = halfAngleDeg * Math.PI / 180;
@@ -8961,7 +9349,23 @@ export default class MainScene extends Phaser.Scene {
                     const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
                     const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
+
+                    // 燃燒機率：10% + 每級 1%（與本尊相同）
+                    const burnChance = 0.10 + skillLevel * 0.01;
+                    const burnDamage = Math.floor(baseDamage * 0.2);
+                    const burnDuration = 5000;
+                    const monstersToBurn: number[] = [];
+
+                    for (const monsterId of hitMonsters) {
+                        if (Math.random() < burnChance) {
+                            monstersToBurn.push(monsterId);
                         }
+                    }
+
+                    if (monstersToBurn.length > 0) {
+                        this.monsterManager.burnMonsters(monstersToBurn, burnDuration, burnDamage);
+                    }
+                }
 
                 // 視覺效果
                 this.flashSkillEffectSector(phantomX, phantomY, range, targetAngle, halfAngleDeg, color);
@@ -11215,9 +11619,10 @@ export default class MainScene extends Phaser.Scene {
         for (let i = 0; i < this.currentAdvancedSkillChoices.length; i++) {
             const advSkillDef = this.currentAdvancedSkillChoices[i];
             const currentLevel = this.skillManager.getAdvancedSkillLevel(advSkillDef.id);
-            const isNew = currentLevel === 0;
+            // 未擁有時 currentLevel = -1，學習後從 Lv.0 開始（與一般技能統一）
+            const isNew = currentLevel < 0;
             const displayCurrentLevel = isNew ? '-' : currentLevel;
-            const nextLevel = isNew ? 1 : currentLevel + 1;
+            const nextLevel = currentLevel + 1; // -1+1=0（新）、0+1=1、...
             const x = startX + i * (cardWidth + cardGap);
 
             // 建立選項容器
@@ -11576,9 +11981,10 @@ export default class MainScene extends Phaser.Scene {
                 // 進階技能卡片
                 const advSkillDef = this.currentAdvancedSkillChoices[opt.index];
                 const currentLevel = this.skillManager.getAdvancedSkillLevel(advSkillDef.id);
-                const isNew = currentLevel === 0;
+                // 未擁有時 currentLevel = -1，學習後從 Lv.0 開始（與一般技能統一）
+                const isNew = currentLevel < 0;
                 const displayCurrentLevel = isNew ? '-' : currentLevel;
-                const nextLevel = isNew ? 1 : currentLevel + 1;
+                const nextLevel = currentLevel + 1; // -1+1=0（新）、0+1=1、...
 
                 // 卡片背景（進階技能用金色邊框）
                 const cardBg = this.add.rectangle(0, 0, cardWidth, cardHeight, 0x1a1a2e);

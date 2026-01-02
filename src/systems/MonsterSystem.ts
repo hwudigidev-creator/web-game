@@ -10,6 +10,20 @@ export interface MonsterDefinition {
     exp: number; // 擊殺經驗值
 }
 
+// 狀態效果類型
+export type StatusEffectType = 'stun' | 'burn';
+
+// 統一狀態效果介面
+export interface StatusEffect {
+    type: StatusEffectType;
+    endTime: number;           // 效果結束時間
+    // DoT 專用參數
+    damage?: number;           // 每次觸發傷害
+    tickInterval?: number;     // 觸發間隔（毫秒）
+    lastTickTime?: number;     // 上次觸發時間
+    aoeRadius?: number;        // AOE 範圍（世界單位）
+}
+
 // 怪物實例
 export interface Monster {
     id: number;
@@ -34,8 +48,8 @@ export interface Monster {
     // BOSS 專用（未來設計）
     isBoss?: boolean;
     bossHpMultiplier?: number; // BOSS HP 倍率
-    // 暈眩/癱瘓狀態
-    stunEndTime?: number; // 暈眩結束時間，0 或 undefined 表示未暈眩
+    // 統一狀態效果系統
+    statusEffects: StatusEffect[];
 }
 
 // 怪物網格格子資料（畫面固定位置）
@@ -226,7 +240,8 @@ export class MonsterManager {
             squashStretch: 1,
             flashStartTime: 0,
             isElite: true,
-            eliteHpMultiplier: eliteLevel
+            eliteHpMultiplier: eliteLevel,
+            statusEffects: []
         };
 
         this.monsters.push(monster);
@@ -676,7 +691,8 @@ export class MonsterManager {
             bouncePhase: Math.random() * Math.PI * 2,
             bounceSpeed: 3 + Math.random() * 2, // 3~5 的隨機速度
             squashStretch: 1,
-            flashStartTime: 0
+            flashStartTime: 0,
+            statusEffects: []
         };
 
         this.monsters.push(monster);
@@ -786,6 +802,7 @@ export class MonsterManager {
                 bounceSpeed: 5 + Math.random() * 3, // 蝙蝠彈跳更快
                 squashStretch: 1,
                 flashStartTime: 0,
+                statusEffects: [],
                 // 蝙蝠專用屬性（使用方向向量）
                 isBat: true,
                 directionX: dirX,
@@ -874,6 +891,24 @@ export class MonsterManager {
                 r = Math.min(255, r + 60);
                 g = Math.min(255, g + 60);
                 b = Math.min(255, b + 60);
+            }
+
+            // 燃燒效果：橘色閃爍
+            const isBurning = this.isMonsterBurning(monster);
+            if (isBurning && !isFlashing && !isStunned) {
+                // 橘色閃爍（週期 200ms）
+                const burnFlashPhase = Math.floor(now / 100) % 2;
+                if (burnFlashPhase === 0) {
+                    // 橘色 (0xff6600)
+                    r = Math.min(255, Math.floor(r * 0.3 + 255 * 0.7));
+                    g = Math.min(255, Math.floor(g * 0.3 + 102 * 0.7));
+                    b = Math.floor(b * 0.3);
+                } else {
+                    // 原色偏暖
+                    r = Math.min(255, Math.floor(r * 0.6 + 200 * 0.4));
+                    g = Math.floor(g * 0.7 + 60 * 0.3);
+                    b = Math.floor(b * 0.5);
+                }
             }
 
             // 蝙蝠使用特殊造型（翅膀形狀）
@@ -1184,17 +1219,99 @@ export class MonsterManager {
         return { totalExp, killCount, killedPositions };
     }
 
-    // 使怪物暈眩（停止活動）
-    stunMonsters(monsterIds: number[], duration: number) {
+    // ===== 統一狀態效果系統 =====
+
+    // 添加狀態效果（統一介面）
+    applyStatusEffect(monsterIds: number[], effect: Omit<StatusEffect, 'lastTickTime'>) {
         const now = this.scene.time.now;
-        const stunEndTime = now + duration;
 
         for (const id of monsterIds) {
             const monster = this.monsters.find(m => m.id === id);
-            if (monster) {
-                // 設定暈眩結束時間（如果已經暈眩中，取較長的結束時間）
-                monster.stunEndTime = Math.max(monster.stunEndTime || 0, stunEndTime);
+            if (!monster) continue;
+
+            // 檢查是否已有相同類型的效果
+            const existing = monster.statusEffects.find(e => e.type === effect.type);
+            if (existing) {
+                // 刷新/延長效果
+                existing.endTime = Math.max(existing.endTime, effect.endTime);
+                if (effect.damage !== undefined) existing.damage = effect.damage;
+                if (effect.aoeRadius !== undefined) existing.aoeRadius = effect.aoeRadius;
+            } else {
+                // 新增效果
+                monster.statusEffects.push({
+                    ...effect,
+                    lastTickTime: now
+                });
             }
+        }
+    }
+
+    // 使怪物暈眩（停止活動）
+    stunMonsters(monsterIds: number[], duration: number) {
+        const now = this.scene.time.now;
+        this.applyStatusEffect(monsterIds, {
+            type: 'stun',
+            endTime: now + duration
+        });
+    }
+
+    // 使怪物燃燒（持續傷害）
+    burnMonsters(monsterIds: number[], duration: number, damagePerTick: number, aoeRadius: number = 0.1) {
+        const now = this.scene.time.now;
+        this.applyStatusEffect(monsterIds, {
+            type: 'burn',
+            endTime: now + duration,
+            damage: damagePerTick,
+            tickInterval: 1000, // 每秒觸發
+            aoeRadius: aoeRadius // 1 單位（世界座標比例）
+        });
+    }
+
+    // 檢查怪物是否有指定狀態
+    hasStatusEffect(monster: Monster, type: StatusEffectType): boolean {
+        const now = this.scene.time.now;
+        return monster.statusEffects.some(e => e.type === type && e.endTime > now);
+    }
+
+    // 取得怪物的指定狀態效果
+    getStatusEffect(monster: Monster, type: StatusEffectType): StatusEffect | undefined {
+        const now = this.scene.time.now;
+        return monster.statusEffects.find(e => e.type === type && e.endTime > now);
+    }
+
+    // 檢查怪物是否暈眩中（向後兼容）
+    isMonsterStunned(monster: Monster): boolean {
+        return this.hasStatusEffect(monster, 'stun');
+    }
+
+    // 檢查怪物是否燃燒中（向後兼容）
+    isMonsterBurning(monster: Monster): boolean {
+        return this.hasStatusEffect(monster, 'burn');
+    }
+
+    // 取得所有有指定狀態的怪物
+    getMonstersWithStatus(type: StatusEffectType): Monster[] {
+        return this.monsters.filter(m => this.hasStatusEffect(m, type));
+    }
+
+    // 取得所有燃燒中的怪物（向後兼容）
+    getBurningMonsters(): Monster[] {
+        return this.getMonstersWithStatus('burn');
+    }
+
+    // 清除怪物指定狀態
+    clearStatusEffect(monsterId: number, type: StatusEffectType) {
+        const monster = this.monsters.find(m => m.id === monsterId);
+        if (monster) {
+            monster.statusEffects = monster.statusEffects.filter(e => e.type !== type);
+        }
+    }
+
+    // 清理過期的狀態效果（每幀呼叫）
+    cleanupExpiredEffects() {
+        const now = this.scene.time.now;
+        for (const monster of this.monsters) {
+            monster.statusEffects = monster.statusEffects.filter(e => e.endTime > now);
         }
     }
 
@@ -1223,12 +1340,6 @@ export class MonsterManager {
                 }
             }
         }
-    }
-
-    // 檢查怪物是否暈眩中
-    isMonsterStunned(monster: Monster): boolean {
-        if (!monster.stunEndTime) return false;
-        return this.scene.time.now < monster.stunEndTime;
     }
 
     // 設定嘲諷目標（幻影分身位置）

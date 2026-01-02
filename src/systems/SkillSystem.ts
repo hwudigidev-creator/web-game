@@ -380,18 +380,18 @@ export const SKILL_LIBRARY: SkillDefinition[] = [
         id: 'passive_retina_module',
         name: '視網膜增強模組',
         subtitle: '血輪眼',
-        description: '提升 0.5 單位拾取範圍，每級再 +0.5 單位',
+        description: '提升 30% 經驗獲取與 0.5 單位拾取範圍，每級再 +30%/+0.5',
         type: 'passive',
         color: 0x992233, // 暗紅色
         maxLevel: 5,
         iconPrefix: 'P03', // 固定圖示，不隨等級變換
         levelUpMessages: [
-            '+0.5 單位拾取範圍',
-            '+1 單位拾取範圍',
-            '+1.5 單位拾取範圍',
-            '+2 單位拾取範圍',
-            '+2.5 單位拾取範圍',
-            '+3 單位拾取範圍，已達最大等級！'
+            '+30% 經驗、+0.5 拾取範圍',
+            '+60% 經驗、+1 拾取範圍',
+            '+90% 經驗、+1.5 拾取範圍',
+            '+120% 經驗、+2 拾取範圍',
+            '+150% 經驗、+2.5 拾取範圍',
+            '+180% 經驗、+3 拾取範圍，已達最大等級！'
         ],
         levelUpQuotes: [
             '敏銳的觀察力，視野範圍擴大了', // LV0
@@ -809,8 +809,10 @@ export class SkillManager {
         const damageBonus = this.getAiEnhancementDamageBonus();
         let finalDamage = Math.floor(baseDamage * (1 + damageBonus));
 
-        // 洞察：暴擊率判定（視網膜增強模組 MAX 後啟用）
-        const critChance = this.getRetinaModuleCritChance(playerLevel);
+        // 暴擊率 = 洞察（視網膜 MAX）+ 技術美術大神加成
+        const baseCritChance = this.getRetinaModuleCritChance(playerLevel);
+        const techArtistCrit = this.getTechArtistCritBonus();
+        const critChance = baseCritChance + techArtistCrit;
         let isCrit = false;
 
         if (critChance > 0 && Math.random() < critChance) {
@@ -930,6 +932,13 @@ export class SkillManager {
         return this.getMaxExtraAbilityValue('passive_ai_enhancement', playerLevel);
     }
 
+    // 技術美術大神：暴擊率加成（每級 +1%）
+    getTechArtistCritBonus(): number {
+        const level = this.advancedSkillLevels.get('advanced_tech_artist') ?? -1;
+        if (level < 0) return 0;
+        return (level + 1) * 0.01; // Lv.0=1%, Lv.1=2%, ...
+    }
+
     // ===== 進階技能系統 =====
 
     // 檢查所有基礎技能是否滿等（4 主動 + 3 被動 = 7 個）
@@ -976,7 +985,7 @@ export class SkillManager {
             // maxLevel < 0 表示無上限，永遠可升級
             if (adv.maxLevel < 0) return true;
 
-            const level = this.advancedSkillLevels.get(adv.id) ?? 0;
+            const level = this.advancedSkillLevels.get(adv.id) ?? -1;
             return level < adv.maxLevel;
         });
     }
@@ -1010,7 +1019,7 @@ export class SkillManager {
         const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === this.equippedAdvancedSkillId);
         if (!def) return null;
 
-        const level = this.advancedSkillLevels.get(this.equippedAdvancedSkillId) ?? 0;
+        const level = this.advancedSkillLevels.get(this.equippedAdvancedSkillId) ?? -1;
         return { definition: def, level };
     }
 
@@ -1046,14 +1055,15 @@ export class SkillManager {
         const def = ADVANCED_SKILL_LIBRARY.find(a => a.id === skillId);
         if (!def) return false;
 
-        const currentLevel = this.advancedSkillLevels.get(skillId) ?? 0;
+        // 未擁有時為 -1，學習後從 Lv.0 開始（與一般技能統一）
+        const currentLevel = this.advancedSkillLevels.get(skillId) ?? -1;
 
         // maxLevel < 0 表示無上限
         if (def.maxLevel >= 0 && currentLevel >= def.maxLevel) {
             return false;  // 已滿級
         }
 
-        // 升級
+        // 升級：-1 → 0（學習）、0 → 1、...
         this.advancedSkillLevels.set(skillId, currentLevel + 1);
         return true;
     }
@@ -1066,7 +1076,7 @@ export class SkillManager {
         // maxLevel < 0 表示無上限，永遠不會滿級
         if (def.maxLevel < 0) return false;
 
-        const level = this.advancedSkillLevels.get(skillId) ?? 0;
+        const level = this.advancedSkillLevels.get(skillId) ?? -1;
         return level >= def.maxLevel;
     }
 
