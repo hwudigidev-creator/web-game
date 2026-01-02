@@ -500,8 +500,8 @@ export default class GridScene extends Phaser.Scene {
             this.load.image(`hex_${char}`, `effects/hex/${char}.png`);
         }
 
-        // 預載入地板障礙物（水坑）
-        for (let i = 1; i <= 5; i++) {
+        // 預載入地板障礙物（水坑）0-5 號
+        for (let i = 0; i <= 5; i++) {
             this.load.image(`floor_water_${i}`, `floor/water_0${i}.png`);
         }
 

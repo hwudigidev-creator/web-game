@@ -55,6 +55,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 地板格子
     private floorGrid!: Phaser.GameObjects.Graphics;
+    private floorRT!: Phaser.GameObjects.RenderTexture; // 灰色地板（用於挖洞）
     private floorHexContainer!: Phaser.GameObjects.Container; // 地板字元容器（在 floorGrid 之上）
 
     // 地板隨機字元（空間定位用）
@@ -84,16 +85,14 @@ export default class MainScene extends Phaser.Scene {
         y: number;          // 世界座標
         radius: number;     // 碰撞半徑（不透明區域）
         imageRadius: number; // 圖片顯示半徑
-        textureKey: string; // 水坑圖片 key
-        scale: number;      // 縮放比例
-        overlaySprite?: Phaser.GameObjects.Sprite; // 城市背景疊層
+        eraseSprite?: Phaser.GameObjects.Sprite; // 用於擦除地板的 sprite
     }[] = [];
     private floorObstacleContainer!: Phaser.GameObjects.Container;
-    private floorOverlayContainer!: Phaser.GameObjects.Container; // 疊層容器
 
     // 視差背景系統
     private parallaxBackground!: Phaser.GameObjects.Sprite;
-    private static readonly PARALLAX_BG_SCALE = 4; // 背景是可視區的 4 倍
+    private static readonly PARALLAX_BG_SCALE = 4;
+
     private static readonly FLOOR_OBSTACLE_COUNT_MIN = 15;
     private static readonly FLOOR_OBSTACLE_COUNT_MAX = 20;
     private static readonly FLOOR_OBSTACLE_SIZE_MIN = 3;   // 障礙物最小大小（單位）
@@ -648,22 +647,33 @@ export default class MainScene extends Phaser.Scene {
         // 建立世界容器（會隨鏡頭移動的內容）
         this.worldContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
 
-        // 繪製地板格子（灰底 + 紅色邊框）
-        this.floorGrid = this.add.graphics();
-        this.drawFloorGrid();
-        this.worldContainer.add(this.floorGrid);
+        // 1. 視差背景（最底層）
+        this.createParallaxBackground();
 
-        // 建立地板字元容器（在 floorGrid 之上）
+        // 2. 灰色地板（使用 RenderTexture 以便挖洞）
+        // 先建立一個灰色填充的 Graphics
+        const grayFloorGraphics = this.make.graphics({ x: 0, y: 0 });
+        grayFloorGraphics.fillStyle(0x1a1a1a, 1);
+        grayFloorGraphics.fillRect(0, 0, this.mapWidth, this.mapHeight);
+        grayFloorGraphics.lineStyle(4, 0xff4444, 1);
+        grayFloorGraphics.strokeRect(0, 0, this.mapWidth, this.mapHeight);
+
+        // 建立 RenderTexture 並把灰色 Graphics 畫上去
+        this.floorRT = this.add.renderTexture(0, 0, this.mapWidth, this.mapHeight);
+        this.floorRT.setOrigin(0, 0);
+        this.floorRT.draw(grayFloorGraphics, 0, 0);
+        grayFloorGraphics.destroy(); // 畫完後銷毀臨時 Graphics
+        this.worldContainer.add(this.floorRT);
+
+        // 保留 floorGrid 引用（用於相容性，但實際使用 floorRT）
+        this.floorGrid = this.add.graphics();
+        this.floorGrid.setVisible(false);
+
+        // 3. 建立地板字元容器
         this.floorHexContainer = this.add.container(0, 0);
         this.worldContainer.add(this.floorHexContainer);
 
-        // 視差背景已移除，改用每個水坑單獨的疊層
-
-        // 建立疊層容器（在視差背景之上，用於顯示被水坑遮罩的背景片段）
-        this.floorOverlayContainer = this.add.container(0, 0);
-        this.worldContainer.add(this.floorOverlayContainer);
-
-        // 建立地板障礙物容器（在疊層之上）
+        // 4. 建立地板障礙物容器（水坑）
         this.floorObstacleContainer = this.add.container(0, 0);
         this.worldContainer.add(this.floorObstacleContainer);
 
@@ -3188,6 +3198,8 @@ export default class MainScene extends Phaser.Scene {
             this.gameBounds.y - this.cameraOffsetY
         );
 
+        // 更新視差背景位置
+        this.updateParallaxBackground();
     }
 
     private updateRevealMask(data: { x: number; y: number; radius: number }) {
@@ -4770,60 +4782,33 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    private drawFloorGrid() {
-        this.floorGrid.clear();
-
-        // 繪製灰色背景（以防萬一，背景圖還沒載好時有灰底）
-        this.floorGrid.fillStyle(0x1a1a1a, 1);
-        this.floorGrid.fillRect(0, 0, this.mapWidth, this.mapHeight);
-
-        // 繪製地圖邊界（紅色框線）
-        this.floorGrid.lineStyle(4, 0xff4444, 1);
-        this.floorGrid.strokeRect(0, 0, this.mapWidth, this.mapHeight);
-    }
-
-    // 建立視差背景（在文字地板和水坑之間，被水坑形狀遮罩）
+    // 建立視差背景
     private createParallaxBackground() {
-        // 背景大小 = 4 倍可視區
         const bgWidth = this.gameBounds.width * MainScene.PARALLAX_BG_SCALE;
         const bgHeight = this.gameBounds.height * MainScene.PARALLAX_BG_SCALE;
 
-        // 建立背景 Sprite（世界座標系）
-        this.parallaxBackground = this.add.sprite(
-            this.mapWidth / 2,
-            this.mapHeight / 2,
-            'bg_city'
-        );
-
-        // 縮放到目標大小
+        this.parallaxBackground = this.add.sprite(this.mapWidth / 2, this.mapHeight / 2, 'bg_city');
         const scaleX = bgWidth / this.parallaxBackground.width;
         const scaleY = bgHeight / this.parallaxBackground.height;
         this.parallaxBackground.setScale(Math.max(scaleX, scaleY));
         this.parallaxBackground.setOrigin(0.5, 0.5);
-
-        // 加入世界容器（在 floorHexContainer 之後，floorObstacleContainer 之前）
+        this.parallaxBackground.setAlpha(0.5); // 50% 透明度
         this.worldContainer.add(this.parallaxBackground);
     }
 
-    // 更新視差背景位置（世界座標系）
+    // 更新視差背景位置
     private updateParallaxBackground() {
         if (!this.parallaxBackground) return;
 
-        // 背景大小
         const bgWidth = this.gameBounds.width * MainScene.PARALLAX_BG_SCALE;
         const bgHeight = this.gameBounds.height * MainScene.PARALLAX_BG_SCALE;
 
-        // 計算視差移動比例
-        // 當相機從左邊移到右邊（0 到 mapWidth-visible），背景中心從 bgWidth/2 移到 mapWidth-bgWidth/2
-        // 比例 = (mapSize - bgSize) / (mapSize - visible)
         const parallaxRatioX = (this.mapWidth - bgWidth) / (this.mapWidth - this.gameBounds.width);
         const parallaxRatioY = (this.mapHeight - bgHeight) / (this.mapHeight - this.gameBounds.height);
 
-        // 背景中心位置（世界座標）
         const bgCenterX = bgWidth / 2 + this.cameraOffsetX * parallaxRatioX;
         const bgCenterY = bgHeight / 2 + this.cameraOffsetY * parallaxRatioY;
 
-        // 設定背景位置
         this.parallaxBackground.setPosition(bgCenterX, bgCenterY);
     }
 
@@ -4902,20 +4887,8 @@ export default class MainScene extends Phaser.Scene {
                 // 加入容器
                 this.floorObstacleContainer.add(sprite);
 
-                // 為每個水坑建立城市背景疊層
-                const overlaySprite = this.add.sprite(x, y, 'bg_city');
-                overlaySprite.setOrigin(0.5, 0.5);
-                // 縮放城市背景到水坑大小
-                const bgScale = obstacleSize / Math.max(overlaySprite.width, overlaySprite.height);
-                overlaySprite.setScale(bgScale);
-                overlaySprite.setAlpha(0.3); // 30% 透明度
-
-                // 使用水坑 sprite 本身作為遮罩來源（它已經在場景中可見）
-                const bitmapMask = sprite.createBitmapMask();
-                overlaySprite.setMask(bitmapMask);
-
-                // 把疊層加到容器
-                this.floorOverlayContainer.add(overlaySprite);
+                // 在灰色地板上挖洞（用水坑形狀，讓視差背景可見）
+                this.eraseFloorWithSprite(sprite);
 
                 // 記錄障礙物資料
                 this.floorObstacles.push({
@@ -4923,23 +4896,19 @@ export default class MainScene extends Phaser.Scene {
                     x,
                     y,
                     radius: collisionRadius,
-                    imageRadius,
-                    textureKey,
-                    scale,
-                    overlaySprite
+                    imageRadius
                 });
 
                 placed = true;
             }
         }
 
-        // 測試用：在起始點附近生成一個水坑
-        this.createTestWaterPit(spawnStartX + unitSize * 3, spawnStartY, unitSize * 5);
+        // 固定水坑：在起始點旁邊生成一個（讓玩家一開始就能看到），使用 0 號圖
+        this.createWaterPit(spawnStartX + unitSize * 2, spawnStartY, unitSize * 4, 'floor_water_0');
     }
 
-    // 建立測試用水坑
-    private createTestWaterPit(x: number, y: number, size: number) {
-        const textureKey = 'floor_water_1';
+    // 建立單個水坑
+    private createWaterPit(x: number, y: number, size: number, textureKey: string) {
         const sprite = this.add.sprite(x, y, textureKey);
         sprite.setOrigin(0.5, 0.5);
         const scale = size / Math.max(sprite.width, sprite.height);
@@ -4948,29 +4917,32 @@ export default class MainScene extends Phaser.Scene {
 
         this.floorObstacleContainer.add(sprite);
 
-        // 建立疊層
-        const overlaySprite = this.add.sprite(x, y, 'bg_city');
-        overlaySprite.setOrigin(0.5, 0.5);
-        const bgScale = size / Math.max(overlaySprite.width, overlaySprite.height);
-        overlaySprite.setScale(bgScale);
-        overlaySprite.setAlpha(0.3);
-
-        // 使用水坑 sprite 作為遮罩
-        const bitmapMask = sprite.createBitmapMask();
-        overlaySprite.setMask(bitmapMask);
-        this.floorOverlayContainer.add(overlaySprite);
-
         const imageRadius = size / 2;
         this.floorObstacles.push({
             sprite,
             x,
             y,
             radius: imageRadius * 0.7,
-            imageRadius,
-            textureKey,
-            scale,
-            overlaySprite
+            imageRadius
         });
+
+        // 在灰色地板上挖洞（用水坑形狀，讓視差背景可見）
+        this.eraseFloorWithSprite(sprite);
+    }
+
+    // 用 sprite 形狀在灰色地板上挖洞
+    private eraseFloorWithSprite(sprite: Phaser.GameObjects.Sprite) {
+        if (!this.floorRT) return;
+
+        // 暫時設為完全不透明以便正確擦除
+        const originalAlpha = sprite.alpha;
+        sprite.setAlpha(1);
+
+        // 用 sprite 的形狀擦除（會依照 sprite 的 alpha 通道）
+        this.floorRT.erase(sprite, sprite.x, sprite.y);
+
+        // 還原透明度
+        sprite.setAlpha(originalAlpha);
     }
 
     // 檢查位置是否與障礙物碰撞
