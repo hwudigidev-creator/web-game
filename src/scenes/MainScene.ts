@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SkillManager, SkillDefinition, PlayerSkill, SKILL_LIBRARY, AdvancedSkillDefinition, PlayerAdvancedSkill } from '../systems/SkillSystem';
+import { SkillManager, SkillDefinition, PlayerSkill, SKILL_LIBRARY, AdvancedSkillDefinition, PlayerAdvancedSkill, SparkColors } from '../systems/SkillSystem';
 import { MonsterManager, Monster } from '../systems/MonsterSystem';
 
 interface GameBounds {
@@ -1213,7 +1213,7 @@ export default class MainScene extends Phaser.Scene {
             // 打擊火花（藍色，暴擊更亮，4 條，方向性反彈）
             for (const m of hitMonstersData) {
                 const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
-                this.showHitSparkEffect(m.x, m.y, isCrit ? 0x88bbff : 0x6699ff, hitDir, 4);
+                this.showHitSparkEffect(m.x, m.y, isCrit ? SparkColors.SOUL_RENDER_CRIT : SparkColors.SOUL_RENDER, hitDir, 4);
             }
         }
     }
@@ -1607,7 +1607,7 @@ export default class MainScene extends Phaser.Scene {
                 // 打擊火花（藍色，方向性反彈）
                 for (const m of hitMonstersData) {
                     const hitDir = Math.atan2(m.y - originY, m.x - originX);
-                    this.showHitSparkEffect(m.x, m.y, 0x6699ff, hitDir, 3);
+                    this.showHitSparkEffect(m.x, m.y, SparkColors.SOUL_RENDER, hitDir, 3);
                 }
             }
         };
@@ -1737,7 +1737,7 @@ export default class MainScene extends Phaser.Scene {
 
                     for (const m of hitMonstersData) {
                         const hitDir = Math.atan2(m.y - originY, m.x - originX);
-                        this.showHitSparkEffect(m.x, m.y, isCrit ? 0x88bbff : 0x6699ff, hitDir, 3);
+                        this.showHitSparkEffect(m.x, m.y, isCrit ? SparkColors.SOUL_RENDER_CRIT : SparkColors.SOUL_RENDER, hitDir, 3);
                     }
                 }
             };
@@ -2072,7 +2072,7 @@ export default class MainScene extends Phaser.Scene {
             // 打擊火花（綠色，爆擊更亮，5 條，光束方向）
             for (const m of hitMonstersData) {
                 const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
-                this.showHitSparkEffect(m.x, m.y, isCrit ? 0x88ff88 : 0x66ff66, hitDir, 5);
+                this.showHitSparkEffect(m.x, m.y, isCrit ? SparkColors.VFX_SNIPE_CRIT : SparkColors.VFX_SNIPE, hitDir, 5);
             }
 
             // MAX 後額外能力：連鎖（再發射一次）
@@ -2173,7 +2173,7 @@ export default class MainScene extends Phaser.Scene {
             // 打擊火花（綠色，爆擊更亮）
             for (const m of hitMonstersData) {
                 const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
-                this.showHitSparkEffect(m.x, m.y, isCrit ? 0x88ff88 : 0x66ff66, hitDir, 5);
+                this.showHitSparkEffect(m.x, m.y, isCrit ? SparkColors.VFX_SNIPE_CRIT : SparkColors.VFX_SNIPE, hitDir, 5);
             }
         }
     }
@@ -2552,7 +2552,7 @@ export default class MainScene extends Phaser.Scene {
 
             // 打擊火花（金色，類似輪鋸效果）
             for (const m of hitMonstersData) {
-                this.showHitSparkEffect(m.x, m.y, 0xffcc00);
+                this.showHitSparkEffect(m.x, m.y, SparkColors.SAWBLADE);
             }
         }
     }
@@ -6640,7 +6640,7 @@ export default class MainScene extends Phaser.Scene {
 
                     // 打擊火花（藍色，暴擊更亮，靈魂渲染系）
                     for (const pos of hitPositions) {
-                        this.showHitSparkEffect(pos.x, pos.y, isCrit ? 0x66aaff : 0x4488ff, currentAngle);
+                        this.showHitSparkEffect(pos.x, pos.y, isCrit ? SparkColors.CELLULOID_CRIT : SparkColors.CELLULOID, currentAngle);
                     }
 
                     // 燃燒機率：10% + 每級 1%
@@ -6882,7 +6882,7 @@ export default class MainScene extends Phaser.Scene {
         const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
 
         // 顯示光線落下特效（藍紫色）
-        const techArtistColor = 0x9966ff; // 藍紫色
+        const techArtistColor = SparkColors.TECH_ARTIST; // 藍紫色
         const explosionRadiusPx = explosionRadiusUnits * unitSize; // 視覺用像素
         this.showLightBeamEffect(targetX, targetY, explosionRadiusPx, techArtistColor, beamOffsetX);
 
@@ -6922,7 +6922,7 @@ export default class MainScene extends Phaser.Scene {
                 // 被炸到的怪物噴出爆炸火花（紫色，爆擊更亮）
                 for (const pos of hitPositions) {
                     const screenPos = this.worldToScreen(pos.x, pos.y);
-                    this.showExplosionSparkEffect(screenPos.x, screenPos.y, isCrit ? 0xbb88ff : 0x9966ff, 1.0);
+                    this.showExplosionSparkEffect(screenPos.x, screenPos.y, isCrit ? SparkColors.TECH_ARTIST_CRIT : SparkColors.TECH_ARTIST, 1.0);
                 }
 
                 // 震動效果
@@ -7047,7 +7047,7 @@ export default class MainScene extends Phaser.Scene {
         if (beamAngle !== undefined) {
             // beamAngle 已經是反彈方向，需要轉換回攻擊方向給 showHitSparkEffect
             const attackDir = beamAngle + Math.PI;
-            this.showHitSparkEffect(worldX, worldY, isCrit ? 0xbb88ff : 0x9966ff, attackDir);
+            this.showHitSparkEffect(worldX, worldY, isCrit ? SparkColors.TECH_ARTIST_CRIT : SparkColors.TECH_ARTIST, attackDir);
         }
 
         // 高速旋轉動畫（外圈）
@@ -7206,7 +7206,7 @@ export default class MainScene extends Phaser.Scene {
 
             // 輪鋸火花效果（金色，爆擊更亮）
             for (const pos of hitPositions) {
-                this.showHitSparkEffect(pos.x, pos.y, isCrit ? 0xffee44 : 0xffcc00);
+                this.showHitSparkEffect(pos.x, pos.y, isCrit ? SparkColors.SAWBLADE_CRIT : SparkColors.SAWBLADE);
             }
 
         }
@@ -7406,7 +7406,7 @@ export default class MainScene extends Phaser.Scene {
                         this.monsterManager.knockbackMonsters([monster.id], this.characterX, this.characterY, sawKnockback);
 
                         // 輪鋸火花效果（金色，暴擊更亮）
-                        this.showHitSparkEffect(monster.x, monster.y, isCrit ? 0xffee44 : 0xffcc00);
+                        this.showHitSparkEffect(monster.x, monster.y, isCrit ? SparkColors.SAWBLADE_CRIT : SparkColors.SAWBLADE);
 
                         // 命中特效
                     }
@@ -7517,7 +7517,7 @@ export default class MainScene extends Phaser.Scene {
                         this.monsterManager.knockbackMonsters([monster.id], state.x, state.y, sawKnockback);
 
                         // 火花特效（爆擊更亮）
-                        this.showHitSparkEffect(monster.x, monster.y, isCrit ? 0xffee44 : 0xffcc00);
+                        this.showHitSparkEffect(monster.x, monster.y, isCrit ? SparkColors.SAWBLADE_CRIT : SparkColors.SAWBLADE);
 
                         // 搜尋前進方向 ±45 度（90度扇形）內最近的敵人
                         let nearestInCone: { id: number; x: number; y: number; dist: number } | null = null;
@@ -8810,7 +8810,7 @@ export default class MainScene extends Phaser.Scene {
 
             // 打擊火花（紅色，次元向量系，暴擊時更亮）
             for (const pos of hitPositions) {
-                this.showHitSparkEffect(pos.x, pos.y, isCrit ? 0xff6688 : 0xff4466, angle);
+                this.showHitSparkEffect(pos.x, pos.y, isCrit ? SparkColors.SOUL_SLASH_CRIT : SparkColors.SOUL_SLASH, angle);
             }
 
             // 連鎖斬擊機率：每級 1%（只有主斬擊能觸發連鎖，連鎖不再觸發連鎖）

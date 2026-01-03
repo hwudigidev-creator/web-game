@@ -1,3 +1,25 @@
+// 技能火花顏色常數（普通/爆擊）
+export const SparkColors = {
+    // 靈魂渲染：藍色
+    SOUL_RENDER: 0x6699ff,
+    SOUL_RENDER_CRIT: 0x88bbff,
+    // 疾光狙擊：綠色
+    VFX_SNIPE: 0x66ff66,
+    VFX_SNIPE_CRIT: 0x88ff88,
+    // 絕對邏輯輪鋸：金色
+    SAWBLADE: 0xffcc00,
+    SAWBLADE_CRIT: 0xffee44,
+    // 技術美術大神：紫色
+    TECH_ARTIST: 0x9966ff,
+    TECH_ARTIST_CRIT: 0xbb88ff,
+    // 次元向量疾劃：紅色
+    SOUL_SLASH: 0xff4466,
+    SOUL_SLASH_CRIT: 0xff6688,
+    // 燃燒賽璐珞：藍色
+    CELLULOID: 0x4488ff,
+    CELLULOID_CRIT: 0x66aaff,
+} as const;
+
 // 技能類型
 export type SkillType = 'active' | 'passive' | 'advanced';
 
