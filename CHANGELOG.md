@@ -1,5 +1,102 @@
 # 更新紀錄
 
+## v0.9.20a - 進階技能完整搬遷
+
+### 完整搬遷至 SkillExecutor
+| 技能 | 說明 |
+|------|------|
+| executePerfectPixel | 井字線 + 四焦點爆炸 |
+| performPerfectPixelExplosion | 單次爆炸傷害邏輯 |
+| executeVfxBurst | 30 枚追蹤導彈發射 |
+| selectMissileTarget | 目標選擇（最近 5 隻隨機） |
+| performMissileHit | 導彈命中傷害 + 燃燒 |
+| executeAbsoluteDefense | 輪鋸環繞傷害邏輯 |
+| performSawBladeHit | 飛行輪鋸命中傷害 |
+
+### 狀態管理搬遷
+- `sawBladeAngle` - 輪鋸公轉角度（MainScene → SkillExecutor）
+- `sawBladeLastHitTime` - 擊中冷卻記錄（MainScene → SkillExecutor）
+- 新增公開存取器：`getSawBladeAngle()`, `clearSawBladeHitTime()`, `resetSawBladeState()`
+- 新增 MainScene 存取器：`getCameraOffsetX()`, `getCameraOffsetY()`
+
+### MainScene 重構
+- `executePerfectPixel` → `startPerfectPixelSequence`（只處理時序）
+- `executeVfxBurst` → `startVfxBurstSequence`（只處理導彈排程）
+- `executeAbsoluteDefense` → 分解為輔助函式：
+  - `hideSawBlades()` - 隱藏輪鋸
+  - `drawSawBladesWithParams()` - 繪製 + 火花效果
+  - `setCurrentSawBladePositions()` / `setSawBladeRadius()`
+- `launchMissile` / `launchSingleSawBlade*` - 改用 SkillExecutor 處理傷害
+
+### 進階技能搬遷狀態
+| 技能 | 狀態 |
+|------|------|
+| executeBurningCelluloid | ✅ v0.9.18a |
+| executeTechArtist | ✅ v0.9.18a |
+| executeSoulSlash | ✅ v0.9.19a |
+| executePerfectPixel | ✅ 本版 |
+| executeVfxBurst | ✅ 本版 |
+| executeAbsoluteDefense | ✅ 本版 |
+
+---
+
+## v0.9.19a - SoulSlash 完整搬遷 + 視覺優化
+
+### executeSoulSlash 完整搬遷
+| 項目 | 說明 |
+|------|------|
+| executeSoulSlash | 入口函數，找最近敵人 |
+| performSoulSlash | 斬擊執行 + 連鎖遞迴 |
+| pointToLineDistance | 碰撞檢測工具函數 |
+
+### 視覺效果優化
+- **閃光效果**：`graphics.arc()` → `sector_60` sprite（統一紋理系統）
+- **容器**：`skillGridContainer` → `uiContainer`（螢幕座標）
+- **座標轉換**：修正 `gameBounds` 偏移問題
+- **連鎖延遲**：移除 50ms 延遲，改為即時執行
+
+### 平衡調整
+- 連鎖斬擊機率：0% + 每級 1% → **10% 基礎** + 每級 1%
+
+### 保留在 MainScene（視覺效果）
+- drawSoulSlashEffect - 主斬擊線（3 層 LINE）
+- drawChainSlashEffect - 連鎖斬擊線（青色）
+- showSlashFlashEffect - 斬擊閃光（sector_60）
+- showChainSlashFlashEffect - 連鎖閃光（sector_60）
+
+### 其他搬遷
+- deactivateZeroTrust - 完整搬遷（ZeroTrust 狀態清理）
+- executePhantomSkillAt - 完整搬遷（分身技能施放）
+
+---
+
+## v0.9.18a - SkillExecutor 進階技能搬移
+
+### 完整搬移（從 MainScene 移至 SkillExecutor）
+| 技能 | 約移除行數 | 說明 |
+|------|-----------|------|
+| executeBurningCelluloid | 124 | 旋轉扇形攻擊 + 燃燒效果 |
+| executeTechArtist | 75 | 隨機光線 + 癱瘓效果 |
+
+### 委託模式保留（狀態變數複雜）
+- executeAbsoluteDefense（輪鋸系統：sawBladeSprites、sawBladeAngle 等）
+- executePerfectPixel（十字光線）
+- executeVfxBurst（圓形光線爆發）
+- executeSoulSlash（衝刺斬擊）
+- activateZeroTrust / deactivateZeroTrust（結界系統）
+
+### 新增公開存取器
+- `getCurrentHp()` / `setCurrentHp()`
+- `getTime()` - Phaser 計時器存取
+- `getCharacter()` - 角色 Sprite 存取
+
+### 累計減少行數
+- 基礎技能：~361 行
+- 進階技能：~199 行
+- **總計：~560 行**
+
+---
+
 ## v0.9.17a - SkillExecutor 重構
 
 ### 架構改進
