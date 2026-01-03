@@ -1,5 +1,5 @@
 // Service Worker for DIGI WAR PWA
-const CACHE_NAME = 'digi-war-v0.9.13a';
+const CACHE_NAME = 'digi-war-v0.9.14a';
 
 // 安裝 Service Worker
 self.addEventListener('install', (event) => {
