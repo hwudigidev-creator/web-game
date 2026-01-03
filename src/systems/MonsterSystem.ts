@@ -42,7 +42,7 @@ export interface Monster {
     isBat?: boolean;
     directionX?: number; // 移動方向 X（單位向量）
     directionY?: number; // 移動方向 Y（單位向量）
-    // 菁英怪專用（每 10 級生成）
+    // 菁英怪專用（每 5 級生成）
     isElite?: boolean;
     eliteHpMultiplier?: number; // 菁英怪 HP 倍率（等於生成時的玩家等級）
     // BOSS 專用（未來設計）
@@ -181,8 +181,8 @@ export class MonsterManager {
     setPlayerLevel(level: number): boolean {
         this.playerLevel = level;
 
-        // 檢查是否達到菁英怪生成等級（每 10 級：10, 20, 30...）
-        if (level >= 10 && level % 10 === 0 && !this.eliteSpawnedAtLevels.has(level)) {
+        // 檢查是否達到菁英怪生成等級（每 5 級：5, 10, 15...）
+        if (level >= 5 && level % 5 === 0 && !this.eliteSpawnedAtLevels.has(level)) {
             // 標記已生成，避免重複
             this.eliteSpawnedAtLevels.add(level);
             return true;
@@ -325,30 +325,30 @@ export class MonsterManager {
         this.createMonsterGrid();
     }
 
-    // 計算 70 級後的強化倍率（每 5 級 +15%，配合動態生成補償）
+    // 計算 60 級後的強化倍率（每 5 級 +15%，配合動態生成補償）
     private getHighLevelMultiplier(): number {
-        if (this.playerLevel <= 70) return 1;
-        const extraTiers = Math.floor((this.playerLevel - 70) / 5);
+        if (this.playerLevel <= 60) return 1;
+        const extraTiers = Math.floor((this.playerLevel - 60) / 5);
         return 1 + 0.15 * extraTiers;
     }
 
-    // 計算怪物血量（根據玩家等級，70 級後額外強化）
+    // 計算怪物血量（根據玩家等級，60 級後額外強化）
     private calculateMonsterHp(baseHp: number): number {
         const baseScaled = baseHp * Math.pow(MonsterManager.HP_GROWTH_RATE, this.playerLevel);
         return Math.floor(baseScaled * this.getHighLevelMultiplier());
     }
 
-    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，70 級後額外強化）
+    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，60 級後額外強化）
     private calculateMonsterDamage(monster: Monster): number {
         const damageUnits = Math.max(1, this.playerLevel);
         const baseDamage = MonsterManager.DAMAGE_UNIT * damageUnits;
-        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 70 級後強化
+        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 60 級後強化
         return baseDamage * monster.definition.damage * this.getHighLevelMultiplier();
     }
 
-    // 計算怪物經驗值（每 5 級翻倍）
+    // 計算怪物經驗值（每 10 級翻倍）
     private calculateMonsterExp(baseExp: number): number {
-        const doubleCount = Math.floor(this.playerLevel / 5);
+        const doubleCount = Math.floor(this.playerLevel / 10);
         return baseExp * Math.pow(2, doubleCount);
     }
 
@@ -421,21 +421,17 @@ export class MonsterManager {
         let totalDamage = 0;
         const hitMonsters: Monster[] = [];
 
-        // 檢查是否需要生成新怪物（動態生成速率）
+        // 檢查是否需要生成新怪物（動態間隔加速）
         const monsterGap = MonsterManager.MAX_MONSTERS - this.monsters.length;
-        // 根據缺口動態調整生成間隔
-        let dynamicInterval = this.spawnInterval; // 預設 2000ms
-        if (monsterGap > 100) {
-            dynamicInterval = 500;  // 缺口大：每 0.5 秒
-        } else if (monsterGap > 50) {
-            dynamicInterval = 1000; // 缺口中：每 1 秒
-        }
+        // 倍率 = 180 / 場上怪物數量（怪物越少，間隔越短）
+        const currentCount = Math.max(1, this.monsters.length);
+        const fillMultiplier = 180 / currentCount;
+        // 動態間隔 = 3 秒 / 倍率，最短 100ms
+        const dynamicInterval = Math.max(100, 3000 / fillMultiplier);
 
         if (this.isSpawning && now - this.lastSpawnTime >= dynamicInterval && monsterGap > 0) {
-            // 每5級多生成1隻怪物，70級後不再增加（最多15隻）
-            const effectiveLevel = Math.min(this.playerLevel, 70);
-            const spawnCount = 1 + Math.floor(effectiveLevel / 5);
-            const actualSpawnCount = Math.min(spawnCount, monsterGap);
+            // 每次固定生成 6 隻
+            const actualSpawnCount = Math.min(6, monsterGap);
             for (let i = 0; i < actualSpawnCount; i++) {
                 this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
             }

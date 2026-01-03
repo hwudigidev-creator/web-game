@@ -83,7 +83,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_absolute_defense',
         name: '絕對邏輯防禦',
         subtitle: '無懈可擊的系統架構',
-        description: '【靈魂統領＋同步率】\n3+Lv/10輪鋸(max6)，盾%=爆率，失盾%×10=傷害加成',
+        description: '【靈魂統領＋同步率】\n3+Lv/5輪鋸(max8)，覆蓋盾時輪鋸射向敵人彈飛',
         color: 0xffdd00,  // 金黃色（防禦感）
         flashColor: 0xffee66,
         cooldown: 100,  // 0.1 秒（持續效果，高頻更新）
@@ -109,10 +109,10 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_vfx_burst',
         name: '爆發的影視特效',
         subtitle: '好萊塢級的視覺轟炸',
-        description: '【疾光狙擊＋AI強化】\n1.5秒內發射20枚追蹤導彈',
+        description: '【疾光狙擊＋AI強化】\n2秒30導彈，命中Lv%燃燒',
         color: 0xff4400,  // 橘紅色（爆炸感）
         flashColor: 0xff6633,
-        cooldown: 3500,  // 3.5 秒
+        cooldown: 5000,  // 5 秒
         maxLevel: -1,  // 無上限
         iconPrefix: 'SB1',  // SB1.png（固定圖示）
         requiredSkills: ['active_vfx', 'passive_ai_enhancement'],  // 疾光狙擊 + AI 賦能強化
@@ -135,7 +135,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_zero_trust',
         name: '零信任防禦協定',
         subtitle: '絕對安全的系統架構',
-        description: '【靈魂統領＋AI強化】\n8光點5單位場，減速50%，擊殺重置護盾CD',
+        description: '【靈魂統領＋AI強化】\n8光點5單位場，減速50%，擊殺Lv%重置盾CD',
         color: 0xffcc00,  // 金黃色
         flashColor: 0xffee66,
         cooldown: 0,  // 持續效果，無冷卻
@@ -148,7 +148,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_soul_slash',
         name: '次元向量疾劃',
         subtitle: '貫穿次元的向量之刃',
-        description: '【靈魂渲染＋AI強化】\n全螢幕直線斬擊，每級1%連鎖機率',
+        description: '【靈魂渲染＋AI強化】\n全螢幕直線斬擊，暴擊3倍，每級1%連鎖',
         color: 0xff3366,  // 紅紫色（斬擊感）
         flashColor: 0xff6699,
         cooldown: 500,  // 0.5 秒
@@ -801,6 +801,13 @@ export class SkillManager {
     calculateFinalDamage(baseDamage: number): number {
         const damageBonus = this.getAiEnhancementDamageBonus();
         return Math.floor(baseDamage * (1 + damageBonus));
+    }
+
+    // 取得總暴擊率（用於需要自訂暴擊倍率的技能）
+    getCritChance(playerLevel: number): number {
+        const baseCritChance = this.getRetinaModuleCritChance(playerLevel);
+        const techArtistCrit = this.getTechArtistCritBonus();
+        return baseCritChance + techArtistCrit;
     }
 
     // 計算最終攻擊傷害（含暴擊判定）
