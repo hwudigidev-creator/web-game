@@ -395,57 +395,62 @@ export class SkillExecutor {
         this.call('triggerShieldBreathScan');
     }
 
-    // ==================== 進階技能 ====================
+    // ==================== 進階技能（委託給 MainScene）====================
 
-    /** 燃燒賽璐珞 */
-    public executeBurningCelluloid(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 燃燒賽璐珞：消耗 HP 旋轉攻擊 */
+    public executeBurningCelluloid(skillLevel: number): void {
+        this.call('executeBurningCelluloid', skillLevel);
     }
 
-    /** 技術美術大神 */
-    public executeTechArtist(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 技術美術大神：隨機光線攻擊 */
+    public executeTechArtist(skillLevel: number): void {
+        this.call('executeTechArtist', skillLevel);
     }
 
-    /** 絕對邏輯防禦 */
-    public executeAbsoluteDefense(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 絕對邏輯防禦：輪鋸環繞 */
+    public executeAbsoluteDefense(skillLevel: number): void {
+        this.call('executeAbsoluteDefense', skillLevel);
     }
 
-    /** 完美像素審判 */
-    public executePerfectPixel(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 完美像素審判：十字光線攻擊 */
+    public executePerfectPixel(skillLevel: number): void {
+        this.call('executePerfectPixel', skillLevel);
     }
 
-    /** 疾光爆發 */
-    public executeVfxBurst(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 疾光爆發：圓形光線爆發 */
+    public executeVfxBurst(skillLevel: number): void {
+        this.call('executeVfxBurst', skillLevel);
     }
 
-    /** 次元向量疾劃 */
-    public executeSoulSlash(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 次元向量疾劃：衝刺斬擊 */
+    public executeSoulSlash(skillLevel: number): void {
+        this.call('executeSoulSlash', skillLevel);
     }
 
-    /** 零信任邊界 */
-    public activateZeroTrust(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    /** 零信任邊界：結界技能 */
+    public activateZeroTrust(skillLevel: number): void {
+        this.call('activateZeroTrust', skillLevel);
     }
 
-    // ==================== 分身系統 ====================
+    /** 停用零信任邊界 */
+    public deactivateZeroTrust(): void {
+        this.call('deactivateZeroTrust');
+    }
 
-    /** 幻影迭代 */
-    public executePhantomIteration(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    // ==================== 分身系統（委託給 MainScene）====================
+
+    /** 幻影迭代：召喚分身 */
+    public executePhantomIteration(skillLevel: number): void {
+        this.call('executePhantomIteration', skillLevel);
     }
 
     /** 在指定位置執行分身技能 */
-    public executePhantomSkillAt(_skillId: string, _skillLevel: number, _phantomX: number, _phantomY: number): void {
-        // TODO: 從 MainScene 搬移
+    public executePhantomSkillAt(skillId: string, skillLevel: number, phantomX: number, phantomY: number): void {
+        this.call('executePhantomSkillAt', skillId, skillLevel, phantomX, phantomY);
     }
 
     /** 分身跟隨咒言圈 */
-    public activatePhantomFollowingCurseCircles(_skillLevel: number): void {
-        // TODO: 從 MainScene 搬移
+    public activatePhantomFollowingCurseCircles(skillLevel: number): void {
+        this.call('activatePhantomFollowingCurseCircles', skillLevel);
     }
 }

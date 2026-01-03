@@ -1,5 +1,32 @@
 # 更新紀錄
 
+## v0.9.17a - SkillExecutor 重構
+
+### 架構改進
+新增 `SkillExecutor.ts`（約 456 行）統一管理技能執行邏輯，從 MainScene 減少約 361 行程式碼：
+
+| 技能類型 | 狀態 | 說明 |
+|---------|------|------|
+| **基礎技能** | 完整搬移 | activateSoulRender, activateCoder, activateVfx, activateArchitect |
+| **進階技能** | 委託模式 | executeBurningCelluloid, executeTechArtist 等 7 個進階技能 |
+| **分身系統** | 委託模式 | executePhantomIteration 等 3 個分身相關方法 |
+
+### 技術細節
+- **委託模式**：進階技能透過 `this.call()` 委託給 MainScene，保持相容性
+- **公開存取器**：MainScene 新增 12 個公開方法供 SkillExecutor 存取屬性
+- **DAMAGE_UNIT**：在 SkillExecutor 中定義本地常數（值 10）
+
+### 移除行數統計
+| 方法 | 約移除行數 |
+|------|-----------|
+| activateSoulRender | 107 |
+| activateCoder | 73 |
+| activateVfx | 139 |
+| activateArchitect | 42 |
+| **總計** | **~361** |
+
+---
+
 ## v0.9.16a - 爆擊火花視覺強化與顏色常數化
 
 ### 火花顏色常數化

@@ -6153,33 +6153,33 @@ export default class MainScene extends Phaser.Scene {
     private activateAdvancedSkill(equipped: PlayerAdvancedSkill) {
         const def = equipped.definition;
 
-        // 根據進階技能類型執行不同效果
+        // 根據進階技能類型執行不同效果（透過 SkillExecutor）
         switch (def.id) {
             case 'advanced_burning_celluloid':
-                this.executeBurningCelluloid(equipped.level);
+                this.skillExecutor.executeBurningCelluloid(equipped.level);
                 break;
             case 'advanced_tech_artist':
-                this.executeTechArtist(equipped.level);
+                this.skillExecutor.executeTechArtist(equipped.level);
                 break;
             case 'advanced_absolute_defense':
-                this.executeAbsoluteDefense(equipped.level);
+                this.skillExecutor.executeAbsoluteDefense(equipped.level);
                 break;
             case 'advanced_perfect_pixel':
-                this.executePerfectPixel(equipped.level);
+                this.skillExecutor.executePerfectPixel(equipped.level);
                 break;
             case 'advanced_vfx_burst':
-                this.executeVfxBurst(equipped.level);
+                this.skillExecutor.executeVfxBurst(equipped.level);
                 break;
             case 'advanced_phantom_iteration':
-                this.executePhantomIteration(equipped.level);
+                this.skillExecutor.executePhantomIteration(equipped.level);
                 break;
             case 'advanced_zero_trust':
                 // 零信任防禦協定是被動觸發，不需要手動執行
                 // 啟用矩陣即可
-                this.activateZeroTrust(equipped.level);
+                this.skillExecutor.activateZeroTrust(equipped.level);
                 break;
             case 'advanced_soul_slash':
-                this.executeSoulSlash(equipped.level);
+                this.skillExecutor.executeSoulSlash(equipped.level);
                 break;
         }
     }
