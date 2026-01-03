@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { SkillManager, SkillDefinition, PlayerSkill, SKILL_LIBRARY, AdvancedSkillDefinition, PlayerAdvancedSkill, SparkColors } from '../systems/SkillSystem';
+import { SkillExecutor } from '../systems/SkillExecutor';
 import { MonsterManager, Monster } from '../systems/MonsterSystem';
 
 interface GameBounds {
@@ -339,6 +340,7 @@ export default class MainScene extends Phaser.Scene {
 
     // 技能系統
     private skillManager: SkillManager = new SkillManager();
+    private skillExecutor!: SkillExecutor;
     private skillIconContainers: Phaser.GameObjects.Container[] = []; // 技能欄圖示容器
     private skillLevelTexts: Phaser.GameObjects.Text[] = []; // 技能等級文字
     private skillIconSprites: (Phaser.GameObjects.Sprite | null)[] = []; // 技能圖示 Sprite
@@ -623,6 +625,9 @@ export default class MainScene extends Phaser.Scene {
         // 計算大地圖尺寸（可視區域的 10 倍）
         this.mapWidth = this.gameBounds.width * MainScene.MAP_SCALE;
         this.mapHeight = this.gameBounds.height * MainScene.MAP_SCALE;
+
+        // 初始化技能執行器
+        this.skillExecutor = new SkillExecutor(this);
 
         // 角色大小為遊玩區域高度的 15%
         this.characterSize = this.gameBounds.height * 0.15;
@@ -1092,129 +1097,19 @@ export default class MainScene extends Phaser.Scene {
         // 根據技能類型執行效果
         switch (def.id) {
             case 'active_soul_render':
-                this.activateSoulRender(skill);
+                this.skillExecutor.activateSoulRender(skill);
                 break;
             case 'active_coder':
-                this.activateCoder(skill);
+                this.skillExecutor.activateCoder(skill);
                 break;
             case 'active_vfx':
-                this.activateVfx(skill);
+                this.skillExecutor.activateVfx(skill);
                 break;
             case 'active_architect':
-                this.activateArchitect(skill);
+                this.skillExecutor.activateArchitect(skill);
                 break;
             default:
                 break;
-        }
-    }
-
-    // 靈魂渲染：朝最近敵人方向打出 60 度扇形傷害
-    // MAX：改為三向衝擊波（0°/120°/240°）、10 傷害、10 單位射程
-    private activateSoulRender(skill: PlayerSkill) {
-        const monsters = this.monsterManager.getMonsters();
-        if (monsters.length === 0) return;
-
-        // MAX 等級：三向衝擊波
-        if (skill.level >= skill.definition.maxLevel) {
-            this.triggerSoulRenderTripleWave(skill);
-            return;
-        }
-
-        // 找最近的怪物
-        let nearestMonster = monsters[0];
-        let nearestDist = Infinity;
-
-        for (const monster of monsters) {
-            const dx = monster.x - this.characterX;
-            const dy = monster.y - this.characterY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < nearestDist) {
-                nearestDist = dist;
-                nearestMonster = monster;
-            }
-        }
-
-        // 計算朝向最近怪物的角度
-        const targetAngle = Math.atan2(
-            nearestMonster.y - this.characterY,
-            nearestMonster.x - this.characterX
-        );
-
-        // 更新角色面向
-        this.facingRight = Math.cos(targetAngle) >= 0;
-        this.updateCharacterSprite();
-
-        // 扇形參數
-        const range = this.gameBounds.height * 0.3; // 3 個單位（畫面高度 10% * 3）
-        // 扇形角度：60 度 + 每級 10 度（Lv.0=60度，Lv.4=100度）
-        const sectorAngle = 60 + skill.level * 10;
-        const halfAngle = (sectorAngle / 2) * (Math.PI / 180);
-
-        // 傷害：2 單位 + 每級 1 單位（Lv.0=2單位，Lv.4=6單位）
-        const damageUnits = 2 + skill.level;
-        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
-
-        // 檢查哪些怪物在扇形範圍內
-        const hitMonsters: number[] = [];
-        for (const monster of monsters) {
-            // 計算怪物碰撞半徑（體型的一半）
-            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-
-            const dx = monster.x - this.characterX;
-            const dy = monster.y - this.characterY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            // 檢查距離（扣除怪物半徑，讓邊緣碰到就算命中）
-            if (dist - monsterRadius > range) continue;
-
-            // 計算怪物相對於玩家的角度
-            const monsterAngle = Math.atan2(dy, dx);
-
-            // 計算角度差（處理角度環繞）
-            let angleDiff = monsterAngle - targetAngle;
-            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-            // 檢查是否在扇形內（考慮怪物體型的角度偏移）
-            const angleOffset = dist > 0 ? Math.atan2(monsterRadius, dist) : Math.PI;
-            if (Math.abs(angleDiff) <= halfAngle + angleOffset) {
-                hitMonsters.push(monster.id);
-            }
-        }
-
-        // 繪製扇形邊緣線（60% 透明度）
-        this.drawSectorEdge(targetAngle, range, halfAngle, skill.definition.color);
-
-        // 繪製打擊區特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
-        const flashColor = skill.definition.flashColor || skill.definition.color;
-        if (this.showGridSkillEffects) {
-            this.flashSkillAreaSector(this.characterX, this.characterY, range, targetAngle, halfAngle, flashColor);
-        } else {
-            // 物件池版本（GPU 渲染，效能好）
-            const halfAngleDeg = halfAngle * (180 / Math.PI);
-            this.flashSkillEffectSector(this.characterX, this.characterY, range, targetAngle, halfAngleDeg, flashColor);
-        }
-
-        // 對命中的怪物造成傷害
-        if (hitMonsters.length > 0) {
-            // 取得命中怪物的位置（在造成傷害前）
-            const hitMonstersData = monsters.filter(m => hitMonsters.includes(m.id));
-
-            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-            if (result.totalExp > 0) {
-                this.addExp(result.totalExp);
-            }
-            // 菁英怪掉落回血物品
-
-            // 擊中 10 隻以上觸發畫面震動
-            this.shakeScreen(hitMonsters.length);
-
-            // 打擊火花（藍色，暴擊更亮，4 條，方向性反彈）
-            for (const m of hitMonstersData) {
-                const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
-                this.showHitSparkEffect(m.x, m.y, isCrit ? SparkColors.SOUL_RENDER_CRIT : SparkColors.SOUL_RENDER, hitDir, 4);
-            }
         }
     }
 
@@ -1454,80 +1349,6 @@ export default class MainScene extends Phaser.Scene {
             if (graphics.active) graphics.destroy();
             timerEvent.remove();
         });
-    }
-
-    // 編碼者：對周圍敵人造成傷害
-    // 起始範圍 3 單位，每級 +0.5 單位（Lv.0=3單位，Lv.5=5.5單位）
-    // 起始傷害 2 單位，每級 +2 單位（Lv.0=2單位，Lv.5=12單位）- 傷害 x2、冷卻 2 秒
-    private activateCoder(skill: PlayerSkill) {
-        const monsters = this.monsterManager.getMonsters();
-        if (monsters.length === 0) return;
-
-        // 1 單位 = 畫面高度 10%
-        const unitSize = this.gameBounds.height * 0.1;
-
-        // 範圍：3 單位 + 每級 0.5 單位（Lv.0=3單位，Lv.5=5.5單位）
-        const rangeUnits = 3 + skill.level * 0.5;
-        const range = unitSize * rangeUnits;
-
-        // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
-        const damageUnits = (1 + skill.level) * 2;
-        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
-
-        // 檢查哪些怪物在範圍內
-        const hitMonsters: number[] = [];
-        for (const monster of monsters) {
-            // 計算怪物碰撞半徑（體型的一半）
-            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-
-            const dx = monster.x - this.characterX;
-            const dy = monster.y - this.characterY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            // 扣除怪物半徑，讓邊緣碰到就算命中
-            if (dist - monsterRadius <= range) {
-                hitMonsters.push(monster.id);
-            }
-        }
-
-        // 繪製圓形邊緣線（60% 透明度）
-        this.drawCircleEdge(range, skill.definition.color);
-
-        // 繪製打擊區特效（預設使用物件池版本，SHIFT+BACKSPACE 切換為網格版）
-        const flashColor = skill.definition.flashColor || skill.definition.color;
-        if (this.showGridSkillEffects) {
-            this.flashSkillAreaCircle(this.characterX, this.characterY, range, flashColor);
-        } else {
-            this.flashSkillEffectCircle(this.characterX, this.characterY, range, flashColor);
-        }
-
-        // 對命中的怪物造成傷害
-        if (hitMonsters.length > 0) {
-            // 取得命中怪物的位置（在造成傷害前）
-            const hitMonstersData = monsters.filter(m => hitMonsters.includes(m.id));
-
-            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-            if (result.totalExp > 0) {
-                this.addExp(result.totalExp);
-            }
-            // 菁英怪掉落回血物品
-
-            // 擊中 10 隻以上觸發畫面震動
-            this.shakeScreen(hitMonsters.length);
-
-            // 爆炸火花（紫色，圓形擴散效果）
-            for (const m of hitMonstersData) {
-                const screenPos = this.worldToScreen(m.x, m.y);
-                this.showExplosionSparkEffect(screenPos.x, screenPos.y, 0xaa66ff, 0.8);
-            }
-
-            // MAX 後額外能力：爆發（從擊殺位置再次發動）
-            const burstChance = this.skillManager.getCoderBurstChance(this.currentLevel);
-            if (burstChance > 0 && result.killedPositions.length > 0) {
-                this.triggerCoderBurst(result.killedPositions, range, finalDamage, skill, burstChance);
-            }
-        }
     }
 
     // 靈魂渲染穿透效果：整片扇形往外推移 5 單位，速度減半，每 0.5 秒造成一次經過區域傷害
@@ -1943,146 +1764,6 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 視效師：投射貫穿光束，對直線 10 單位範圍敵人造成傷害
-    // 每級多發射一道隨機方向的光束（Lv.0=1道，Lv.5=6道）
-    // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
-    private activateVfx(skill: PlayerSkill) {
-        const monsters = this.monsterManager.getMonsters();
-        if (monsters.length === 0) return;
-
-        // 檢查是否 MAX 等級
-        const isMax = skill.level >= skill.definition.maxLevel;
-
-        // MAX 時：3 條精準鎖定射線，10 倍粗
-        // 非 MAX：光束數量 = 技能等級 + 1（Lv.0=1道，Lv.4=5道）
-        const beamCount = isMax ? 3 : skill.level + 1;
-
-        // 光束參數
-        const range = isMax
-            ? this.gameBounds.height * 1.5  // MAX：15 單位射程
-            : this.gameBounds.height * 1.0; // 普通：10 單位
-        const beamWidth = isMax
-            ? this.gameBounds.height * 0.5  // MAX：5 單位寬（10 倍粗）
-            : this.gameBounds.height * 0.05; // 普通：0.5 單位
-
-        // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
-        const damageUnits = 1 + skill.level;
-        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
-
-        // 收集所有被命中的怪物（使用 Set 避免重複）
-        const allHitMonsters = new Set<number>();
-        const targetAngles: number[] = [];
-
-        if (isMax) {
-            // MAX 模式：精準鎖定最近的 3 隻怪物
-            const monstersWithDist = monsters.map(monster => {
-                const dx = monster.x - this.characterX;
-                const dy = monster.y - this.characterY;
-                return { monster, dist: Math.sqrt(dx * dx + dy * dy) };
-            });
-            monstersWithDist.sort((a, b) => a.dist - b.dist);
-
-            const targetCount = Math.min(beamCount, monstersWithDist.length);
-            for (let i = 0; i < targetCount; i++) {
-                const target = monstersWithDist[i].monster;
-                const targetAngle = Math.atan2(
-                    target.y - this.characterY,
-                    target.x - this.characterX
-                );
-                targetAngles.push(targetAngle);
-            }
-        } else {
-            // 普通模式：隨機選擇不重複的目標怪物
-            const availableIndices = monsters.map((_, i) => i);
-            for (let beam = 0; beam < beamCount; beam++) {
-                let targetAngle: number;
-                if (availableIndices.length > 0) {
-                    const pickIndex = Math.floor(Math.random() * availableIndices.length);
-                    const monsterIndex = availableIndices[pickIndex];
-                    availableIndices.splice(pickIndex, 1);
-                    const targetMonster = monsters[monsterIndex];
-                    targetAngle = Math.atan2(
-                        targetMonster.y - this.characterY,
-                        targetMonster.x - this.characterX
-                    );
-                } else {
-                    targetAngle = Math.random() * Math.PI * 2;
-                }
-                targetAngles.push(targetAngle);
-            }
-        }
-
-        // 發射光束
-        for (const targetAngle of targetAngles) {
-            // 檢查哪些怪物在這道光束範圍內
-            for (const monster of monsters) {
-                const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-                const dx = monster.x - this.characterX;
-                const dy = monster.y - this.characterY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-
-                if (dist - monsterRadius > range) continue;
-
-                const dirX = Math.cos(targetAngle);
-                const dirY = Math.sin(targetAngle);
-                const projLength = dx * dirX + dy * dirY;
-
-                if (projLength < -monsterRadius) continue;
-
-                const perpDist = Math.abs(dx * dirY - dy * dirX);
-                if (perpDist <= beamWidth / 2 + monsterRadius) {
-                    allHitMonsters.add(monster.id);
-                }
-            }
-
-            // 繪製光束邊緣線
-            this.drawBeamEdge(targetAngle, range, beamWidth, skill.definition.color);
-
-            // 繪製光束特效
-            const endX = this.characterX + Math.cos(targetAngle) * range;
-            const endY = this.characterY + Math.sin(targetAngle) * range;
-            const beamFlashColor = skill.definition.flashColor || skill.definition.color;
-            if (this.showGridSkillEffects) {
-                this.flashSkillAreaLine(this.characterX, this.characterY, endX, endY, beamWidth, beamFlashColor);
-            } else {
-                this.flashSkillEffectLine(this.characterX, this.characterY, endX, endY, beamWidth, beamFlashColor);
-            }
-        }
-
-        // 更新角色面向（朝第一道光束方向）
-        if (targetAngles.length > 0) {
-            this.facingRight = Math.cos(targetAngles[0]) >= 0;
-            this.updateCharacterSprite();
-        }
-
-        // 對命中的怪物造成傷害
-        const hitMonsterIds = Array.from(allHitMonsters);
-        if (hitMonsterIds.length > 0) {
-            const hitMonstersData = monsters.filter(m => hitMonsterIds.includes(m.id));
-            const hitPositions = hitMonstersData.map(m => ({ x: m.x, y: m.y }));
-
-            const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
-            if (result.totalExp > 0) {
-                this.addExp(result.totalExp);
-            }
-
-            this.shakeScreen(hitMonsterIds.length);
-
-            // 打擊火花（綠色，爆擊更亮，5 條，光束方向）
-            for (const m of hitMonstersData) {
-                const hitDir = Math.atan2(m.y - this.characterY, m.x - this.characterX);
-                this.showHitSparkEffect(m.x, m.y, isCrit ? SparkColors.VFX_SNIPE_CRIT : SparkColors.VFX_SNIPE, hitDir, 5);
-            }
-
-            // MAX 後額外能力：連鎖（再發射一次）
-            const chainChance = this.skillManager.getVfxChainChance(this.currentLevel);
-            if (chainChance > 0 && hitPositions.length > 0) {
-                this.triggerVfxChain(hitPositions, finalDamage, chainChance, skill, isCrit);
-            }
-        }
-    }
-
     // 疾光狙擊 MAX 連鎖效果：3 條鎖定最近敵人的超粗射線
     private triggerVfxChain(
         _hitPositions: { x: number; y: number }[],
@@ -2463,49 +2144,6 @@ export default class MainScene extends Phaser.Scene {
                 timerEvent.remove();
             });
         }
-    }
-
-    // 架構師：產生護盾，護盾吸收傷害並反傷給攻擊者
-    // 反傷傷害：2/4/6/8/10/20（Lv.0~5），擊退只有 MAX 才有
-    // MAX 額外能力：八角爆盾 - 護盾殘值×10 傷害、4 單位範圍爆炸並擊退
-    private activateArchitect(skill: PlayerSkill) {
-        // 記錄技能等級（用於反傷擊退判斷）
-        this.architectSkillLevel = skill.level;
-
-        // MAX 後額外能力：八角爆盾 - 護盾有殘值時觸發爆炸
-        // 只要技能達到 MAX（explosionChance > 0），就 100% 觸發
-        const explosionChance = this.skillManager.getArchitectExplosionChance(this.currentLevel);
-        if (explosionChance > 0 && this.currentShield > 0) {
-            this.triggerShieldExplosion(skill);
-        }
-
-        // 絕對邏輯防禦：護盾重新填充時，剩餘輪鋸向外飛出
-        if (this.currentSawBladePositions.length > 0) {
-            this.launchSawBladesOutward();
-        }
-
-        // 護盾值為最大 HP 的 30%
-        const shieldAmount = Math.floor(this.maxHp * 0.3);
-
-        // 設定護盾值（不疊加，直接設定）
-        this.currentShield = shieldAmount;
-        this.maxShield = shieldAmount; // 記錄護盾最大值用於護盾比例計算
-
-        // 反傷傷害：2/4/6/8/10/20（Lv.0=2, Lv.5=20）
-        const reflectDamageTable = [2, 4, 6, 8, 10, 20];
-        const reflectUnits = reflectDamageTable[skill.level] || 2;
-        this.shieldReflectDamage = MainScene.DAMAGE_UNIT * reflectUnits;
-
-        // 繪製護盾條
-        this.drawShieldBarFill();
-
-        // 繪製護盾特效（使用護盾圖片）
-        const shieldRadius = this.gameBounds.height * 0.18;
-        const shieldFlashColor = skill.definition.flashColor || skill.definition.color;
-        this.flashShieldEffect(this.characterX, this.characterY, shieldRadius, shieldFlashColor);
-
-        // 地面文字金色呼吸掃光
-        this.triggerShieldBreathScan();
     }
 
     // 八角爆盾：護盾殘值×10 傷害、4 單位範圍金色八角盾爆炸並擊退
@@ -14854,4 +14492,24 @@ export default class MainScene extends Phaser.Scene {
             }
         });
     }
+
+    // ==================== SkillExecutor 存取器 ====================
+
+    public getCharacterX(): number { return this.characterX; }
+    public getCharacterY(): number { return this.characterY; }
+    public getCurrentLevel(): number { return this.currentLevel; }
+    public getGameBounds() { return this.gameBounds; }
+    public getMonsterManager() { return this.monsterManager; }
+    public getSkillManager() { return this.skillManager; }
+    public getShowGridSkillEffects(): boolean { return this.showGridSkillEffects; }
+    public getCurrentShield(): number { return this.currentShield; }
+    public getMaxShield(): number { return this.maxShield; }
+    public setCurrentShield(value: number) { this.currentShield = value; }
+    public getFacingRight(): boolean { return this.facingRight; }
+    public setFacingRight(value: boolean) { this.facingRight = value; this.updateCharacterSprite(); }
+    public setArchitectSkillLevel(value: number) { this.architectSkillLevel = value; }
+    public getCurrentSawBladePositions() { return this.currentSawBladePositions; }
+    public getMaxHp(): number { return this.maxHp; }
+    public setMaxShield(value: number) { this.maxShield = value; }
+    public setShieldReflectDamage(value: number) { this.shieldReflectDamage = value; }
 }
