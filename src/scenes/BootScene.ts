@@ -23,6 +23,9 @@ export default class BootScene extends Phaser.Scene {
         // 載入護盾紋理（靈魂統領及相關組合技用）
         this.load.image('effect_shield', 'effects/shield.png');
 
+        // 載入斬擊紋理（燃燒賽璐珞用）
+        this.load.image('effect_slash', 'effects/slash.png');
+
         // 載入地板 hex 字元紋理（0-9, A-F）
         const hexChars = '0123456789ABCDEF';
         for (const char of hexChars) {

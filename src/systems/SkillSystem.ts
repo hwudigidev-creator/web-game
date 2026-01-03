@@ -57,7 +57,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_burning_celluloid',
         name: '燃燒的賽璐珞',
         subtitle: '傳統手繪動畫師、逐幀動畫師',
-        description: '【靈魂渲染＋鈦金肝】\n消耗10HP，旋轉一圈30°扇形攻擊',
+        description: '【靈魂渲染＋鈦金肝】\n-10HP旋轉攻擊7單位，(10%+Lv%)燃燒',
         color: 0xff6600,  // 橘紅色（燃燒感）
         flashColor: 0xff9933,
         cooldown: 2000,  // 2 秒
@@ -70,7 +70,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_tech_artist',
         name: '技術美術大神',
         subtitle: '一人成軍的遊戲開發者',
-        description: '【咒言幻象＋視網膜】\n周圍5單位射下光線，3單位爆炸，敵人暈眩1秒',
+        description: '【咒言幻象＋視網膜】\n5單位內落雷，3單位爆炸+暈眩1秒',
         color: 0x9966ff,  // 藍紫色
         flashColor: 0xbb99ff,
         cooldown: 1000,  // 1 秒
@@ -83,7 +83,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_absolute_defense',
         name: '絕對邏輯防禦',
         subtitle: '無懈可擊的系統架構',
-        description: '【靈魂統領＋同步率】\n輪鋸2+每10技能級1個(max6)，滿後-0.1%→回盾',
+        description: '【靈魂統領＋同步率】\n3+Lv/10輪鋸(max6)，盾%=爆率，失盾%×10=傷害加成',
         color: 0xffdd00,  // 金黃色（防禦感）
         flashColor: 0xffee66,
         cooldown: 100,  // 0.1 秒（持續效果，高頻更新）
@@ -96,7 +96,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_perfect_pixel',
         name: '完美像素審判',
         subtitle: '構圖之神的鐵律',
-        description: '【疾光狙擊＋視網膜】\n井字線四焦點爆炸，敵人暈眩1秒',
+        description: '【疾光狙擊＋視網膜】\n井字線4焦點各炸1次，3單位+暈眩1秒',
         color: 0x66ffcc,  // 青綠色（疾光狙擊系）
         flashColor: 0x88ffee,
         cooldown: 3000,  // 3 秒
@@ -109,7 +109,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_vfx_burst',
         name: '爆發的影視特效',
         subtitle: '好萊塢級的視覺轟炸',
-        description: '【疾光狙擊＋AI強化】\n每3.5秒發射20枚追蹤導彈',
+        description: '【疾光狙擊＋AI強化】\n1.5秒內發射20枚追蹤導彈',
         color: 0xff4400,  // 橘紅色（爆炸感）
         flashColor: 0xff6633,
         cooldown: 3500,  // 3.5 秒
@@ -122,7 +122,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_phantom_iteration',
         name: '幻影迭代模式',
         subtitle: '咒言幻象的創作者',
-        description: '【咒言幻象＋AI強化】\n召喚最多3隻強力分身支援戰鬥',
+        description: '【咒言幻象＋AI強化】\n分身max3，滿時每分身咒言圈2秒',
         color: 0x9966ff,  // 紫藍色（幻影感）
         flashColor: 0xbb88ff,
         cooldown: 8000,  // 8 秒
@@ -135,7 +135,7 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_zero_trust',
         name: '零信任防禦協定',
         subtitle: '絕對安全的系統架構',
-        description: '【靈魂統領＋AI強化】\n光束鎖敵每秒+1倍寬&+Lv%傷，減速50%',
+        description: '【靈魂統領＋AI強化】\n8光點5單位場，減速50%，擊殺重置護盾CD',
         color: 0xffcc00,  // 金黃色
         flashColor: 0xffee66,
         cooldown: 0,  // 持續效果，無冷卻

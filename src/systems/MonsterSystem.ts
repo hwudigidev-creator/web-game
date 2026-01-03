@@ -65,7 +65,7 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         id: 'slime',
         name: '史萊姆',
         color: 0x66ff66,
-        speed: 1.8, // 每秒 1.8 單位（加速）
+        speed: 1.2, // 每秒 1.2 單位
         damage: 1,
         size: 0.05, // 畫面高度的 5%（縮小）
         hp: 30,

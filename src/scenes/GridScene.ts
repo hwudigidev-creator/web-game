@@ -489,6 +489,7 @@ export default class GridScene extends Phaser.Scene {
         this.load.image('effect_line', 'effects/line.png');
         this.load.image('effect_soulwave', 'effects/soulwave.png');
         this.load.image('effect_shield', 'effects/shield.png');
+        this.load.image('effect_slash', 'effects/slash.png');
         const sectorAngles = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 360];
         for (const angle of sectorAngles) {
             this.load.image(`effect_sector_${angle}`, `effects/sector_${angle}.png`);
@@ -505,8 +506,10 @@ export default class GridScene extends Phaser.Scene {
             this.load.image(`floor_water_${i}`, `floor/water_0${i}.png`);
         }
 
-        // 預載入城市背景
-        this.load.image('bg_city', 'city/bg_city.png');
+        // 預載入城市背景（5 張隨機選擇）
+        for (let i = 1; i <= 5; i++) {
+            this.load.image(`bg_city_${i}`, `city/bg_city_0${i}.png`);
+        }
 
         // 預載入技能圖示
         const skillIconPrefixes = ['A', 'B', 'C', 'D'];
