@@ -313,7 +313,7 @@ export default class MainScene extends Phaser.Scene {
     private static readonly GAME_MODES = [
         { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, damageMultiplier: 1.0, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
         { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍', image: 'mode_nightmare' },
-        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, color: 0xF44336, description: '怪物 3 倍速 1.5 倍，經驗 3 倍', image: 'mode_inferno' }
+        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, color: 0xF44336, description: '極限挑戰，高風險高回報', image: 'mode_inferno' }
     ];
     private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; damageMultiplier: number; color: number; description: string } = MainScene.GAME_MODES[0];
     private modePanelContainer!: Phaser.GameObjects.Container;
@@ -10336,8 +10336,8 @@ export default class MainScene extends Phaser.Scene {
                 this.modeCardImages.push(null as unknown as Phaser.GameObjects.Sprite);
             }
 
-            // 模式名稱（大字）
-            const nameY = -cardHeight * 0.3;
+            // 模式名稱（大字，靠上）
+            const nameY = -cardHeight * 0.35;
             const nameText = this.add.text(0, nameY, mode.name, {
                 fontFamily: '"Noto Sans TC", sans-serif',
                 fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(cardHeight * 0.15))}px`,
@@ -10348,34 +10348,12 @@ export default class MainScene extends Phaser.Scene {
             nameText.setOrigin(0.5, 0.5);
             optionContainer.add(nameText);
 
-            // 倍率顯示
-            const multiplierY = nameY + cardHeight * 0.12;
-            const monsterMultText = this.add.text(0, multiplierY, `怪物 x${mode.multiplier}`, {
-                fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.07))}px`,
-                color: '#ffffff'
-            });
-            monsterMultText.setResolution(2);
-            monsterMultText.setOrigin(0.5, 0.5);
-            optionContainer.add(monsterMultText);
-
-            // 經驗倍率顯示
-            const expMultY = multiplierY + cardHeight * 0.08;
-            const expMultText = this.add.text(0, expMultY, `經驗 x${mode.expMultiplier}`, {
-                fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.07))}px`,
-                color: '#ffdd00'
-            });
-            expMultText.setResolution(2);
-            expMultText.setOrigin(0.5, 0.5);
-            optionContainer.add(expMultText);
-
-            // 描述文字
-            const descY = expMultY + cardHeight * 0.12;
+            // 描述文字（靠近底端，白色）
+            const descY = cardHeight * 0.35;
             const descText = this.add.text(0, descY, mode.description, {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
-                color: '#888888',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.055))}px`,
+                color: '#ffffff',
                 wordWrap: { width: cardWidth * 0.85 },
                 align: 'center'
             });
@@ -10383,12 +10361,12 @@ export default class MainScene extends Phaser.Scene {
             descText.setOrigin(0.5, 0.5);
             optionContainer.add(descText);
 
-            // 按鍵提示
-            const keyY = cardHeight * 0.35;
-            const keyHint = this.add.text(0, keyY, keys[i], {
+            // 按鍵提示（卡片外側底部）
+            const keyLabelY = cardHeight * 0.5 + cardHeight * 0.08;
+            const keyHint = this.add.text(0, keyLabelY, `[ ${keys[i]} ]`, {
                 fontFamily: '"Noto Sans TC", sans-serif',
-                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.1))}px`,
-                color: '#666666',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.06))}px`,
+                color: '#ffff00',
                 fontStyle: 'bold'
             });
             keyHint.setResolution(2);

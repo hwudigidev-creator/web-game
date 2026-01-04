@@ -527,6 +527,11 @@ export default class GridScene extends Phaser.Scene {
             this.load.image(`skill_icon_${icon}`, `icons/skills/${icon}.png`);
         }
 
+        // 載入難度模式背景圖
+        this.load.image('mode_daily', 'images/mode_daily.png');
+        this.load.image('mode_nightmare', 'images/mode_nightmare.png');
+        this.load.image('mode_inferno', 'images/mode_inferno.png');
+
         // 開始載入
         this.load.start();
     }
