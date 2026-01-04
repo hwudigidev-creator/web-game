@@ -65,7 +65,7 @@ export const MONSTER_TYPES: MonsterDefinition[] = [
         id: 'slime',
         name: '史萊姆',
         color: 0x66ff66,
-        speed: 1.2, // 每秒 1.2 單位
+        speed: 1.0, // 每秒 1 單位（標準速度）
         damage: 1,
         size: 0.05, // 畫面高度的 5%（縮小）
         hp: 30,
@@ -112,6 +112,20 @@ export class MonsterManager {
     private spawnInterval: number = 2000; // 每 2 秒生成一隻
     private lastSpawnTime: number = 0;
     private isSpawning: boolean = false;
+    private gameStartTime: number = 0; // 遊戲開始時間
+
+    // 生怪倍率設定（根據遊戲時間）
+    private static readonly SPAWN_BASE_COUNT = 10; // 基礎生成數量
+    private static readonly SPAWN_MULTIPLIER_PHASE1 = 0.3; // 0-20秒：30%
+    private static readonly SPAWN_MULTIPLIER_PHASE2 = 0.6; // 20-60秒：60%
+    private static readonly SPAWN_MULTIPLIER_PHASE3 = 1.0; // 60秒後：100%
+    private static readonly SPAWN_PHASE1_END = 20000; // 20秒
+    private static readonly SPAWN_PHASE2_END = 60000; // 60秒
+
+    // 難度倍率（由遊戲模式設定）
+    private difficultyMultiplier: number = 1.0;
+    private speedMultiplier: number = 1.0; // 怪物速度倍率
+    private hpMultiplier: number = 1.0; // 怪物血量倍率
 
     // 蝙蝠群生成設定
     private batSwarmInterval: number = 30000; // 每 30 秒生成一批
@@ -332,10 +346,10 @@ export class MonsterManager {
         return 1 + 0.15 * extraTiers;
     }
 
-    // 計算怪物血量（根據玩家等級，60 級後額外強化）
+    // 計算怪物血量（根據玩家等級，60 級後額外強化，套用難度倍率）
     private calculateMonsterHp(baseHp: number): number {
         const baseScaled = baseHp * Math.pow(MonsterManager.HP_GROWTH_RATE, this.playerLevel);
-        return Math.floor(baseScaled * this.getHighLevelMultiplier());
+        return Math.floor(baseScaled * this.getHighLevelMultiplier() * this.hpMultiplier);
     }
 
     // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，60 級後額外強化）
@@ -357,6 +371,18 @@ export class MonsterManager {
         this.isSpawning = true;
         this.lastSpawnTime = this.scene.time.now;
         this.lastBatSwarmTime = this.scene.time.now; // 蝙蝠群也從現在開始計時
+        this.gameStartTime = this.scene.time.now; // 記錄遊戲開始時間
+    }
+
+    // 取得當前生怪倍率（根據遊戲時間）
+    private getSpawnMultiplier(now: number): number {
+        const elapsed = now - this.gameStartTime;
+        if (elapsed < MonsterManager.SPAWN_PHASE1_END) {
+            return MonsterManager.SPAWN_MULTIPLIER_PHASE1; // 0-20秒：30%
+        } else if (elapsed < MonsterManager.SPAWN_PHASE2_END) {
+            return MonsterManager.SPAWN_MULTIPLIER_PHASE2; // 20-60秒：60%
+        }
+        return MonsterManager.SPAWN_MULTIPLIER_PHASE3; // 60秒後：100%
     }
 
     // 停止生成怪物
@@ -426,12 +452,17 @@ export class MonsterManager {
         // 倍率 = 180 / 場上怪物數量（怪物越少，間隔越短）
         const currentCount = Math.max(1, this.monsters.length);
         const fillMultiplier = 180 / currentCount;
-        // 動態間隔 = 3 秒 / 倍率，最短 100ms
-        const dynamicInterval = Math.max(100, 3000 / fillMultiplier);
+        // 時間倍率（0-20秒: 0.3, 20-60秒: 0.6, 60秒後: 1.0）
+        const spawnMultiplier = this.getSpawnMultiplier(now);
+        // 時間間隔 = 3秒 / 時間倍率（0-20秒: 10秒, 20-60秒: 5秒, 60秒後: 3秒）
+        const timeInterval = 3000 / spawnMultiplier;
+        // 動態間隔 = 時間間隔 / 填充倍率，最短 100ms
+        const dynamicInterval = Math.max(100, timeInterval / fillMultiplier);
 
         if (this.isSpawning && now - this.lastSpawnTime >= dynamicInterval && monsterGap > 0) {
-            // 每次固定生成 10 隻
-            const actualSpawnCount = Math.min(10, monsterGap);
+            // 根據遊戲時間和難度倍率計算生成數量
+            const baseSpawnCount = Math.floor(MonsterManager.SPAWN_BASE_COUNT * spawnMultiplier * this.difficultyMultiplier);
+            const actualSpawnCount = Math.min(Math.max(1, baseSpawnCount), monsterGap);
             for (let i = 0; i < actualSpawnCount; i++) {
                 this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
             }
@@ -466,8 +497,8 @@ export class MonsterManager {
                 if (!isStunned) {
                     // 計算減速倍率（零信任防禦協定）
                     const slowMult = this.getSlowMultiplier(monster.x, monster.y);
-                    // 速度單位轉換：單位/秒 → 像素/秒
-                    const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1 * slowMult;
+                    // 速度單位轉換：單位/秒 → 像素/秒（含難度速度倍率）
+                    const speedInPixels = monster.definition.speed * this.speedMultiplier * this.gameBounds.height * 0.1 * slowMult;
                     const moveDistance = (speedInPixels * delta) / 1000;
 
                     // 沿固定方向移動（始終保持同一方向）
@@ -516,7 +547,8 @@ export class MonsterManager {
                     if (distance > collisionRange) {
                         // 計算減速倍率（零信任防禦協定）
                         const slowMult = this.getSlowMultiplier(monster.x, monster.y);
-                        const speedInPixels = monster.definition.speed * this.gameBounds.height * 0.1 * slowMult;
+                        // 速度含難度速度倍率
+                        const speedInPixels = monster.definition.speed * this.speedMultiplier * this.gameBounds.height * 0.1 * slowMult;
                         const moveDistance = (speedInPixels * delta) / 1000;
                         const ratio = moveDistance / distance;
                         monster.x += dx * ratio;
@@ -792,7 +824,7 @@ export class MonsterManager {
                 definition: batDef,
                 x: spawnX,
                 y: spawnY,
-                hp: MonsterManager.BAT_FIXED_HP, // 固定 HP
+                hp: Math.floor(MonsterManager.BAT_FIXED_HP * this.hpMultiplier), // 固定 HP * 難度倍率
                 lastDamageTime: 0,
                 bouncePhase: Math.random() * Math.PI * 2,
                 bounceSpeed: 5 + Math.random() * 3, // 蝙蝠彈跳更快
@@ -1140,6 +1172,32 @@ export class MonsterManager {
     // 設定生成間隔
     setSpawnInterval(interval: number) {
         this.spawnInterval = interval;
+    }
+
+    // 設定難度倍率（影響生成數量）
+    setDifficultyMultiplier(multiplier: number) {
+        this.difficultyMultiplier = multiplier;
+    }
+
+    // 設定速度倍率（影響怪物移動速度）
+    setSpeedMultiplier(multiplier: number) {
+        this.speedMultiplier = multiplier;
+    }
+
+    setHpMultiplier(multiplier: number) {
+        this.hpMultiplier = multiplier;
+    }
+
+    // 取得生怪資訊（供 DEBUG 顯示）
+    getSpawnInfo(): { spawnMultiplier: number; interval: number; spawnCount: number } {
+        const now = this.scene.time.now;
+        const currentCount = Math.max(1, this.monsters.length);
+        const fillMultiplier = 180 / currentCount;
+        const spawnMultiplier = this.getSpawnMultiplier(now);
+        const timeInterval = 3000 / spawnMultiplier;
+        const interval = Math.max(100, timeInterval / fillMultiplier);
+        const spawnCount = Math.floor(MonsterManager.SPAWN_BASE_COUNT * spawnMultiplier * this.difficultyMultiplier);
+        return { spawnMultiplier, interval, spawnCount: Math.max(1, spawnCount) };
     }
 
     // 對怪物造成傷害，返回是否死亡、經驗值和是否為菁英怪

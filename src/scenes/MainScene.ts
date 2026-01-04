@@ -309,6 +309,21 @@ export default class MainScene extends Phaser.Scene {
     };
     private isKeyboardMoving: boolean = false;
 
+    // 遊戲模式系統
+    private static readonly GAME_MODES = [
+        { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
+        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 1.5, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍', image: 'mode_nightmare' },
+        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.0, color: 0xF44336, description: '怪物 3 倍速 1.5 倍，經驗 3 倍', image: 'mode_inferno' }
+    ];
+    private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; color: number; description: string } = MainScene.GAME_MODES[0];
+    private modePanelContainer!: Phaser.GameObjects.Container;
+    private modeCardBgs: Phaser.GameObjects.Rectangle[] = [];
+    private modeCardContainers: Phaser.GameObjects.Container[] = [];
+    private modeCardImages: Phaser.GameObjects.Sprite[] = [];
+    private selectedModeIndex: number = 0;
+    private isModeSelecting: boolean = false; // 防止重複點擊
+    private hasModeSelected: boolean = false; // 是否已選擇模式
+
     // 技能選擇面板
     private skillPanelContainer!: Phaser.GameObjects.Container;
     private isPaused: boolean = false;
@@ -551,11 +566,13 @@ export default class MainScene extends Phaser.Scene {
     private expCrystalContainer!: Phaser.GameObjects.Container;
     // 經驗水晶物件池（預先創建避免頻繁生成）
     private expCrystalPool: Phaser.GameObjects.Sprite[] = [];
-    private static readonly EXP_CRYSTAL_POOL_SIZE = 100;     // 物件池大小
+    private static readonly EXP_CRYSTAL_POOL_SIZE = 300;     // 物件池大小上限
+    private static readonly EXP_CRYSTAL_MERGE_THRESHOLD = 200; // 超過此數量開始合併
     private static readonly EXP_CRYSTAL_SIZE = 0.04;         // 水晶大小（畫面高度比例）
     private static readonly EXP_CRYSTAL_MAGNET_RANGE = 2;    // 磁鐵吸取觸發範圍（單位）
     private static readonly EXP_CRYSTAL_ATTRACT_SPEED = 8;   // 吸取速度（單位/秒）
-    private static readonly EXP_CRYSTAL_PICKUP_RANGE = 0.3;  // 實際拾取範圍（單位）
+    private static readonly EXP_CRYSTAL_PICKUP_RANGE = 1;    // 實際拾取範圍（單位）
+    private pendingMergeExp: number = 0;                     // 待合併的經驗值
 
     // 技能範圍格子系統（只覆蓋遊玩區域）
     private skillGridContainer!: Phaser.GameObjects.Container;
@@ -924,6 +941,9 @@ export default class MainScene extends Phaser.Scene {
         // 建立經驗條
         this.createExpBar();
 
+        // 建立遊戲模式選擇面板
+        this.createModePanel();
+
         // 建立技能選擇面板
         this.createSkillPanel();
 
@@ -986,6 +1006,7 @@ export default class MainScene extends Phaser.Scene {
             this.updateShieldAura(delta);
             this.updateLowHpVignetteBreathing(delta);
             this.updateSkillCooldownDisplay();
+            this.handleModePanelInput();
             this.handleSkillPanelInput();
             return;
         }
@@ -2913,12 +2934,8 @@ export default class MainScene extends Phaser.Scene {
             leftControls.classList.add('visible');
         }
 
-        // 轉場完成後顯示技能選擇面板（初始 1 點技能點數）
-        this.pendingSkillPoints = 1;
-        this.tryShowSkillPanel();
-
-        // 開始生成怪物
-        this.monsterManager.startSpawning();
+        // 轉場完成後顯示模式選擇面板
+        this.showModePanel();
 
         // 開始播放遊戲 BGM
         this.playRandomGameBgm();
@@ -3019,16 +3036,30 @@ export default class MainScene extends Phaser.Scene {
         const minutes = Math.floor(gameTime / 60);
         const seconds = gameTime % 60;
 
+        // 生怪資訊
+        const spawnInfo = this.monsterManager ? this.monsterManager.getSpawnInfo() : null;
+        const spawnPhase = gameTime < 20 ? '階段1 (0-20s)' : gameTime < 60 ? '階段2 (20-60s)' : '階段3 (60s+)';
+
         const debugInfo = [
             `FPS: ${fps}`,
-            `怪物數量: ${monsterCount} / 200`,
-            `玩家位置: ${playerPos}`,
-            `鏡頭位置: ${cameraPos}`,
             `遊戲時間: ${minutes}:${String(seconds).padStart(2, '0')}`,
+            `--- 難度資訊 ---`,
+            `遊戲模式: ${this.currentGameMode.name} (怪物x${this.currentGameMode.multiplier}, 經驗x${this.currentGameMode.expMultiplier})`,
+            `生怪階段: ${spawnPhase}`,
+            `時間倍率: ${spawnInfo ? spawnInfo.spawnMultiplier.toFixed(1) : '-'}`,
+            `生怪間隔: ${spawnInfo ? (spawnInfo.interval / 1000).toFixed(2) : '-'}s`,
+            `每次生成: ${spawnInfo ? spawnInfo.spawnCount : '-'} 隻`,
+            `--- 狀態資訊 ---`,
+            `怪物數量: ${monsterCount} / 200`,
+            `經驗水晶: ${this.expCrystals.length} / 200`,
+            `待合併經驗: ${this.pendingMergeExp}`,
             `等級: ${this.currentLevel}`,
             `HP: ${Math.round(this.currentHp)} / ${Math.round(this.maxHp)}`,
             `護盾: ${Math.round(this.currentShield)} / ${Math.round(this.maxShield)}`,
-            `待分配點數: ${this.pendingSkillPoints}`
+            `待分配點數: ${this.pendingSkillPoints}`,
+            `--- 位置資訊 ---`,
+            `玩家位置: ${playerPos}`,
+            `鏡頭位置: ${cameraPos}`
         ].join('\n');
 
         this.debugText.setText(debugInfo);
@@ -7248,9 +7279,10 @@ export default class MainScene extends Phaser.Scene {
 
     // 處理怪物死亡（掉落系統入口）
     private handleMonsterDeath(monster: { x: number; y: number; isElite: boolean; isBoss: boolean; exp: number }) {
-        // 所有怪物掉落經驗水晶
+        // 所有怪物掉落經驗水晶（套用經驗倍率）
         if (monster.exp > 0) {
-            this.spawnExpCrystal(monster.x, monster.y, monster.exp);
+            const finalExp = Math.floor(monster.exp * this.currentGameMode.expMultiplier);
+            this.spawnExpCrystal(monster.x, monster.y, finalExp);
         }
         // 菁英怪額外掉落血球
         if (monster.isElite) {
@@ -10180,6 +10212,351 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
+    // ===== 遊戲模式選擇面板 =====
+
+    private createModePanel() {
+        // 建立面板容器
+        this.modePanelContainer = this.add.container(0, 0);
+        this.modePanelContainer.setVisible(false);
+
+        // 將模式面板加入 uiContainer
+        this.uiContainer.add(this.modePanelContainer);
+
+        // 80% 黑色透明背景覆蓋遊戲區域
+        const overlay = this.add.rectangle(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            this.gameBounds.y + this.gameBounds.height / 2,
+            this.gameBounds.width,
+            this.gameBounds.height,
+            0x000000,
+            0.8
+        );
+        overlay.setInteractive(); // 阻擋點擊穿透
+        this.modePanelContainer.add(overlay);
+
+        // 標題文字
+        const titleY = this.gameBounds.y + this.gameBounds.height * 0.12;
+        const title = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            titleY,
+            '選擇難度',
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(this.gameBounds.height * 0.07))}px`,
+                color: '#ffffff',
+                fontStyle: 'bold'
+            }
+        );
+        title.setResolution(2);
+        title.setOrigin(0.5, 0.5);
+        this.modePanelContainer.add(title);
+
+        // 副標題文字
+        const subtitleY = titleY + this.gameBounds.height * 0.06;
+        const subtitle = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            subtitleY,
+            '挑戰更高難度獲得更多經驗',
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.025))}px`,
+                color: '#cccccc'
+            }
+        );
+        subtitle.setResolution(2);
+        subtitle.setOrigin(0.5, 0.5);
+        this.modePanelContainer.add(subtitle);
+
+        // 建立 3 個模式選項
+        this.createModeOptions();
+
+        // 底部提示文字
+        const hintY = this.gameBounds.y + this.gameBounds.height * 0.92;
+        const hintText = this.isMobile ? '點兩次確認' : '重複按同一鍵確認';
+        const hint = this.add.text(
+            this.gameBounds.x + this.gameBounds.width / 2,
+            hintY,
+            hintText,
+            {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(this.gameBounds.height * 0.022))}px`,
+                color: '#888888'
+            }
+        );
+        hint.setResolution(2);
+        hint.setOrigin(0.5, 0.5);
+        this.modePanelContainer.add(hint);
+    }
+
+    private createModeOptions() {
+        // 清除舊的選項
+        this.modeCardBgs = [];
+        this.modeCardContainers = [];
+        this.modeCardImages = [];
+
+        // 選項卡片設定
+        const cardWidth = this.gameBounds.width * 0.25;
+        const cardHeight = this.gameBounds.height * (this.isMobile ? 0.55 : 0.5);
+        const cardGap = this.gameBounds.width * 0.05;
+        const numCards = MainScene.GAME_MODES.length;
+        const totalWidth = cardWidth * numCards + cardGap * (numCards - 1);
+        const startX = this.gameBounds.x + (this.gameBounds.width - totalWidth) / 2 + cardWidth / 2;
+        const centerY = this.gameBounds.y + this.gameBounds.height * 0.55;
+
+        // 按鍵對應
+        const keys = ['1', '2', '3'];
+
+        for (let i = 0; i < numCards; i++) {
+            const mode = MainScene.GAME_MODES[i];
+            const x = startX + i * (cardWidth + cardGap);
+
+            // 建立選項容器
+            const optionContainer = this.add.container(x, centerY);
+            this.modeCardContainers.push(optionContainer);
+
+            // 卡片背景
+            const cardBg = this.add.rectangle(0, 0, cardWidth, cardHeight, 0x222222);
+            cardBg.setStrokeStyle(2, mode.color);
+            optionContainer.add(cardBg);
+            this.modeCardBgs.push(cardBg);
+
+            // 背景圖片（滿版於卡片內）
+            if (this.textures.exists(mode.image)) {
+                const bgImage = this.add.sprite(0, 0, mode.image);
+                // 計算縮放以填滿卡片
+                const scaleX = cardWidth / bgImage.width;
+                const scaleY = cardHeight / bgImage.height;
+                const scale = Math.max(scaleX, scaleY);
+                bgImage.setScale(scale);
+                bgImage.setAlpha(0.6); // 半透明讓文字更清晰
+                optionContainer.add(bgImage);
+                this.modeCardImages.push(bgImage);
+            } else {
+                // 沒有圖片時用空的佔位
+                this.modeCardImages.push(null as unknown as Phaser.GameObjects.Sprite);
+            }
+
+            // 模式名稱（大字）
+            const nameY = -cardHeight * 0.3;
+            const nameText = this.add.text(0, nameY, mode.name, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_LARGE, Math.floor(cardHeight * 0.15))}px`,
+                color: '#' + mode.color.toString(16).padStart(6, '0'),
+                fontStyle: 'bold'
+            });
+            nameText.setResolution(2);
+            nameText.setOrigin(0.5, 0.5);
+            optionContainer.add(nameText);
+
+            // 倍率顯示
+            const multiplierY = nameY + cardHeight * 0.12;
+            const monsterMultText = this.add.text(0, multiplierY, `怪物 x${mode.multiplier}`, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.07))}px`,
+                color: '#ffffff'
+            });
+            monsterMultText.setResolution(2);
+            monsterMultText.setOrigin(0.5, 0.5);
+            optionContainer.add(monsterMultText);
+
+            // 經驗倍率顯示
+            const expMultY = multiplierY + cardHeight * 0.08;
+            const expMultText = this.add.text(0, expMultY, `經驗 x${mode.expMultiplier}`, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.07))}px`,
+                color: '#ffdd00'
+            });
+            expMultText.setResolution(2);
+            expMultText.setOrigin(0.5, 0.5);
+            optionContainer.add(expMultText);
+
+            // 描述文字
+            const descY = expMultY + cardHeight * 0.12;
+            const descText = this.add.text(0, descY, mode.description, {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_SMALL, Math.floor(cardHeight * 0.05))}px`,
+                color: '#888888',
+                wordWrap: { width: cardWidth * 0.85 },
+                align: 'center'
+            });
+            descText.setResolution(2);
+            descText.setOrigin(0.5, 0.5);
+            optionContainer.add(descText);
+
+            // 按鍵提示
+            const keyY = cardHeight * 0.35;
+            const keyHint = this.add.text(0, keyY, keys[i], {
+                fontFamily: '"Noto Sans TC", sans-serif',
+                fontSize: `${Math.max(MainScene.MIN_FONT_SIZE_MEDIUM, Math.floor(cardHeight * 0.1))}px`,
+                color: '#666666',
+                fontStyle: 'bold'
+            });
+            keyHint.setResolution(2);
+            keyHint.setOrigin(0.5, 0.5);
+            optionContainer.add(keyHint);
+
+            // 點擊/觸控事件
+            cardBg.setInteractive({ useHandCursor: true });
+            cardBg.on('pointerdown', () => this.onModeCardClick(i));
+            cardBg.on('pointerover', () => this.onModeCardHover(i));
+
+            this.modePanelContainer.add(optionContainer);
+        }
+
+        // 預設選中第一個
+        this.updateModeCardStyle(0, true);
+    }
+
+    private updateModeCardStyle(index: number, isSelected: boolean) {
+        const cardBg = this.modeCardBgs[index];
+        const container = this.modeCardContainers[index];
+        const image = this.modeCardImages[index];
+        if (!cardBg || !container) return;
+
+        const mode = MainScene.GAME_MODES[index];
+        if (isSelected) {
+            cardBg.setFillStyle(0x333333);
+            cardBg.setStrokeStyle(3, mode.color);
+            // 彈起動畫
+            this.tweens.add({
+                targets: container,
+                scaleX: 1.05,
+                scaleY: 1.05,
+                duration: 100
+            });
+            // 圖片變亮（移除灰度）
+            if (image) {
+                image.clearTint();
+                image.setAlpha(0.8);
+            }
+        } else {
+            cardBg.setFillStyle(0x222222);
+            cardBg.setStrokeStyle(2, mode.color);
+            // 縮回動畫
+            this.tweens.add({
+                targets: container,
+                scaleX: 1,
+                scaleY: 1,
+                duration: 100
+            });
+            // 圖片灰度效果
+            if (image) {
+                image.setTint(0x666666);
+                image.setAlpha(0.4);
+            }
+        }
+    }
+
+    private onModeCardHover(index: number) {
+        if (this.isModeSelecting) return;
+        if (this.selectedModeIndex === index) return;
+
+        // 切換選中狀態
+        this.updateModeCardStyle(this.selectedModeIndex, false);
+        this.selectedModeIndex = index;
+        this.updateModeCardStyle(index, true);
+    }
+
+    private onModeCardClick(index: number) {
+        if (this.isModeSelecting) return;
+
+        // hover 已經選中，直接確認
+        if (this.selectedModeIndex === index) {
+            this.confirmModeSelection(index);
+            return;
+        }
+
+        // 切換選中（備用，hover 應該已處理）
+        this.updateModeCardStyle(this.selectedModeIndex, false);
+        this.selectedModeIndex = index;
+        this.updateModeCardStyle(index, true);
+    }
+
+    private confirmModeSelection(index: number) {
+        if (this.isModeSelecting) return;
+        this.isModeSelecting = true;
+
+        this.currentGameMode = MainScene.GAME_MODES[index];
+        this.hasModeSelected = true;
+
+        // 設定怪物管理器的難度倍率、速度倍率與血量倍率
+        this.monsterManager.setDifficultyMultiplier(this.currentGameMode.multiplier);
+        this.monsterManager.setSpeedMultiplier(this.currentGameMode.speedMultiplier);
+        this.monsterManager.setHpMultiplier(this.currentGameMode.hpMultiplier);
+
+        // 淡出動畫
+        this.tweens.add({
+            targets: this.modePanelContainer,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => {
+                this.modePanelContainer.setVisible(false);
+                this.isModeSelecting = false;
+
+                // 開始生成怪物（遊戲暫停時不會實際生成）
+                this.monsterManager.startSpawning();
+
+                // 顯示技能選擇面板
+                this.pendingSkillPoints = 1;
+                this.tryShowSkillPanel();
+            }
+        });
+    }
+
+    private showModePanel() {
+        this.isPaused = true;
+        this.isModeSelecting = false;
+        this.selectedModeIndex = 0;
+
+        // 重設卡片樣式
+        this.modeCardBgs.forEach((_, index) => {
+            this.updateModeCardStyle(index, index === 0);
+        });
+
+        this.modePanelContainer.setVisible(true);
+        this.modePanelContainer.setAlpha(0);
+        this.tweens.add({
+            targets: this.modePanelContainer,
+            alpha: 1,
+            duration: 200
+        });
+    }
+
+    private handleModePanelInput() {
+        // 只在模式面板顯示時處理
+        if (!this.modePanelContainer || !this.modePanelContainer.visible) return;
+        if (!this.keyOne) return;
+
+        // 三個選項，用 1, 2, 3 鍵
+        if (Phaser.Input.Keyboard.JustDown(this.keyOne)) {
+            if (this.selectedModeIndex === 0) {
+                this.confirmModeSelection(0);
+            } else {
+                this.updateModeCardStyle(this.selectedModeIndex, false);
+                this.selectedModeIndex = 0;
+                this.updateModeCardStyle(0, true);
+            }
+        }
+        if (Phaser.Input.Keyboard.JustDown(this.keyTwo)) {
+            if (this.selectedModeIndex === 1) {
+                this.confirmModeSelection(1);
+            } else {
+                this.updateModeCardStyle(this.selectedModeIndex, false);
+                this.selectedModeIndex = 1;
+                this.updateModeCardStyle(1, true);
+            }
+        }
+        if (Phaser.Input.Keyboard.JustDown(this.keyThree)) {
+            if (this.selectedModeIndex === 2) {
+                this.confirmModeSelection(2);
+            } else {
+                this.updateModeCardStyle(this.selectedModeIndex, false);
+                this.selectedModeIndex = 2;
+                this.updateModeCardStyle(2, true);
+            }
+        }
+    }
+
     // ===== 技能選擇面板 =====
 
     private createSkillPanel() {
@@ -12241,15 +12618,22 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 從池中取得經驗水晶
-    private getExpCrystalFromPool(): Phaser.GameObjects.Sprite | null {
-        const sprite = this.expCrystalPool.pop();
+    // 從池中取得經驗水晶（池空時動態創建）
+    private getExpCrystalFromPool(): Phaser.GameObjects.Sprite {
+        let sprite = this.expCrystalPool.pop();
         if (sprite) {
             sprite.setVisible(true);
             sprite.setActive(true);
             return sprite;
         }
-        return null; // 池耗盡時返回 null
+        // 池耗盡時動態創建新水晶（確保經驗不會丟失）
+        const crystalSize = this.gameBounds.height * MainScene.EXP_CRYSTAL_SIZE;
+        sprite = this.add.sprite(0, 0, 'exp_crystal');
+        sprite.setDisplaySize(crystalSize, crystalSize);
+        sprite.setVisible(true);
+        sprite.setActive(true);
+        this.expCrystalContainer.add(sprite);
+        return sprite;
     }
 
     // 歸還經驗水晶到池中
@@ -12264,25 +12648,66 @@ export default class MainScene extends Phaser.Scene {
     // 生成經驗水晶
     private spawnExpCrystal(worldX: number, worldY: number, exp: number) {
         const sprite = this.getExpCrystalFromPool();
-        if (!sprite) return; // 池耗盡時不生成
 
         // 設定位置
         sprite.setPosition(worldX, worldY);
+
+        // 加入待合併的經驗值
+        const totalExp = exp + this.pendingMergeExp;
+        this.pendingMergeExp = 0;
 
         // 加入追蹤列表
         this.expCrystals.push({
             id: this.nextExpCrystalId++,
             x: worldX,
             y: worldY,
-            exp: exp,
+            exp: totalExp,
             sprite: sprite,
             floatPhase: Math.random() * Math.PI * 2,
             isBeingAttracted: false
         });
     }
 
+    // 合併遠處的經驗水晶（超過閾值時執行）
+    private mergeDistantExpCrystals() {
+        if (this.expCrystals.length <= MainScene.EXP_CRYSTAL_MERGE_THRESHOLD) return;
+
+        // 計算每個水晶與玩家的距離
+        const playerWorldX = this.characterX + this.cameraOffsetX;
+        const playerWorldY = this.characterY + this.cameraOffsetY;
+
+        // 找出離玩家最遠且未被吸取的水晶
+        let furthestIndex = -1;
+        let furthestDistSq = 0;
+
+        for (let i = 0; i < this.expCrystals.length; i++) {
+            const crystal = this.expCrystals[i];
+            if (crystal.isBeingAttracted) continue; // 跳過正在被吸取的
+
+            const dx = crystal.x - playerWorldX;
+            const dy = crystal.y - playerWorldY;
+            const distSq = dx * dx + dy * dy;
+
+            if (distSq > furthestDistSq) {
+                furthestDistSq = distSq;
+                furthestIndex = i;
+            }
+        }
+
+        // 刪除最遠的水晶，累加經驗到待合併值
+        if (furthestIndex >= 0) {
+            const crystal = this.expCrystals[furthestIndex];
+            this.pendingMergeExp += crystal.exp;
+            this.releaseExpCrystalToPool(crystal.sprite);
+            this.expCrystals.splice(furthestIndex, 1);
+        }
+    }
+
     // 更新經驗水晶（浮動動畫 + 磁鐵吸取 + 拾取檢測）
     private updateExpCrystals(delta: number) {
+        // 超過閾值時合併遠處水晶
+        this.mergeDistantExpCrystals();
+
         if (this.expCrystals.length === 0) return;
 
         const unitSize = this.gameBounds.height * 0.1;
