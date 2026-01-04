@@ -2,7 +2,7 @@
 
 交互式網頁遊戲專案
 
-**版本**: v0.9.24b（右下角顯示，由 package.json 自動注入）
+**版本**: v0.9.25a（右下角顯示，由 package.json 自動注入）
 
 ## 技術棧
 
@@ -615,6 +615,37 @@ node scripts/generate-icons.mjs
 - 禁用觸控長按選單
 - 長按移動支援
 - PWA 安裝支援
+- PWA 安裝提示（橫向時底部滑出，說明全螢幕體驗）
+
+### 圖片 Zoom 裁切技術
+
+在 Phaser 3 中實現圖片放大但不超出容器邊界的效果：
+
+```typescript
+// 1. 初始設定：計算基礎縮放和裁切範圍
+const baseScale = Math.max(cardWidth / image.width, cardHeight / image.height);
+const cropWidth = cardWidth / baseScale;
+const cropHeight = cardHeight / baseScale;
+const cropX = (image.width - cropWidth) / 2;
+const cropY = (image.height - cropHeight) / 2;
+image.setCrop(cropX, cropY, cropWidth, cropHeight);
+image.setScale(baseScale);
+
+// 2. Zoom In：放大圖片同時縮小裁切範圍
+const zoomFactor = 1.1; // 放大 10%
+const newCropWidth = cropWidth / zoomFactor;
+const newCropHeight = cropHeight / zoomFactor;
+const newCropX = cropX + (cropWidth - newCropWidth) / 2;
+const newCropY = cropY + (cropHeight - newCropHeight) / 2;
+image.setCrop(newCropX, newCropY, newCropWidth, newCropHeight);
+image.setScale(baseScale * zoomFactor);
+
+// 3. Zoom Out：恢復原始裁切範圍
+image.setCrop(cropX, cropY, cropWidth, cropHeight);
+image.setScale(baseScale);
+```
+
+**原理**：圖片放大 N 倍時，裁切範圍縮小 1/N，使顯示區域維持固定大小。
 
 ### 容器層級
 

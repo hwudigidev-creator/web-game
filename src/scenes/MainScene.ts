@@ -312,8 +312,8 @@ export default class MainScene extends Phaser.Scene {
     // 遊戲模式系統
     private static readonly GAME_MODES = [
         { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, damageMultiplier: 1.0, debuffResistance: 0, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
-        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, debuffResistance: 0.25, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍', image: 'mode_nightmare' },
-        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, debuffResistance: 0.5, color: 0xF44336, description: '極限挑戰，高風險高回報', image: 'mode_inferno' }
+        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, debuffResistance: 0.25, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍\n機率抵抗負面狀態', image: 'mode_nightmare' },
+        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, debuffResistance: 0.5, color: 0xF44336, description: '極限挑戰，高風險高回報\n更高機率抵抗負面狀態', image: 'mode_inferno' }
     ];
     private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; damageMultiplier: number; debuffResistance: number; color: number; description: string } = MainScene.GAME_MODES[0];
     private modePanelContainer!: Phaser.GameObjects.Container;
@@ -10321,15 +10321,28 @@ export default class MainScene extends Phaser.Scene {
             optionContainer.add(cardBg);
             this.modeCardBgs.push(cardBg);
 
-            // 背景圖片（滿版於卡片內）
+            // 背景圖片（滿版於卡片內，使用 setCrop 裁切）
             if (this.textures.exists(mode.image)) {
                 const bgImage = this.add.sprite(0, 0, mode.image);
-                // 計算縮放以填滿卡片
                 const scaleX = cardWidth / bgImage.width;
                 const scaleY = cardHeight / bgImage.height;
-                const scale = Math.max(scaleX, scaleY);
-                bgImage.setScale(scale);
-                bgImage.setAlpha(0.6); // 半透明讓文字更清晰
+                const baseScale = Math.max(scaleX, scaleY);
+
+                // 計算裁切區域（圖片中心部分，符合卡片比例）
+                const cropWidth = cardWidth / baseScale;
+                const cropHeight = cardHeight / baseScale;
+                const cropX = (bgImage.width - cropWidth) / 2;
+                const cropY = (bgImage.height - cropHeight) / 2;
+                bgImage.setCrop(cropX, cropY, cropWidth, cropHeight);
+
+                bgImage.setScale(baseScale);
+                bgImage.setAlpha(0.6);
+                bgImage.setData('baseScale', baseScale);
+                bgImage.setData('cropX', cropX);
+                bgImage.setData('cropY', cropY);
+                bgImage.setData('cropWidth', cropWidth);
+                bgImage.setData('cropHeight', cropHeight);
+
                 optionContainer.add(bgImage);
                 this.modeCardImages.push(bgImage);
             } else {
@@ -10403,10 +10416,30 @@ export default class MainScene extends Phaser.Scene {
                 scaleY: 1.05,
                 duration: 100
             });
-            // 圖片變亮（移除灰度）
+            // 圖片變亮並放大 10%（調整裁切維持邊界）
             if (image) {
-                image.clearTint();
+                image.setTint(0xffffff);
                 image.setAlpha(0.8);
+                const baseScale = image.getData('baseScale') || 1;
+                const cropX = image.getData('cropX') || 0;
+                const cropY = image.getData('cropY') || 0;
+                const cropWidth = image.getData('cropWidth') || image.width;
+                const cropHeight = image.getData('cropHeight') || image.height;
+
+                // 縮放時縮小裁切範圍，維持顯示區域不變
+                const zoomFactor = 1.1;
+                const newCropWidth = cropWidth / zoomFactor;
+                const newCropHeight = cropHeight / zoomFactor;
+                const newCropX = cropX + (cropWidth - newCropWidth) / 2;
+                const newCropY = cropY + (cropHeight - newCropHeight) / 2;
+                image.setCrop(newCropX, newCropY, newCropWidth, newCropHeight);
+
+                this.tweens.add({
+                    targets: image,
+                    scaleX: baseScale * zoomFactor,
+                    scaleY: baseScale * zoomFactor,
+                    duration: 100
+                });
             }
         } else {
             cardBg.setFillStyle(0x222222);
@@ -10418,10 +10451,25 @@ export default class MainScene extends Phaser.Scene {
                 scaleY: 1,
                 duration: 100
             });
-            // 圖片灰度效果
+            // 圖片灰度效果並縮回
             if (image) {
                 image.setTint(0x666666);
                 image.setAlpha(0.4);
+                const baseScale = image.getData('baseScale') || 1;
+                const cropX = image.getData('cropX') || 0;
+                const cropY = image.getData('cropY') || 0;
+                const cropWidth = image.getData('cropWidth') || image.width;
+                const cropHeight = image.getData('cropHeight') || image.height;
+
+                // 恢復原始裁切範圍
+                image.setCrop(cropX, cropY, cropWidth, cropHeight);
+
+                this.tweens.add({
+                    targets: image,
+                    scaleX: baseScale,
+                    scaleY: baseScale,
+                    duration: 100
+                });
             }
         }
     }
