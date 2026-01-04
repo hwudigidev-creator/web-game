@@ -309,6 +309,60 @@
       max-height: calc(100vh - 80px);
       overflow: visible;
       box-sizing: border-box;
+      position: relative;
+    }
+
+    /* 難度切換標籤（左側凸出，貼齊邊框，在榜框下層） */
+    .lb-difficulty-tabs {
+      position: absolute;
+      right: calc(100% - 2px); /* 貼齊左邊框（2px 邊框寬度） */
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: -1; /* 在榜框下層 */
+    }
+
+    .lb-diff-tab {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      padding: 12px 8px;
+      background: rgba(40, 40, 60, 0.95);
+      border: 2px solid rgba(100, 100, 150, 0.4);
+      border-right: none;
+      border-radius: 8px 0 0 8px;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .lb-diff-tab:hover {
+      background: rgba(60, 60, 90, 0.95);
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .lb-diff-tab.active {
+      background: rgba(80, 80, 120, 0.95);
+      border-color: rgba(150, 150, 200, 0.6);
+      color: #fff;
+    }
+
+    .lb-diff-tab[data-difficulty="daily"].active {
+      border-color: #4CAF50;
+      color: #4CAF50;
+    }
+
+    .lb-diff-tab[data-difficulty="nightmare"].active {
+      border-color: #9C27B0;
+      color: #9C27B0;
+    }
+
+    .lb-diff-tab[data-difficulty="inferno"].active {
+      border-color: #F44336;
+      color: #F44336;
     }
 
     .lb-tabs {
@@ -1011,7 +1065,7 @@
       user-select: none;
     }
   </style>
-  <script type="module" crossorigin src="/web-game/assets/index-CFKiUlYh.js"></script>
+  <script type="module" crossorigin src="/web-game/assets/index-CWp8Zl4A.js"></script>
   <link rel="modulepreload" crossorigin href="/web-game/assets/phaser-0RJB29YE.js">
 </head>
 
@@ -1041,6 +1095,12 @@
   <!-- 排行榜彈出視窗 -->
   <div id="leaderboard-popup" class="popup-overlay">
     <div class="popup-content leaderboard-content">
+      <!-- 難度切換標籤（左側凸出） -->
+      <div class="lb-difficulty-tabs">
+        <button class="lb-diff-tab active" data-difficulty="daily">日常</button>
+        <button class="lb-diff-tab" data-difficulty="nightmare">噩夢</button>
+        <button class="lb-diff-tab" data-difficulty="inferno">煉獄</button>
+      </div>
       <h2><i class="fa-solid fa-ranking-star"></i> 排行榜</h2>
       <!-- 頁籤 -->
       <div class="lb-tabs">
@@ -1397,16 +1457,17 @@
     // Google Sheets API URL
     const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyjqIgHpEa9G6qR53DjAV8mLA_794Pepoc9cUJWeZJRPIC7Iqj6fTsfy2vl-a95x6aMnQ/exec';
 
-    // 排行榜資料快取
+    // 排行榜資料快取（依難度分開）
     let leaderboardData = {
-      time: [],    // { name: 'Player', score: '12:34' }
-      level: [],   // { name: 'Player', score: 'Lv.50' }
-      damage: []   // { name: 'Player', score: '0', level: 75 }
+      daily: { time: [], level: [], damage: [] },
+      nightmare: { time: [], level: [], damage: [] },
+      inferno: { time: [], level: [], damage: [] }
     };
+    let currentDifficulty = 'daily'; // 目前顯示的難度
     let isLoadingLeaderboard = false;
 
     // 從 Google Sheets 載入排行榜
-    async function fetchLeaderboard() {
+    async function fetchLeaderboard(difficulty = currentDifficulty) {
       if (!SHEET_API_URL) {
         console.warn('Google Sheets API URL not configured');
         return;
@@ -1421,19 +1482,20 @@
       }
 
       try {
-        const response = await fetch(`${SHEET_API_URL}?type=all`, {
+        const response = await fetch(`${SHEET_API_URL}?type=all&difficulty=${difficulty}`, {
           method: 'GET',
           redirect: 'follow'
         });
         const result = await response.json();
         if (result.success && result.data) {
+          const diffData = leaderboardData[difficulty];
           // 轉換格式（包含陣營）
-          leaderboardData.time = (result.data.time || []).map(e => ({
+          diffData.time = (result.data.time || []).map(e => ({
             name: e.name,
             school: e.school || '',
             score: formatTime(e.score)
           }));
-          leaderboardData.level = (result.data.level || []).map(e => {
+          diffData.level = (result.data.level || []).map(e => {
             const lv = parseFloat(e.score) || 0;
             const lvInt = Math.floor(lv);
             const expPercent = Math.round((lv - lvInt) * 100);
@@ -1444,7 +1506,7 @@
               rawScore: lv
             };
           });
-          leaderboardData.damage = (result.data.damage || []).map(e => {
+          diffData.damage = (result.data.damage || []).map(e => {
             const dmg = parseFloat(e.score) || 0;
             const lv = e.level || 1;
             const rate = dmg / (lv * lv);
@@ -1459,7 +1521,7 @@
             };
           });
           // 依損傷率排序（越低越好）
-          leaderboardData.damage.sort((a, b) => a.damageRate - b.damageRate);
+          diffData.damage.sort((a, b) => a.damageRate - b.damageRate);
         }
         renderLeaderboard();
       } catch (error) {
@@ -1501,7 +1563,7 @@
     }
 
     // 提交紀錄到 Google Sheets
-    async function submitToSheet(type, name, score, school, level) {
+    async function submitToSheet(type, name, score, school, level, difficulty = 'daily') {
       if (!SHEET_API_URL) {
         console.warn('Google Sheets API URL not configured');
         return null;
@@ -1516,7 +1578,7 @@
         const timestamp = Date.now();
         const checksum = generateChecksum(type, name, scoreStr, levelStr, timestamp);
 
-        console.log('Submit debug:', { type, name, scoreStr, levelStr, timestamp, checksum });
+        console.log('Submit debug:', { type, name, scoreStr, levelStr, timestamp, checksum, difficulty });
 
         // 使用 URL 參數方式提交（避免 CORS 問題）
         const params = new URLSearchParams({
@@ -1526,8 +1588,9 @@
           score: scoreStr,
           school: school || '',
           level: levelStr,
-          ts: String(timestamp),
-          cs: checksum
+          difficulty: difficulty,
+          timestamp: String(timestamp),
+          checksum: checksum
         });
         const response = await fetch(`${SHEET_API_URL}?${params.toString()}`, {
           method: 'GET',
@@ -1543,7 +1606,8 @@
 
     function renderLeaderboard() {
       const entriesPerPage = calculateEntriesPerPage();
-      const data = leaderboardData[currentTab].slice(0, MAX_ENTRIES);
+      const diffData = leaderboardData[currentDifficulty] || leaderboardData.daily;
+      const data = (diffData[currentTab] || []).slice(0, MAX_ENTRIES);
       const totalPages = Math.max(1, Math.ceil(data.length / entriesPerPage));
 
       // 確保頁碼有效
@@ -1591,6 +1655,24 @@
       });
     });
 
+    // 難度頁籤切換
+    const lbDiffTabs = document.querySelectorAll('.lb-diff-tab');
+    lbDiffTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        lbDiffTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentDifficulty = tab.dataset.difficulty;
+        currentPage = 1;
+        // 如果該難度尚未載入，先載入
+        const diffData = leaderboardData[currentDifficulty];
+        if (diffData.time.length === 0 && diffData.level.length === 0 && diffData.damage.length === 0) {
+          fetchLeaderboard(currentDifficulty);
+        } else {
+          renderLeaderboard();
+        }
+      });
+    });
+
     // 翻頁
     lbPrev.addEventListener('click', () => {
       if (currentPage > 1) {
@@ -1601,7 +1683,8 @@
 
     lbNext.addEventListener('click', () => {
       const entriesPerPage = calculateEntriesPerPage();
-      const data = leaderboardData[currentTab].slice(0, MAX_ENTRIES);
+      const diffData = leaderboardData[currentDifficulty] || leaderboardData.daily;
+      const data = (diffData[currentTab] || []).slice(0, MAX_ENTRIES);
       const totalPages = Math.ceil(data.length / entriesPerPage);
       if (currentPage < totalPages) {
         currentPage++;
@@ -1628,15 +1711,17 @@
 
     // 監聯遊戲結束事件以更新排行榜
     window.addEventListener('gameRecordUpdate', (e) => {
-      const { type, name, school, score, level, rawScore } = e.detail;
-      if (leaderboardData[type]) {
+      const { type, name, school, score, level, rawScore, difficulty } = e.detail;
+      const diff = difficulty || 'daily';
+      const diffData = leaderboardData[diff];
+      if (diffData && diffData[type]) {
         // 傷害榜需要計算損傷率 (damage / level²)
         if (type === 'damage') {
           const dmg = parseFloat(score) || 0;
           const lv = level || 1;
           const rate = dmg / (lv * lv);
           const ratePercent = (rate * 100).toFixed(2);
-          leaderboardData[type].push({
+          diffData[type].push({
             name,
             school: school || '',
             score: `${dmg} (${ratePercent}%)`, // 顯示格式: "總傷 (損傷率%)"
@@ -1646,30 +1731,30 @@
           });
         } else if (type === 'level') {
           // 等級榜需要 rawScore 用於排序
-          leaderboardData[type].push({ name, school: school || '', score, rawScore: rawScore || 0 });
+          diffData[type].push({ name, school: school || '', score, rawScore: rawScore || 0 });
         } else {
-          leaderboardData[type].push({ name, school: school || '', score });
+          diffData[type].push({ name, school: school || '', score });
         }
         // 排序（時間和等級越大越好，損傷率越低越好）
         if (type === 'damage') {
-          leaderboardData[type].sort((a, b) => {
+          diffData[type].sort((a, b) => {
             return (a.damageRate || 0) - (b.damageRate || 0); // 損傷率低的排前面
           });
         } else if (type === 'level') {
-          leaderboardData[type].sort((a, b) => {
+          diffData[type].sort((a, b) => {
             const lvA = a.rawScore || parseFloat(a.score.replace('Lv.', '')) || 0;
             const lvB = b.rawScore || parseFloat(b.score.replace('Lv.', '')) || 0;
             return lvB - lvA;
           });
         } else if (type === 'time') {
-          leaderboardData[type].sort((a, b) => {
+          diffData[type].sort((a, b) => {
             const [mA, sA] = a.score.split(':').map(Number);
             const [mB, sB] = b.score.split(':').map(Number);
             return (mB * 60 + sB) - (mA * 60 + sA);
           });
         }
         // 只保留前 100 名
-        leaderboardData[type] = leaderboardData[type].slice(0, MAX_ENTRIES);
+        diffData[type] = diffData[type].slice(0, MAX_ENTRIES);
       }
     });
 
@@ -1741,10 +1826,10 @@
     });
 
     // 顯示死亡彈出視窗
-    function showDeathPopup(time, level, damage, isReopen = false) {
+    function showDeathPopup(time, level, damage, difficulty = 'daily', isReopen = false) {
       // 保存死亡資訊供重新打開用
       if (!isReopen) {
-        lastDeathData = { time, level, damage };
+        lastDeathData = { time, level, damage, difficulty };
         isPlayerDead = true;
       }
 
@@ -1754,6 +1839,7 @@
       const expPercent = Math.round((level - lvInt) * 100);
       deathLevel.textContent = expPercent > 0 ? `Lv.${lvInt} (${expPercent}%)` : `Lv.${lvInt}`;
       deathLevel.dataset.rawLevel = level; // 存原始值供提交用
+      deathLevel.dataset.difficulty = difficulty; // 存難度供提交用
       deathDamage.textContent = damage;
       // 重新打開時保留已輸入的暱稱和陣營
       if (!isReopen) {
@@ -1770,6 +1856,7 @@
       const school = selectedSchool || deathSchoolInput.value.trim() || '無陣營';
       const displayName = `${nickname}`;
       const level = parseFloat(deathLevel.dataset.rawLevel) || 0;
+      const difficulty = deathLevel.dataset.difficulty || 'daily';
 
       // 顯示載入狀態
       deathSubmit.disabled = true;
@@ -1780,18 +1867,25 @@
       const levelScore = level;
       const damageScore = parseFloat(deathDamage.textContent) || 0;
 
-      // 同時提交到 Google Sheets
-      const promises = [
-        submitToSheet('time', displayName, timeScore, school, level),
-        submitToSheet('level', displayName, levelScore, school, level)
-      ];
-      // 無傷神話：需達到 75 級才能入榜
-      if (level >= 75) {
-        promises.push(submitToSheet('damage', displayName, damageScore, school, level));
-      }
+      // 依序提交到 Google Sheets（避免競態條件產生多行）
+      const results = [];
 
-      const results = await Promise.all(promises);
-      console.log('Submit results:', results);
+      // 1. 先提交時間（會建立新行）
+      const timeResult = await submitToSheet('time', displayName, timeScore, school, level, difficulty);
+      results.push(timeResult);
+      console.log('Time submit result:', timeResult);
+
+      // 2. 再提交等級（會更新同一行）
+      const levelResult = await submitToSheet('level', displayName, levelScore, school, level, difficulty);
+      results.push(levelResult);
+      console.log('Level submit result:', levelResult);
+
+      // 3. 無傷神話：需達到 75 級才能入榜
+      if (level >= 75) {
+        const damageResult = await submitToSheet('damage', displayName, damageScore, school, level, difficulty);
+        results.push(damageResult);
+        console.log('Damage submit result:', damageResult);
+      }
 
       // 檢查是否有失敗
       const failed = results.filter(r => r && !r.success);
@@ -1803,20 +1897,20 @@
         return;
       }
 
-      // 也更新本地快取（供即時顯示）
+      // 也更新本地快取（供即時顯示，包含難度）
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-        detail: { type: 'time', name: displayName, school, score: deathTime.textContent }
+        detail: { type: 'time', name: displayName, school, score: deathTime.textContent, difficulty }
       }));
       // 等級榜需要 rawScore 用於排序
       const lvInt = Math.floor(level);
       const expPct = Math.round((level - lvInt) * 100);
       const levelDisplay = expPct > 0 ? `Lv.${lvInt} (${expPct}%)` : `Lv.${lvInt}`;
       window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-        detail: { type: 'level', name: displayName, school, score: levelDisplay, rawScore: level }
+        detail: { type: 'level', name: displayName, school, score: levelDisplay, rawScore: level, difficulty }
       }));
       if (level >= 75) {
         window.dispatchEvent(new CustomEvent('gameRecordUpdate', {
-          detail: { type: 'damage', name: displayName, school, score: deathDamage.textContent, level: level }
+          detail: { type: 'damage', name: displayName, school, score: deathDamage.textContent, level: level, difficulty }
         }));
       }
 
@@ -1844,14 +1938,14 @@
 
     // 監聯遊戲死亡事件
     window.addEventListener('playerDeath', (e) => {
-      const { survivalTime, level, totalDamage } = e.detail;
-      showDeathPopup(survivalTime, level, totalDamage);
+      const { survivalTime, level, totalDamage, difficulty } = e.detail;
+      showDeathPopup(survivalTime, level, totalDamage, difficulty || 'daily');
     });
 
     // 點擊遊戲區域重新打開死亡彈窗
     document.getElementById('app').addEventListener('click', () => {
       if (isPlayerDead && lastDeathData && deathPopup.style.display !== 'flex') {
-        showDeathPopup(lastDeathData.time, lastDeathData.level, lastDeathData.damage, true);
+        showDeathPopup(lastDeathData.time, lastDeathData.level, lastDeathData.damage, lastDeathData.difficulty, true);
       }
     });
 
