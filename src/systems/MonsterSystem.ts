@@ -348,24 +348,24 @@ export class MonsterManager {
         return 1 + 0.15 * extraTiers;
     }
 
-    // 計算怪物血量（根據玩家等級，60 級後額外強化，套用難度倍率）
+    // 計算怪物血量（根據玩家等級，50 級後額外強化，套用難度倍率）
     private calculateMonsterHp(baseHp: number): number {
         const baseScaled = baseHp * Math.pow(MonsterManager.HP_GROWTH_RATE, this.playerLevel);
         return Math.floor(baseScaled * this.getHighLevelMultiplier() * this.hpMultiplier);
     }
 
-    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，60 級後額外強化，套用難度倍率）
+    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，50 級後額外強化，套用難度倍率）
     private calculateMonsterDamage(monster: Monster): number {
         const damageUnits = Math.max(1, this.playerLevel);
         const baseDamage = MonsterManager.DAMAGE_UNIT * damageUnits;
-        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 60 級後強化 + 難度倍率
+        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 50 級後強化 + 難度倍率
         return baseDamage * monster.definition.damage * this.getHighLevelMultiplier() * this.damageMultiplier;
     }
 
-    // 計算怪物經驗值（每 10 級翻倍）
+    // 計算怪物經驗值（每 10 級翻倍，50 級後額外強化）
     private calculateMonsterExp(baseExp: number): number {
         const doubleCount = Math.floor(this.playerLevel / 10);
-        return baseExp * Math.pow(2, doubleCount);
+        return Math.floor(baseExp * Math.pow(2, doubleCount) * this.getHighLevelMultiplier());
     }
 
     // 開始生成怪物
