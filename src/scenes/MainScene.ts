@@ -537,6 +537,26 @@ export default class MainScene extends Phaser.Scene {
     // 拾取範圍（單位，1 單位 = 畫面高度 10%）
     private basePickupRange: number = 1;    // 基礎拾取範圍（技能加成從 skillManager 取得）
 
+    // 經驗水晶掉落系統（怪物死亡時掉落，需拾取才獲得經驗）
+    private expCrystals: {
+        id: number;
+        x: number;           // 世界座標 X
+        y: number;           // 世界座標 Y
+        exp: number;         // 經驗值
+        sprite: Phaser.GameObjects.Sprite;
+        floatPhase: number;  // 浮動動畫相位
+        isBeingAttracted: boolean; // 是否正在被吸取
+    }[] = [];
+    private nextExpCrystalId: number = 0;
+    private expCrystalContainer!: Phaser.GameObjects.Container;
+    // 經驗水晶物件池（預先創建避免頻繁生成）
+    private expCrystalPool: Phaser.GameObjects.Sprite[] = [];
+    private static readonly EXP_CRYSTAL_POOL_SIZE = 100;     // 物件池大小
+    private static readonly EXP_CRYSTAL_SIZE = 0.04;         // 水晶大小（畫面高度比例）
+    private static readonly EXP_CRYSTAL_MAGNET_RANGE = 2;    // 磁鐵吸取觸發範圍（單位）
+    private static readonly EXP_CRYSTAL_ATTRACT_SPEED = 8;   // 吸取速度（單位/秒）
+    private static readonly EXP_CRYSTAL_PICKUP_RANGE = 0.3;  // 實際拾取範圍（單位）
+
     // 技能範圍格子系統（只覆蓋遊玩區域）
     private skillGridContainer!: Phaser.GameObjects.Container;
     private skillGridCells: Phaser.GameObjects.Rectangle[] = [];
@@ -690,9 +710,13 @@ export default class MainScene extends Phaser.Scene {
         // 建立角色容器（會隨鏡頭移動，但獨立於 worldContainer 以便設定深度）
         this.characterContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
 
-        // 建立回血物品容器（隨鏡頭移動，深度在角色下方、怪物上方）
+        // 建立回血物品容器（隨鏡頭移動，深度在怪物下方）
         this.healingItemContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
-        this.healingItemContainer.setDepth(52); // 在角色(60)之下、怪物網格(50)之上
+        this.healingItemContainer.setDepth(4); // 在怪物網格(5)之下
+
+        // 建立經驗水晶容器（隨鏡頭移動，深度在怪物下方）
+        this.expCrystalContainer = this.add.container(this.gameBounds.x, this.gameBounds.y);
+        this.expCrystalContainer.setDepth(3); // 在回血物品(4)之下
 
         // 建立護盾光環圖形（在角色下方）
         this.shieldAuraGraphics = this.add.graphics();
@@ -720,6 +744,7 @@ export default class MainScene extends Phaser.Scene {
         const geometryMask = clipMask.createGeometryMask();
         this.worldContainer.setMask(geometryMask);
         this.healingItemContainer.setMask(geometryMask); // 回血物品也套用遮罩
+        this.expCrystalContainer.setMask(geometryMask);  // 經驗水晶也套用遮罩
 
         // 建立 UI 容器（固定在螢幕上，不隨鏡頭移動）
         this.uiContainer = this.add.container(0, 0);
@@ -748,8 +773,9 @@ export default class MainScene extends Phaser.Scene {
         this.initSkillEffectPool();
         this.initLineEffectPool(); // LINE 紋理池（打擊火花用）
         this.initCircleLineEffectPool(); // CIRCLE_LINE 紋理池（圓形邊緣線用）
+        this.initExpCrystalPool(); // 經驗水晶物件池
 
-        // 清理舊的事件監聽器（場景重啟時）
+        // 清理舊的事件監聯器（場景重啟時）
         if (this.gridScaleHandler) {
             window.removeEventListener('gridscalechange', this.gridScaleHandler);
         }
@@ -1037,6 +1063,9 @@ export default class MainScene extends Phaser.Scene {
 
         // 更新回血物品（浮動動畫、過期移除、拾取檢測）
         this.updateHealingItems(delta);
+
+        // 更新經驗水晶（浮動動畫、磁鐵吸取、拾取檢測）
+        this.updateExpCrystals(delta);
 
         // 嘗試發動技能攻擊
         this.tryActivateSkills(now);
@@ -2845,6 +2874,12 @@ export default class MainScene extends Phaser.Scene {
 
         // 同步移動回血物品容器
         this.healingItemContainer.setPosition(
+            this.gameBounds.x - this.cameraOffsetX,
+            this.gameBounds.y - this.cameraOffsetY
+        );
+
+        // 同步移動經驗水晶容器
+        this.expCrystalContainer.setPosition(
             this.gameBounds.x - this.cameraOffsetX,
             this.gameBounds.y - this.cameraOffsetY
         );
@@ -7006,6 +7041,13 @@ export default class MainScene extends Phaser.Scene {
         this.healingItems = [];
         this.nextHealingItemId = 0;
 
+        // 清除經驗水晶（回收到池中）
+        for (const crystal of this.expCrystals) {
+            this.releaseExpCrystalToPool(crystal.sprite);
+        }
+        this.expCrystals = [];
+        this.nextExpCrystalId = 0;
+
         // 隱藏角色
         if (this.character) {
             this.character.setVisible(false);
@@ -7205,8 +7247,12 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // 處理怪物死亡（掉落系統入口）
-    private handleMonsterDeath(monster: { x: number; y: number; isElite: boolean; isBoss: boolean }) {
-        // 菁英怪掉落血球
+    private handleMonsterDeath(monster: { x: number; y: number; isElite: boolean; isBoss: boolean; exp: number }) {
+        // 所有怪物掉落經驗水晶
+        if (monster.exp > 0) {
+            this.spawnExpCrystal(monster.x, monster.y, monster.exp);
+        }
+        // 菁英怪額外掉落血球
         if (monster.isElite) {
             this.spawnHealingItems(monster.x, monster.y);
         }
@@ -7214,7 +7260,6 @@ export default class MainScene extends Phaser.Scene {
         if (monster.isBoss) {
             // TODO: BOSS 專屬掉落
         }
-        // 未來可以在這裡加入其他掉落邏輯
     }
 
     // ========== 結束回血物品系統 ==========
@@ -7591,63 +7636,53 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
-    // 零信任防禦協定：啟用
-    private activateZeroTrust(_skillLevel: number) {
-        if (this.zeroTrustActive) return;
-        this.zeroTrustActive = true;
-
-        const unitSize = this.gameBounds.height / 10;
-        const radius = 5; // 5 單位半徑
-        const radiusPx = radius * unitSize;
-
-        // 建立八角矩陣護盾圖
+    // 零信任防禦協定：建立護盾 Sprite（供 SkillExecutor 呼叫）
+    private createZeroTrustShieldSprite() {
         if (!this.zeroTrustSprite) {
             this.zeroTrustSprite = this.add.sprite(0, 0, MainScene.TEXTURE_SHIELD);
             this.skillGridContainer.add(this.zeroTrustSprite);
             this.zeroTrustSprite.setDepth(49);
             this.zeroTrustSprite.setAlpha(0.15);
         }
+    }
 
-        // 建立 8 個光點（在領域的 8 個角）
-        for (let i = 0; i < 8; i++) {
-            const angle = (i / 8) * Math.PI * 2 - Math.PI / 2; // 從正上方開始
-            const homeX = this.characterX + Math.cos(angle) * radiusPx;
-            const homeY = this.characterY + Math.sin(angle) * radiusPx;
+    // 零信任防禦協定：建立光點（供 SkillExecutor 呼叫）
+    private createZeroTrustPoint(index: number, radiusPx: number) {
+        const unitSize = this.gameBounds.height / 10;
+        const angle = (index / 8) * Math.PI * 2 - Math.PI / 2; // 從正上方開始
+        const homeX = this.characterX + Math.cos(angle) * radiusPx;
+        const homeY = this.characterY + Math.sin(angle) * radiusPx;
 
-            // 光點 sprite（sector_360，橢圓壓扁，參考護盾腳底橢圓再小一半）
-            const pointSprite = this.add.sprite(0, 0, MainScene.TEXTURE_SECTOR_360);
-            this.skillGridContainer.add(pointSprite);
-            pointSprite.setDepth(56);
-            pointSprite.setTint(0xffffff); // 平時白色
-            pointSprite.setAlpha(0.8);
-            const pointScaleX = (unitSize * 0.3) / MainScene.EFFECT_TEXTURE_SIZE; // 小一半
-            const pointScaleY = pointScaleX * 0.35; // 壓扁成橢圓
-            pointSprite.setScale(pointScaleX, pointScaleY);
+        // 光點 sprite
+        const pointSprite = this.add.sprite(0, 0, MainScene.TEXTURE_SECTOR_360);
+        this.skillGridContainer.add(pointSprite);
+        pointSprite.setDepth(56);
+        pointSprite.setTint(0xffffff);
+        pointSprite.setAlpha(0.8);
+        const pointScaleX = (unitSize * 0.3) / MainScene.EFFECT_TEXTURE_SIZE;
+        const pointScaleY = pointScaleX * 0.35;
+        pointSprite.setScale(pointScaleX, pointScaleY);
 
-            // 向上射線 sprite（裝飾用）
-            const beamSprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
-            this.skillGridContainer.add(beamSprite);
-            beamSprite.setDepth(55);
-            beamSprite.setTint(0xffdd44);
-            beamSprite.setAlpha(0.6);
-            beamSprite.setRotation(-Math.PI / 2); // 向上
+        // 向上射線 sprite
+        const beamSprite = this.add.sprite(0, 0, MainScene.TEXTURE_LINE);
+        this.skillGridContainer.add(beamSprite);
+        beamSprite.setDepth(55);
+        beamSprite.setTint(0xffdd44);
+        beamSprite.setAlpha(0.6);
+        beamSprite.setRotation(-Math.PI / 2);
 
-            this.zeroTrustPoints.push({
-                targetMonsterId: null,
-                currentX: homeX,
-                currentY: homeY,
-                homeAngle: angle,
-                lastDamageTime: 0,
-                pointSprite: pointSprite,
-                beamSprite: beamSprite,
-                flickerPhase: Math.random() * Math.PI * 2, // 隨機初始相位
-                lockStartTime: 0,
-                beamMultiplier: 1
-            });
-        }
-
-        // 設定減速區域（5 單位半徑，速度減半）
-        this.monsterManager.setSlowZone(this.characterX, this.characterY, 5, 0.5);
+        this.zeroTrustPoints.push({
+            targetMonsterId: null,
+            currentX: homeX,
+            currentY: homeY,
+            homeAngle: angle,
+            lastDamageTime: 0,
+            pointSprite: pointSprite,
+            beamSprite: beamSprite,
+            flickerPhase: Math.random() * Math.PI * 2,
+            lockStartTime: 0,
+            beamMultiplier: 1
+        });
     }
 
     // 零信任防禦協定：更新邏輯（在 update 中呼叫）
@@ -7661,7 +7696,6 @@ export default class MainScene extends Phaser.Scene {
         const radius = 5; // 5 單位半徑
         const radiusPx = radius * unitSize;
         const damageInterval = 500; // 0.5 秒
-        const damageRadius = 1; // 1 單位傷害範圍
         const now = this.time.now;
         const beamColor = 0xffcc00; // 金黃色
         const moveSpeed = unitSize * 8; // 光點移動速度（每秒 8 單位）
@@ -7676,10 +7710,6 @@ export default class MainScene extends Phaser.Scene {
             this.zeroTrustSprite.setAlpha(0.15);
             this.zeroTrustSprite.rotation += 0.015;
         }
-
-        // 傷害計算
-        const damageUnits = this.currentLevel + skillLevel;
-        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
 
         // 取得所有怪物
         const monsters = this.monsterManager.getMonsters();
@@ -7826,42 +7856,19 @@ export default class MainScene extends Phaser.Scene {
             if (point.targetMonsterId !== null && now - point.lastDamageTime >= damageInterval) {
                 point.lastDamageTime = now;
 
-                // 傷害範圍隨倍率增加（基礎1單位，每倍+0.5單位）
-                const actualDamageRadius = damageRadius + (point.beamMultiplier - 1) * 0.5;
+                // 呼叫 SkillExecutor 處理傷害
+                const result = this.skillExecutor.performZeroTrustPointDamage(
+                    point.currentX, point.currentY, point.beamMultiplier, skillLevel
+                );
 
-                // 檢測傷害範圍內的怪物
-                const hitMonsterIds: number[] = [];
-                for (const monster of monsters) {
-                    const mdx = monster.x - point.currentX;
-                    const mdy = monster.y - point.currentY;
-                    const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
-                    if (mdist <= actualDamageRadius * unitSize) {
-                        hitMonsterIds.push(monster.id);
-                    }
-                }
-
-                if (hitMonsterIds.length > 0) {
-                    // 傷害加成：每秒 +技能等級% 傷害
-                    const damageBonus = (point.beamMultiplier - 1) * skillLevel * 0.01;
-                    const boostedDamage = Math.floor(baseDamage * (1 + damageBonus));
-                    const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(boostedDamage, this.currentLevel);
-                    const result = this.monsterManager.damageMonsters(hitMonsterIds, finalDamage);
-                    if (result.totalExp > 0) this.addExp(result.totalExp);
-
-                    // 在減速範圍內殺死敵人時，機率重置靈魂統領（護盾）冷卻
-                    // 機率 = 技能等級 × 1%（每擊殺一隻判定一次）
-                    if (result.killCount > 0) {
-                        const resetChance = skillLevel * 0.01;
-                        for (let i = 0; i < result.killCount; i++) {
-                            if (Math.random() < resetChance) {
-                                this.skillCooldowns.delete('active_architect');
-                                break; // 重置一次即可
-                            }
-                        }
+                if (result.hitMonsters.length > 0) {
+                    // 重置護盾冷卻
+                    if (result.shouldResetShield) {
+                        this.skillCooldowns.delete('active_architect');
                     }
 
                     // 命中時顯示小爆炸效果（倍率高時效果更大）
-                    this.showZeroTrustHitEffect(point.currentX, point.currentY, isCrit);
+                    this.showZeroTrustHitEffect(point.currentX, point.currentY, result.isCrit);
                 }
             }
         }
@@ -8135,15 +8142,9 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 幻影迭代模式：召喚影分身（最多 3 個，滿 3 個後每個分身啟動跟隨咒言圈）
-    private executePhantomIteration(skillLevel: number) {
+    // 幻影迭代模式：建立分身（供 SkillExecutor 呼叫）
+    private createPhantom(skillLevel: number) {
         const unitSize = this.gameBounds.height / 10;
-
-        // 如果已有 3 個分身，啟動每個分身的跟隨咒言圈
-        if (this.phantoms.length >= MainScene.PHANTOM_MAX_COUNT) {
-            this.activatePhantomFollowingCurseCircles(skillLevel);
-            return;
-        }
 
         // 計算新分身的扇區索引
         const sectorIndex = this.phantoms.length;
@@ -8299,21 +8300,14 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 分身在指定位置施放技能
-    // 每個分身啟動跟隨咒言圈（持續 2 秒，每 0.2 秒傷害一次）
-    private activatePhantomFollowingCurseCircles(skillLevel: number) {
+    // 分身啟動跟隨咒言圈（供 SkillExecutor 呼叫）
+    private startPhantomCurseCircles(baseDamage: number, skillLevel: number) {
         const unitSize = this.gameBounds.height / 10;
         const circleRadius = unitSize * 2; // 2 單位半徑
 
-        // 計算傷害
-        const equipped = this.skillManager.getEquippedAdvancedSkill();
-        const level = equipped ? equipped.level : skillLevel;
-        const damageUnits = this.currentLevel + level;
-        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
-
         // 對每個分身啟動跟隨咒言圈
         for (const phantom of this.phantoms) {
-            this.createFollowingCurseCircle(phantom.id, circleRadius, baseDamage, level);
+            this.createFollowingCurseCircle(phantom.id, circleRadius, baseDamage, skillLevel);
         }
     }
 
@@ -8323,9 +8317,9 @@ export default class MainScene extends Phaser.Scene {
         const damageInterval = 200; // 每 0.2 秒傷害一次
         const unitSize = this.gameBounds.height / 10;
 
-        // 呼吸效果參數（2-3單位範圍快速呼吸）
+        // 呼吸效果參數（2-2.5單位範圍高速呼吸）
         const minRadius = unitSize * 2;
-        const maxRadius = unitSize * 3;
+        const maxRadius = unitSize * 2.5;
         let breathPhase = 0;
 
         // 創建咒言圈 sprite（外圈）
@@ -8366,8 +8360,8 @@ export default class MainScene extends Phaser.Scene {
                 return;
             }
 
-            // 快速呼吸效果（2-3單位範圍）
-            breathPhase += 0.15; // 快速呼吸
+            // 高速呼吸效果（2-2.5單位範圍）
+            breathPhase += 0.25; // 高速呼吸
             const breathWave = (Math.sin(breathPhase) + 1) / 2; // 0~1
             const currentRadius = minRadius + (maxRadius - minRadius) * breathWave;
             const scale = (currentRadius * 2) / MainScene.EFFECT_TEXTURE_SIZE;
@@ -8388,46 +8382,15 @@ export default class MainScene extends Phaser.Scene {
                 lastDamageTime = elapsed;
                 hitMonsterSet.clear(); // 每次傷害清空，允許重複命中
 
-                // 檢測範圍內的怪物
-                const monsters = this.monsterManager.getMonsters();
-                const hitMonsters: number[] = [];
+                // 呼叫 SkillExecutor 處理傷害
+                const result = this.skillExecutor.performCurseCircleDamage(
+                    phantom.x, phantom.y, currentRadius, damage, skillLevel
+                );
 
-                for (const monster of monsters) {
-                    const dx = monster.x - phantom.x;
-                    const dy = monster.y - phantom.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
-
-                    if (dist - monsterRadius <= currentRadius) {
-                        hitMonsters.push(monster.id);
-                    }
-                }
-
-                if (hitMonsters.length > 0) {
-                    // 咒言圈傷害減半
-                    const halfDamage = Math.floor(damage * 0.5);
-                    const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(halfDamage, this.currentLevel);
-                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-                    if (result.totalExp > 0) this.addExp(result.totalExp);
-
-                    // 燃燒 DOT 機率觸發（與燃燒賽璐珞相同：10% + 每級 1%）
-                    const burnChance = 0.10 + skillLevel * 0.01;
-                    const burnDamage = Math.floor(damage * 0.2);
-                    const burnDuration = 5000;
-                    const monstersToBurn: number[] = [];
-
-                    for (const monsterId of hitMonsters) {
-                        if (Math.random() < burnChance) {
-                            monstersToBurn.push(monsterId);
-                        }
-                    }
-
-                    if (monstersToBurn.length > 0) {
-                        this.monsterManager.burnMonsters(monstersToBurn, burnDuration, burnDamage);
-                    }
-
-                    // 命中特效（咒言圈打擊閃光）
-                    for (const monsterId of hitMonsters) {
+                // 命中特效
+                if (result.hitMonsters.length > 0) {
+                    const monsters = this.monsterManager.getMonsters();
+                    for (const monsterId of result.hitMonsters) {
                         const monster = monsters.find(m => m.id === monsterId);
                         if (monster) {
                             this.showHitSparkEffect(monster.x, monster.y, MainScene.PHANTOM_COLOR);
@@ -8902,14 +8865,16 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 分身版燃燒的賽璐珞（指定座標，範圍 3 單位）- 保留供其他用途
-    private phantomCastBurningCelluloidAt(baseDamage: number, phantomX: number, phantomY: number, skillLevel: number) {
-        const range = this.gameBounds.height * 0.3; // 3 單位（本尊 7 單位）
-        const halfAngleDeg = 15; // 30 度扇形
+    // 分身版燃燒賽璐珞（時序處理）
+    private startPhantomBurningCelluloid(params: {
+        baseDamage: number; phantomX: number; phantomY: number; skillLevel: number;
+    }) {
+        const { baseDamage, phantomX, phantomY, skillLevel } = params;
+        const range = this.gameBounds.height * 0.3; // 3 單位
+        const halfAngleDeg = 15;
         const halfAngle = halfAngleDeg * Math.PI / 180;
-        const color = MainScene.PHANTOM_COLOR; // 分身暗紫色
+        const color = MainScene.PHANTOM_COLOR;
 
-        // 旋轉一圈
         const rotationSteps = 12;
         const stepDelay = 80;
 
@@ -8917,47 +8882,10 @@ export default class MainScene extends Phaser.Scene {
             this.time.delayedCall(i * stepDelay, () => {
                 const targetAngle = (i / rotationSteps) * Math.PI * 2;
 
-                // 扇形範圍內的怪物
-                const monsters = this.monsterManager.getMonsters();
-                const hitMonsters: number[] = [];
-
-                for (const monster of monsters) {
-                    const dx = monster.x - phantomX;
-                    const dy = monster.y - phantomY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-
-                    if (dist <= range) {
-                        const monsterAngle = Math.atan2(dy, dx);
-                        let angleDiff = Math.abs(monsterAngle - targetAngle);
-                        if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
-
-                        if (angleDiff <= halfAngle) {
-                            hitMonsters.push(monster.id);
-                        }
-                    }
-                }
-
-                if (hitMonsters.length > 0) {
-                    const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
-                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-                    if (result.totalExp > 0) this.addExp(result.totalExp);
-
-                    // 燃燒機率：10% + 每級 1%（與本尊相同）
-                    const burnChance = 0.10 + skillLevel * 0.01;
-                    const burnDamage = Math.floor(baseDamage * 0.2);
-                    const burnDuration = 5000;
-                    const monstersToBurn: number[] = [];
-
-                    for (const monsterId of hitMonsters) {
-                        if (Math.random() < burnChance) {
-                            monstersToBurn.push(monsterId);
-                        }
-                    }
-
-                    if (monstersToBurn.length > 0) {
-                        this.monsterManager.burnMonsters(monstersToBurn, burnDuration, burnDamage);
-                    }
-                }
+                // 呼叫 SkillExecutor 處理傷害
+                this.skillExecutor.performPhantomBurningCelluloidStep(
+                    phantomX, phantomY, targetAngle, range, halfAngle, baseDamage, skillLevel
+                );
 
                 // 視覺效果
                 this.flashSkillEffectSector(phantomX, phantomY, range, targetAngle, halfAngleDeg, color);
@@ -8965,23 +8893,22 @@ export default class MainScene extends Phaser.Scene {
         }
     }
 
-    // 分身版技術美術大神（指定座標，每次 2 發，範圍縮小）
-    private phantomCastTechArtistAt(baseDamage: number, phantomX: number, phantomY: number) {
+    // 分身版技術美術大神（時序處理）- 0.5 秒內 5 發光線
+    private startPhantomTechArtist(params: { baseDamage: number; phantomX: number; phantomY: number }) {
+        const { baseDamage, phantomX, phantomY } = params;
         const unitSize = this.gameBounds.height / 10;
-        const range = unitSize * 3;          // 縮小：本尊 5 單位
-        const explosionRadius = unitSize * 2; // 縮小：本尊 3 單位
-        const beamCount = 2; // 分身版每次 2 發
+        const range = unitSize * 3;
+        const explosionRadius = unitSize * 2;
+        const beamCount = 5;
+        const beamInterval = 100; // 每發間隔 100ms，共 0.5 秒
 
         for (let b = 0; b < beamCount; b++) {
-            // 每發稍微延遲以區分視覺
-            this.time.delayedCall(b * 100, () => {
-                // 隨機位置
+            this.time.delayedCall(b * beamInterval, () => {
                 const angle = Math.random() * Math.PI * 2;
                 const dist = Math.random() * range;
                 const targetX = phantomX + Math.cos(angle) * dist;
                 const targetY = phantomY + Math.sin(angle) * dist;
 
-                // 計算光束角度（用於爆炸線條方向）- 反彈效果：與攻擊方向相反
                 const beamOffsetX = (Math.random() - 0.5) * 2 * unitSize;
                 const targetScreen = this.worldToScreen(targetX, targetY);
                 const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
@@ -8991,96 +8918,74 @@ export default class MainScene extends Phaser.Scene {
 
                 // 延遲後爆炸
                 this.time.delayedCall(150, () => {
+                    // 先暈眩
                     const monsters = this.monsterManager.getMonsters();
-                    const hitMonsters: number[] = [];
-
+                    const hitMonsterIds: number[] = [];
                     for (const monster of monsters) {
                         const dx = monster.x - targetX;
                         const dy = monster.y - targetY;
                         const distPixels = Math.sqrt(dx * dx + dy * dy);
-                        // 轉換成世界單位
-                        const distUnits = distPixels / unitSize;
-                        const monsterRadiusUnits = monster.definition.size * 0.5;
-
-                        if (distUnits - monsterRadiusUnits <= 2) { // 2 單位爆炸範圍（本尊 3）
-                            hitMonsters.push(monster.id);
+                        const monsterRadius = unitSize * monster.definition.size * 0.5;
+                        if (distPixels - monsterRadius <= explosionRadius) {
+                            hitMonsterIds.push(monster.id);
                         }
                     }
-
-                    if (hitMonsters.length > 0) {
-                        // 先暈眩，再造成傷害
-                        this.monsterManager.stunMonsters(hitMonsters, 1000);
-
-                        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
-                        const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-                        if (result.totalExp > 0) this.addExp(result.totalExp);
-
-                        this.showExplosionEffect(targetX, targetY, explosionRadius, MainScene.PHANTOM_COLOR, beamAngle, isCrit);
-                    } else {
-                        this.showExplosionEffect(targetX, targetY, explosionRadius, MainScene.PHANTOM_COLOR, beamAngle);
+                    if (hitMonsterIds.length > 0) {
+                        this.monsterManager.stunMonsters(hitMonsterIds, 1000);
                     }
+
+                    // 呼叫 SkillExecutor 處理傷害
+                    const result = this.skillExecutor.performPhantomTechArtistHit(
+                        targetX, targetY, explosionRadius, baseDamage
+                    );
+
+                    // 爆炸效果
+                    this.showExplosionEffect(targetX, targetY, explosionRadius, MainScene.PHANTOM_COLOR, beamAngle, result.isCrit);
                 });
             });
         }
     }
 
-    // 分身版完美像素審判（指定座標，範圍縮小）
-    private phantomCastPerfectPixelAt(baseDamage: number, phantomX: number, phantomY: number) {
+    // 分身版完美像素審判（時序處理）
+    private startPhantomPerfectPixel(params: { baseDamage: number; phantomX: number; phantomY: number }) {
+        const { baseDamage, phantomX, phantomY } = params;
         const unitSize = this.gameBounds.height / 10;
-        const explosionRadius = unitSize * 2; // 縮小：本尊 3 單位
+        const explosionRadius = unitSize * 2;
+        const explosionRadiusUnits = 2;
 
-        // 4 個焦點位置（分身位置 ±1.5 單位，本尊 ±2）
+        // 4 個焦點位置
         const offset = unitSize * 1.5;
         const focusPoints = [
-            { x: phantomX - offset, y: phantomY - offset },  // 左上
-            { x: phantomX + offset, y: phantomY - offset },  // 右上
-            { x: phantomX - offset, y: phantomY + offset },  // 左下
-            { x: phantomX + offset, y: phantomY + offset }   // 右下
+            { x: phantomX - offset, y: phantomY - offset },
+            { x: phantomX + offset, y: phantomY - offset },
+            { x: phantomX - offset, y: phantomY + offset },
+            { x: phantomX + offset, y: phantomY + offset }
         ];
 
-        // 隨機順序爆炸
         const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
 
         order.forEach((index, i) => {
             this.time.delayedCall(i * 250, () => {
                 const point = focusPoints[index];
 
-                const monsters = this.monsterManager.getMonsters();
-                const hitMonsters: number[] = [];
+                // 呼叫 SkillExecutor 處理傷害
+                const result = this.skillExecutor.performPhantomPerfectPixelExplosion(
+                    point.x, point.y, baseDamage, explosionRadiusUnits
+                );
 
-                for (const monster of monsters) {
-                    const dx = monster.x - point.x;
-                    const dy = monster.y - point.y;
-                    const distPixels = Math.sqrt(dx * dx + dy * dy);
-                    // 轉換成世界單位
-                    const distUnits = distPixels / unitSize;
-                    const monsterRadiusUnits = monster.definition.size * 0.5;
-
-                    if (distUnits - monsterRadiusUnits <= 2) { // 2 單位爆炸範圍（本尊 3）
-                        hitMonsters.push(monster.id);
-                    }
-                }
-
-                if (hitMonsters.length > 0) {
-                    // 先暈眩效果（1 秒），再造成傷害
-                    this.monsterManager.stunMonsters(hitMonsters, 1000);
-
-                    const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
-                    const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-                    if (result.totalExp > 0) this.addExp(result.totalExp);
-                        }
-
-                // 顯示完整爆炸視覺效果（暗紫色版）
+                // 顯示爆炸視覺效果
                 const screenPos = this.worldToScreen(point.x, point.y);
                 this.showPhantomPerfectPixelExplosion(screenPos.x, screenPos.y, explosionRadius);
 
-                // 被炸到的怪物噴出爆炸火花（暗紫色）
-                const monstersForSpark = this.monsterManager.getMonsters();
-                for (const monsterId of hitMonsters) {
-                    const monster = monstersForSpark.find(m => m.id === monsterId);
-                    if (monster) {
-                        const sparkPos = this.worldToScreen(monster.x, monster.y);
-                        this.showExplosionSparkEffect(sparkPos.x, sparkPos.y, MainScene.PHANTOM_COLOR_LIGHT, 0.8);
+                // 被炸到的怪物噴出爆炸火花
+                if (result.hitMonsters.length > 0) {
+                    const monsters = this.monsterManager.getMonsters();
+                    for (const monsterId of result.hitMonsters) {
+                        const monster = monsters.find(m => m.id === monsterId);
+                        if (monster) {
+                            const sparkPos = this.worldToScreen(monster.x, monster.y);
+                            this.showExplosionSparkEffect(sparkPos.x, sparkPos.y, MainScene.PHANTOM_COLOR_LIGHT, 0.8);
+                        }
                     }
                 }
             });
@@ -9638,7 +9543,7 @@ export default class MainScene extends Phaser.Scene {
 
         // 啟用（如果尚未啟用）
         if (!this.zeroTrustActive) {
-            this.activateZeroTrust(equipped.level);
+            this.skillExecutor.activateZeroTrust(equipped.level);
         }
 
         // 更新光束
@@ -11159,14 +11064,11 @@ export default class MainScene extends Phaser.Scene {
         // 更新進階技能欄位顯示
         this.updateAdvancedSkillDisplay();
 
-        // 首次取得或切換技能時：重置冷卻並立即觸發
+        // 首次取得或切換到新技能時：重置冷卻並立即觸發
         // 升級同一技能時：保持現有冷卻，不觸發
-        if (equipped && (isFirstTime || (!isSameSkill && newLevel === 1))) {
+        if (equipped && (isFirstTime || !isSameSkill)) {
             this.advancedSkillCooldownTime = 0;
             this.activateAdvancedSkill(equipped);
-            this.advancedSkillCooldownTime = this.time.now;
-        } else if (!isSameSkill) {
-            // 切換到已升級過的技能：重置冷卻但不立即觸發
             this.advancedSkillCooldownTime = this.time.now;
         }
         // 升級同一技能：冷卻保持不變
@@ -11774,15 +11676,12 @@ export default class MainScene extends Phaser.Scene {
                 // 更新進階技能欄位顯示
                 this.updateAdvancedSkillDisplay();
 
-                // 首次取得或切換技能時：重置冷卻並立即觸發
+                // 首次取得或切換到新技能時：重置冷卻並立即觸發
                 // 升級同一技能時：保持現有冷卻，不觸發
                 const equipped = this.skillManager.getEquippedAdvancedSkill();
-                if (equipped && (isFirstTime || (!isSameSkill && newLevel === 1))) {
+                if (equipped && (isFirstTime || !isSameSkill)) {
                     this.advancedSkillCooldownTime = 0;
                     this.activateAdvancedSkill(equipped);
-                    this.advancedSkillCooldownTime = this.time.now;
-                } else if (!isSameSkill) {
-                    // 切換到已升級過的技能：重置冷卻但不立即觸發
                     this.advancedSkillCooldownTime = this.time.now;
                 }
                 // 升級同一技能：冷卻保持不變
@@ -12294,6 +12193,183 @@ export default class MainScene extends Phaser.Scene {
         }
         this.circleLineEffectPool.push(sprite);
     }
+
+    // ========== 經驗水晶物件池系統 ==========
+
+    // 初始化經驗水晶物件池
+    private initExpCrystalPool() {
+        const crystalSize = MainScene.EXP_CRYSTAL_SIZE * this.gameBounds.height;
+
+        for (let i = 0; i < MainScene.EXP_CRYSTAL_POOL_SIZE; i++) {
+            // 創建菱形水晶 sprite（使用 Graphics 繪製紋理）
+            const graphics = this.add.graphics();
+            const halfSize = crystalSize / 2;
+
+            // 繪製菱形（紫色漸層）
+            graphics.fillStyle(0x9933ff, 1); // 紫色
+            graphics.beginPath();
+            graphics.moveTo(halfSize, 0);           // 頂點
+            graphics.lineTo(crystalSize, halfSize); // 右點
+            graphics.lineTo(halfSize, crystalSize); // 底點
+            graphics.lineTo(0, halfSize);           // 左點
+            graphics.closePath();
+            graphics.fillPath();
+
+            // 添加高光
+            graphics.fillStyle(0xcc66ff, 0.6);
+            graphics.beginPath();
+            graphics.moveTo(halfSize, crystalSize * 0.15);
+            graphics.lineTo(crystalSize * 0.7, halfSize);
+            graphics.lineTo(halfSize, crystalSize * 0.4);
+            graphics.lineTo(crystalSize * 0.3, halfSize * 0.7);
+            graphics.closePath();
+            graphics.fillPath();
+
+            // 生成紋理
+            const textureKey = `exp_crystal_pool_${i}`;
+            graphics.generateTexture(textureKey, crystalSize, crystalSize);
+            graphics.destroy();
+
+            // 創建 sprite
+            const sprite = this.add.sprite(0, 0, textureKey);
+            sprite.setOrigin(0.5, 0.5);
+            sprite.setVisible(false);
+            sprite.setActive(false);
+            this.expCrystalContainer.add(sprite);
+
+            this.expCrystalPool.push(sprite);
+        }
+    }
+
+    // 從池中取得經驗水晶
+    private getExpCrystalFromPool(): Phaser.GameObjects.Sprite | null {
+        const sprite = this.expCrystalPool.pop();
+        if (sprite) {
+            sprite.setVisible(true);
+            sprite.setActive(true);
+            return sprite;
+        }
+        return null; // 池耗盡時返回 null
+    }
+
+    // 歸還經驗水晶到池中
+    private releaseExpCrystalToPool(sprite: Phaser.GameObjects.Sprite) {
+        sprite.setVisible(false);
+        sprite.setActive(false);
+        sprite.setScale(1);
+        sprite.setAlpha(1);
+        this.expCrystalPool.push(sprite);
+    }
+
+    // 生成經驗水晶
+    private spawnExpCrystal(worldX: number, worldY: number, exp: number) {
+        const sprite = this.getExpCrystalFromPool();
+        if (!sprite) return; // 池耗盡時不生成
+
+        // 設定位置
+        sprite.setPosition(worldX, worldY);
+
+        // 加入追蹤列表
+        this.expCrystals.push({
+            id: this.nextExpCrystalId++,
+            x: worldX,
+            y: worldY,
+            exp: exp,
+            sprite: sprite,
+            floatPhase: Math.random() * Math.PI * 2,
+            isBeingAttracted: false
+        });
+    }
+
+    // 更新經驗水晶（浮動動畫 + 磁鐵吸取 + 拾取檢測）
+    private updateExpCrystals(delta: number) {
+        if (this.expCrystals.length === 0) return;
+
+        const unitSize = this.gameBounds.height * 0.1;
+        // 拾取範圍 = 基礎範圍 + 視網膜增強模組加成（用於磁鐵觸發）
+        const pickupBonus = this.skillManager.getRetinaModulePickupBonus();
+        const magnetRange = (MainScene.EXP_CRYSTAL_MAGNET_RANGE + pickupBonus) * unitSize;
+        const pickupRange = MainScene.EXP_CRYSTAL_PICKUP_RANGE * unitSize;
+        const attractSpeed = MainScene.EXP_CRYSTAL_ATTRACT_SPEED * unitSize * (delta / 1000);
+
+        const crystalsToRemove: number[] = [];
+
+        for (const crystal of this.expCrystals) {
+            const dx = this.characterX - crystal.x;
+            const dy = this.characterY - crystal.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 檢查是否在磁鐵範圍內
+            if (dist <= magnetRange) {
+                crystal.isBeingAttracted = true;
+            }
+
+            // 磁鐵吸取效果
+            if (crystal.isBeingAttracted) {
+                if (dist > pickupRange) {
+                    // 向玩家移動
+                    const moveX = (dx / dist) * attractSpeed;
+                    const moveY = (dy / dist) * attractSpeed;
+                    crystal.x += moveX;
+                    crystal.y += moveY;
+                    crystal.sprite.setPosition(crystal.x, crystal.y);
+
+                    // 吸取時縮放動畫
+                    const scale = 0.8 + 0.2 * Math.sin(this.time.now * 0.01);
+                    crystal.sprite.setScale(scale);
+                } else {
+                    // 拾取水晶
+                    this.addExp(crystal.exp);
+                    this.playExpCrystalPickupEffect(crystal.x, crystal.y);
+                    crystalsToRemove.push(crystal.id);
+                }
+            } else {
+                // 浮動動畫（未被吸取時）
+                crystal.floatPhase += delta * 0.003;
+                const floatOffset = Math.sin(crystal.floatPhase) * 5;
+                crystal.sprite.setY(crystal.y + floatOffset);
+            }
+        }
+
+        // 移除被拾取的水晶
+        for (const id of crystalsToRemove) {
+            const index = this.expCrystals.findIndex(c => c.id === id);
+            if (index !== -1) {
+                const crystal = this.expCrystals[index];
+                this.releaseExpCrystalToPool(crystal.sprite);
+                this.expCrystals.splice(index, 1);
+            }
+        }
+    }
+
+    // 拾取經驗水晶特效（紫色上升光點）
+    private playExpCrystalPickupEffect(x: number, y: number) {
+        const sprite = this.getSkillEffectSprite();
+        if (!sprite) return;
+
+        sprite.setTexture(MainScene.TEXTURE_CIRCLE);
+        sprite.setPosition(x, y);
+        sprite.setScale(0.15);
+        sprite.setTint(0x9933ff); // 紫色
+        sprite.setAlpha(1);
+        sprite.setVisible(true);
+
+        // 上升 + 縮小 + 淡出
+        this.tweens.add({
+            targets: sprite,
+            y: y - 40,
+            scaleX: 0.3,
+            scaleY: 0.3,
+            alpha: 0,
+            duration: 350,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                this.releaseSkillEffectSprite(sprite);
+            }
+        });
+    }
+
+    // ========== 結束經驗水晶物件池系統 ==========
 
     /**
      * 標準化打擊火花效果（使用物件池）
@@ -13956,4 +14032,8 @@ export default class MainScene extends Phaser.Scene {
     public clearZeroTrustTrackedMonsters() { this.zeroTrustTrackedMonsters.clear(); }
     public getZeroTrustSprite() { return this.zeroTrustSprite; }
     public clearZeroTrustSprite() { this.zeroTrustSprite = undefined; }
+
+    // 分身系統存取器
+    public getPhantomCount(): number { return this.phantoms.length; }
+    public getPhantomMaxCount(): number { return MainScene.PHANTOM_MAX_COUNT; }
 }

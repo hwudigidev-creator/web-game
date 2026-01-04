@@ -540,7 +540,7 @@ export class SkillExecutor {
 
     /**
      * 技術美術大神：在角色周圍 5 單位隨機地點射下光線
-     * 3 單位爆炸範圍，命中敵人癱瘓 1 秒
+     * 0.5 秒內連發 5 道光線，3 單位爆炸範圍，命中敵人癱瘓 1 秒
      * 傷害單位 = 角色等級 + 技能等級
      */
     public executeTechArtist(skillLevel: number): void {
@@ -551,58 +551,67 @@ export class SkillExecutor {
         const spawnRadiusUnits = 5;
         const explosionRadiusUnits = 3;
         const stunDuration = 1000;
-
-        // 隨機選擇落點
-        const randomAngle = Math.random() * Math.PI * 2;
-        const randomDist = Math.random() * spawnRadiusUnits * unitSize;
-        const targetX = this.characterX + Math.cos(randomAngle) * randomDist;
-        const targetY = this.characterY + Math.sin(randomAngle) * randomDist;
-
-        // 計算光束角度
-        const beamOffsetX = (Math.random() - 0.5) * 2 * unitSize;
-        const targetScreen = this.call('worldToScreen', targetX, targetY);
-        const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
+        const beamCount = 5;
+        const burstDuration = 500; // 0.5 秒內發射完畢
+        const beamInterval = burstDuration / beamCount; // 每發間隔 100ms
 
         const techArtistColor = SparkColors.TECH_ARTIST;
         const explosionRadiusPx = explosionRadiusUnits * unitSize;
-        this.call('showLightBeamEffect', targetX, targetY, explosionRadiusPx, techArtistColor, beamOffsetX);
+        const time = this.scene.getTime();
 
-        // 延遲 200ms 後造成傷害
-        this.scene.getTime().delayedCall(200, () => {
-            const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+        for (let i = 0; i < beamCount; i++) {
+            time.delayedCall(i * beamInterval, () => {
+                // 每發隨機選擇落點
+                const randomAngle = Math.random() * Math.PI * 2;
+                const randomDist = Math.random() * spawnRadiusUnits * unitSize;
+                const targetX = this.characterX + Math.cos(randomAngle) * randomDist;
+                const targetY = this.characterY + Math.sin(randomAngle) * randomDist;
 
-            const monsters = this.monsterManager.getMonsters();
-            const hitMonsters: number[] = [];
-            const hitPositions: { x: number; y: number }[] = [];
+                // 計算光束角度
+                const beamOffsetX = (Math.random() - 0.5) * 2 * unitSize;
+                const targetScreen = this.call('worldToScreen', targetX, targetY);
+                const beamAngle = -Math.PI / 2 - Math.atan2(beamOffsetX, targetScreen.y + 50);
 
-            for (const monster of monsters) {
-                const dx = monster.x - targetX;
-                const dy = monster.y - targetY;
-                const distPixels = Math.sqrt(dx * dx + dy * dy);
-                const distUnits = distPixels / unitSize;
-                const monsterRadiusUnits = monster.definition.size * 0.5;
+                this.call('showLightBeamEffect', targetX, targetY, explosionRadiusPx, techArtistColor, beamOffsetX);
 
-                if (distUnits - monsterRadiusUnits <= explosionRadiusUnits) {
-                    hitMonsters.push(monster.id);
-                    hitPositions.push({ x: monster.x, y: monster.y });
-                }
-            }
+                // 延遲 200ms 後造成傷害
+                time.delayedCall(200, () => {
+                    const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
-            if (hitMonsters.length > 0) {
-                this.monsterManager.stunMonsters(hitMonsters, stunDuration);
-                const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
-                if (result.totalExp > 0) this.call('addExp', result.totalExp);
+                    const monsters = this.monsterManager.getMonsters();
+                    const hitMonsters: number[] = [];
+                    const hitPositions: { x: number; y: number }[] = [];
 
-                for (const pos of hitPositions) {
-                    const screenPos = this.call('worldToScreen', pos.x, pos.y);
-                    this.call('showExplosionSparkEffect', screenPos.x, screenPos.y, isCrit ? SparkColors.TECH_ARTIST_CRIT : SparkColors.TECH_ARTIST, 1.0);
-                }
+                    for (const monster of monsters) {
+                        const dx = monster.x - targetX;
+                        const dy = monster.y - targetY;
+                        const distPixels = Math.sqrt(dx * dx + dy * dy);
+                        const distUnits = distPixels / unitSize;
+                        const monsterRadiusUnits = monster.definition.size * 0.5;
 
-                this.call('shakeScreen', hitMonsters.length);
-            }
+                        if (distUnits - monsterRadiusUnits <= explosionRadiusUnits) {
+                            hitMonsters.push(monster.id);
+                            hitPositions.push({ x: monster.x, y: monster.y });
+                        }
+                    }
 
-            this.call('showExplosionEffect', targetX, targetY, explosionRadiusPx, techArtistColor, beamAngle, isCrit);
-        });
+                    if (hitMonsters.length > 0) {
+                        this.monsterManager.stunMonsters(hitMonsters, stunDuration);
+                        const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+                        if (result.totalExp > 0) this.call('addExp', result.totalExp);
+
+                        for (const pos of hitPositions) {
+                            const screenPos = this.call('worldToScreen', pos.x, pos.y);
+                            this.call('showExplosionSparkEffect', screenPos.x, screenPos.y, isCrit ? SparkColors.TECH_ARTIST_CRIT : SparkColors.TECH_ARTIST, 1.0);
+                        }
+
+                        this.call('shakeScreen', hitMonsters.length);
+                    }
+
+                    this.call('showExplosionEffect', targetX, targetY, explosionRadiusPx, techArtistColor, beamAngle, isCrit);
+                });
+            });
+        }
     }
 
     /** 絕對邏輯防禦：有護盾時產生繞角色旋轉的輪鋸（最多8個） */
@@ -1060,16 +1069,39 @@ export class SkillExecutor {
         return Math.sqrt(ddx * ddx + ddy * ddy);
     }
 
-    /** 零信任邊界：結界技能 */
-    public activateZeroTrust(skillLevel: number): void {
-        this.call('activateZeroTrust', skillLevel);
+    /** 零信任邊界：啟用結界 */
+    public activateZeroTrust(_skillLevel: number): void {
+        if (this.scene.getZeroTrustActive()) return;
+        this.scene.setZeroTrustActive(true);
+
+        const unitSize = this.gameBounds.height / 10;
+        const radius = 5; // 5 單位半徑
+        const radiusPx = radius * unitSize;
+
+        // 建立護盾 Sprite
+        this.call('createZeroTrustShieldSprite');
+
+        // 建立 8 個光點
+        for (let i = 0; i < 8; i++) {
+            this.call('createZeroTrustPoint', i, radiusPx);
+        }
+
+        // 設定減速區域（5 單位半徑，速度減半）
+        this.monsterManager.setSlowZone(this.characterX, this.characterY, 5, 0.5);
     }
 
-    // ==================== 分身系統（委託給 MainScene）====================
+    // ==================== 分身系統 ====================
 
-    /** 幻影迭代：召喚分身 */
+    /** 幻影迭代：召喚分身（最多 3 個，滿 3 個後啟動咒言圈） */
     public executePhantomIteration(skillLevel: number): void {
-        this.call('executePhantomIteration', skillLevel);
+        // 如果已有 3 個分身，啟動每個分身的跟隨咒言圈
+        if (this.scene.getPhantomCount() >= this.scene.getPhantomMaxCount()) {
+            this.activatePhantomFollowingCurseCircles(skillLevel);
+            return;
+        }
+
+        // 建立新分身
+        this.call('createPhantom', skillLevel);
     }
 
     /**
@@ -1088,20 +1120,240 @@ export class SkillExecutor {
 
         switch (skillId) {
             case 'advanced_burning_celluloid':
-                this.call('phantomCastBurningCelluloidAt', baseDamage, phantomX, phantomY, level);
+                this.call('startPhantomBurningCelluloid', { baseDamage, phantomX, phantomY, skillLevel: level });
                 break;
             case 'advanced_tech_artist':
-                this.call('phantomCastTechArtistAt', baseDamage, phantomX, phantomY);
+                this.call('startPhantomTechArtist', { baseDamage, phantomX, phantomY });
                 break;
             case 'advanced_perfect_pixel':
-                this.call('phantomCastPerfectPixelAt', baseDamage, phantomX, phantomY);
+                this.call('startPhantomPerfectPixel', { baseDamage, phantomX, phantomY });
                 break;
         }
     }
 
-    /** 分身跟隨咒言圈 */
+    /** 分身燃燒賽璐珞 - 單步傷害邏輯 */
+    public performPhantomBurningCelluloidStep(
+        phantomX: number, phantomY: number, targetAngle: number,
+        range: number, halfAngle: number, baseDamage: number, skillLevel: number
+    ): number[] {
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+
+        for (const monster of monsters) {
+            const dx = monster.x - phantomX;
+            const dy = monster.y - phantomY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist <= range) {
+                const monsterAngle = Math.atan2(dy, dx);
+                let angleDiff = Math.abs(monsterAngle - targetAngle);
+                if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+                if (angleDiff <= halfAngle) {
+                    hitMonsters.push(monster.id);
+                }
+            }
+        }
+
+        if (hitMonsters.length > 0) {
+            const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.call('addExp', result.totalExp);
+
+            // 燃燒機率：10% + 每級 1%
+            const burnChance = 0.10 + skillLevel * 0.01;
+            const burnDamage = Math.floor(baseDamage * 0.2);
+            const monstersToBurn: number[] = [];
+
+            for (const monsterId of hitMonsters) {
+                if (Math.random() < burnChance) {
+                    monstersToBurn.push(monsterId);
+                }
+            }
+
+            if (monstersToBurn.length > 0) {
+                this.monsterManager.burnMonsters(monstersToBurn, 5000, burnDamage);
+            }
+        }
+
+        return hitMonsters;
+    }
+
+    /** 分身技術美術 - 單發傷害邏輯 */
+    public performPhantomTechArtistHit(
+        targetX: number, targetY: number, explosionRadius: number, baseDamage: number
+    ): { hitMonsters: number[]; isCrit: boolean } {
+        const unitSize = this.gameBounds.height / 10;
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+
+        for (const monster of monsters) {
+            const dx = monster.x - targetX;
+            const dy = monster.y - targetY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const monsterRadius = unitSize * monster.definition.size * 0.5;
+
+            if (dist - monsterRadius <= explosionRadius) {
+                hitMonsters.push(monster.id);
+            }
+        }
+
+        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+
+        if (hitMonsters.length > 0) {
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.call('addExp', result.totalExp);
+        }
+
+        return { hitMonsters, isCrit };
+    }
+
+    /** 分身完美像素 - 單次爆炸傷害邏輯 */
+    public performPhantomPerfectPixelExplosion(
+        focusX: number, focusY: number, baseDamage: number, explosionRadiusUnits: number
+    ): { hitMonsters: number[]; isCrit: boolean } {
+        const unitSize = this.gameBounds.height / 10;
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+
+        for (const monster of monsters) {
+            const dx = monster.x - focusX;
+            const dy = monster.y - focusY;
+            const distPixels = Math.sqrt(dx * dx + dy * dy);
+            const distUnits = distPixels / unitSize;
+            const monsterRadiusUnits = monster.definition.size * 0.5;
+
+            if (distUnits - monsterRadiusUnits <= explosionRadiusUnits) {
+                hitMonsters.push(monster.id);
+            }
+        }
+
+        const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
+
+        if (hitMonsters.length > 0) {
+            this.monsterManager.stunMonsters(hitMonsters, 500); // 分身版暈眩 0.5 秒
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.call('addExp', result.totalExp);
+        }
+
+        return { hitMonsters, isCrit };
+    }
+
+    /** 分身跟隨咒言圈：計算傷害並啟動視覺效果 */
     public activatePhantomFollowingCurseCircles(skillLevel: number): void {
-        this.call('activatePhantomFollowingCurseCircles', skillLevel);
+        const equipped = this.skillManager.getEquippedAdvancedSkill();
+        const level = equipped ? equipped.level : skillLevel;
+        const damageUnits = this.currentLevel + level;
+        const baseDamage = DAMAGE_UNIT * damageUnits;
+
+        // 啟動視覺效果
+        this.call('startPhantomCurseCircles', baseDamage, level);
+    }
+
+    /** 咒言圈傷害邏輯 - 每 0.2 秒造成一次傷害 */
+    public performCurseCircleDamage(
+        centerX: number,
+        centerY: number,
+        radius: number,
+        baseDamage: number,
+        skillLevel: number
+    ): { hitMonsters: number[] } {
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+
+        for (const monster of monsters) {
+            const dx = monster.x - centerX;
+            const dy = monster.y - centerY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const monsterRadius = this.gameBounds.height * monster.definition.size * 0.5;
+
+            if (dist - monsterRadius <= radius) {
+                hitMonsters.push(monster.id);
+            }
+        }
+
+        if (hitMonsters.length > 0) {
+            // 咒言圈傷害減半
+            const halfDamage = Math.floor(baseDamage * 0.5);
+            const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(halfDamage, this.currentLevel);
+            const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
+            if (result.totalExp > 0) this.call('addExp', result.totalExp);
+
+            // 燃燒 DOT 機率觸發（與燃燒賽璐珞相同：10% + 每級 1%）
+            const burnChance = 0.10 + skillLevel * 0.01;
+            const burnDamage = Math.floor(baseDamage * 0.2);
+            const burnDuration = 5000;
+            const monstersToBurn: number[] = [];
+
+            for (const monsterId of hitMonsters) {
+                if (Math.random() < burnChance) {
+                    monstersToBurn.push(monsterId);
+                }
+            }
+
+            if (monstersToBurn.length > 0) {
+                this.monsterManager.burnMonsters(monstersToBurn, burnDuration, burnDamage);
+            }
+        }
+
+        return { hitMonsters };
+    }
+
+    /** 零信任光點傷害邏輯 - 每 0.5 秒造成範圍傷害 */
+    public performZeroTrustPointDamage(
+        pointX: number,
+        pointY: number,
+        beamMultiplier: number,
+        skillLevel: number
+    ): { hitMonsters: number[]; isCrit: boolean; killCount: number; shouldResetShield: boolean } {
+        const unitSize = this.gameBounds.height / 10;
+        const baseDamageRadius = 1; // 基礎 1 單位傷害範圍
+        const actualDamageRadius = baseDamageRadius + (beamMultiplier - 1) * 0.5; // 每倍 +0.5 單位
+        const damageRadiusPx = actualDamageRadius * unitSize;
+
+        const damageUnits = this.currentLevel + skillLevel;
+        const baseDamage = DAMAGE_UNIT * damageUnits;
+
+        const monsters = this.monsterManager.getMonsters();
+        const hitMonsters: number[] = [];
+
+        for (const monster of monsters) {
+            const dx = monster.x - pointX;
+            const dy = monster.y - pointY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= damageRadiusPx) {
+                hitMonsters.push(monster.id);
+            }
+        }
+
+        let isCrit = false;
+        let killCount = 0;
+        let shouldResetShield = false;
+
+        if (hitMonsters.length > 0) {
+            // 傷害加成：每秒 +技能等級% 傷害
+            const damageBonus = (beamMultiplier - 1) * skillLevel * 0.01;
+            const boostedDamage = Math.floor(baseDamage * (1 + damageBonus));
+            const critResult = this.skillManager.calculateFinalDamageWithCrit(boostedDamage, this.currentLevel);
+            isCrit = critResult.isCrit;
+            const result = this.monsterManager.damageMonsters(hitMonsters, critResult.damage);
+            if (result.totalExp > 0) this.call('addExp', result.totalExp);
+            killCount = result.killCount;
+
+            // 在減速範圍內殺死敵人時，機率重置靈魂統領（護盾）冷卻
+            // 機率 = 技能等級 × 1%（每擊殺一隻判定一次）
+            if (killCount > 0) {
+                const resetChance = skillLevel * 0.01;
+                for (let i = 0; i < killCount; i++) {
+                    if (Math.random() < resetChance) {
+                        shouldResetShield = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return { hitMonsters, isCrit, killCount, shouldResetShield };
     }
 
     /** 解除零信任護盾 */

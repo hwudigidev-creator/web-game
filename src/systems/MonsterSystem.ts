@@ -127,7 +127,7 @@ export class MonsterManager {
     private tauntTarget: { x: number; y: number; active: boolean } = { x: 0, y: 0, active: false };
 
     // 怪物死亡回調（用於掉落系統等）
-    private onMonsterKilledCallback: ((monster: { x: number; y: number; isElite: boolean; isBoss: boolean; definition: MonsterDefinition }) => void) | null = null;
+    private onMonsterKilledCallback: ((monster: { x: number; y: number; isElite: boolean; isBoss: boolean; definition: MonsterDefinition; exp: number }) => void) | null = null;
 
     // 遊戲區域
     private gameBounds: { x: number; y: number; width: number; height: number };
@@ -430,8 +430,8 @@ export class MonsterManager {
         const dynamicInterval = Math.max(100, 3000 / fillMultiplier);
 
         if (this.isSpawning && now - this.lastSpawnTime >= dynamicInterval && monsterGap > 0) {
-            // 每次固定生成 6 隻
-            const actualSpawnCount = Math.min(6, monsterGap);
+            // 每次固定生成 10 隻
+            const actualSpawnCount = Math.min(10, monsterGap);
             for (let i = 0; i < actualSpawnCount; i++) {
                 this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
             }
@@ -1158,11 +1158,17 @@ export class MonsterManager {
                 ? MonsterManager.BAT_FIXED_EXP
                 : this.calculateMonsterExp(monster.definition.exp);
             const isElite = monster.isElite || false;
+            const isBoss = monster.isBoss || false;
             const deathX = monster.x;
             const deathY = monster.y;
+            const definition = monster.definition;
             // 播放死亡煙霧效果
             this.playDeathSmoke(monster.x, monster.y);
             this.removeMonster(monsterId);
+            // 觸發死亡回調（掉落經驗水晶等）
+            if (this.onMonsterKilledCallback) {
+                this.onMonsterKilledCallback({ x: deathX, y: deathY, isElite, isBoss, definition, exp });
+            }
             return { killed: true, exp, isElite, x: deathX, y: deathY };
         }
 
@@ -1184,35 +1190,26 @@ export class MonsterManager {
     }
 
     // 批量對多個怪物造成傷害
+    // 注意：經驗值現在由怪物死亡時掉落水晶獲得，totalExp 僅供參考不應使用
     damageMonsters(monsterIds: number[], damage: number): { totalExp: number; killCount: number; killedPositions: { x: number; y: number }[] } {
-        let totalExp = 0;
         let killCount = 0;
         const killedPositions: { x: number; y: number }[] = [];
 
         for (const id of monsterIds) {
-            // 先取得怪物資料（在造成傷害前）
+            // 先取得怪物位置（在造成傷害前）
             const monster = this.monsters.find(m => m.id === id);
-            const monsterData = monster ? {
-                x: monster.x,
-                y: monster.y,
-                isElite: monster.isElite || false,
-                isBoss: monster.isBoss || false,
-                definition: monster.definition
-            } : null;
+            const monsterPos = monster ? { x: monster.x, y: monster.y } : null;
 
+            // damageMonster 會自動觸發死亡回調
             const result = this.damageMonster(id, damage);
-            if (result.killed && monsterData) {
-                totalExp += result.exp;
+            if (result.killed && monsterPos) {
                 killCount++;
-                killedPositions.push({ x: monsterData.x, y: monsterData.y });
-                // 觸發怪物死亡回調（掉落系統用）
-                if (this.onMonsterKilledCallback) {
-                    this.onMonsterKilledCallback(monsterData);
-                }
+                killedPositions.push(monsterPos);
             }
         }
 
-        return { totalExp, killCount, killedPositions };
+        // 經驗值由水晶掉落獲得，不再直接返回
+        return { totalExp: 0, killCount, killedPositions };
     }
 
     // ===== 統一狀態效果系統 =====
@@ -1379,7 +1376,7 @@ export class MonsterManager {
     }
 
     // 設定怪物死亡回調（用於掉落系統）
-    setOnMonsterKilled(callback: (monster: { x: number; y: number; isElite: boolean; isBoss: boolean; definition: MonsterDefinition }) => void) {
+    setOnMonsterKilled(callback: (monster: { x: number; y: number; isElite: boolean; isBoss: boolean; definition: MonsterDefinition; exp: number }) => void) {
         this.onMonsterKilledCallback = callback;
     }
 }

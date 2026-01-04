@@ -92,10 +92,10 @@ export const ADVANCED_SKILL_LIBRARY: AdvancedSkillDefinition[] = [
         id: 'advanced_tech_artist',
         name: '技術美術大神',
         subtitle: '一人成軍的遊戲開發者',
-        description: '【咒言幻象＋視網膜】\n5單位內落雷，3單位爆炸+暈眩1秒',
+        description: '【咒言幻象＋視網膜】\n5單位內連發5道落雷，3單位爆炸+暈眩1秒',
         color: 0x9966ff,  // 藍紫色
         flashColor: 0xbb99ff,
-        cooldown: 1000,  // 1 秒
+        cooldown: 2000,  // 2 秒
         maxLevel: -1,  // 無上限
         iconPrefix: 'SC0',  // SC0.png（固定圖示）
         requiredSkills: ['active_coder', 'passive_retina_module'],  // 咒言幻象（遊戲先知）+ 視網膜增強模組

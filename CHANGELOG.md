@@ -1,5 +1,57 @@
 # 更新紀錄
 
+## v0.9.22a - 經驗水晶掉落系統
+
+### 經驗水晶系統（新增）
+- **掉落機制**：怪物死亡時掉落紫色菱形經驗水晶
+- **磁鐵吸取**：玩家靠近時水晶會被吸向玩家
+  - 觸發範圍：2 單位（+ 視網膜增強模組加成）
+  - 吸取速度：8 單位/秒
+  - 拾取範圍：0.3 單位
+- **視覺效果**：浮動動畫、吸取時縮放脈動、拾取紫色光效
+- **物件池**：100 個預創建水晶避免效能問題
+
+### 架構改動
+| 項目 | 說明 |
+|------|------|
+| `damageMonster` | 怪物死亡時觸發回調（含經驗值）|
+| `damageMonsters` | 返回 `totalExp: 0`（經驗由水晶獲得）|
+| `handleMonsterDeath` | 生成經驗水晶 + 菁英怪血球 |
+| `updateExpCrystals` | 處理浮動/吸取/拾取邏輯 |
+
+### 圖層調整
+- 經驗水晶容器：depth 3（怪物之下）
+- 回血物品容器：depth 4（怪物之下）
+- 怪物網格：depth 5
+
+### 遊戲流程變化
+```
+舊：怪物死亡 → 直接獲得經驗
+新：怪物死亡 → 掉落經驗水晶 → 玩家靠近 → 磁鐵吸取 → 拾取獲得經驗
+```
+
+---
+
+## v0.9.21a - 分身技能傷害邏輯搬遷
+
+### 搬遷至 SkillExecutor
+| 方法 | 說明 |
+|------|------|
+| performPhantomBurningCelluloidStep | 分身燃燒賽璐珞單步傷害 |
+| performPhantomTechArtistHit | 分身技術美術命中傷害 |
+| performPhantomPerfectPixelExplosion | 分身完美像素爆炸傷害 |
+
+### MainScene 重構
+- `phantomCastBurningCelluloidAt` → `startPhantomBurningCelluloid`（時序處理）
+- `phantomCastTechArtistAt` → `startPhantomTechArtist`（時序處理）
+- `phantomCastPerfectPixelAt` → `startPhantomPerfectPixel`（時序處理）
+
+### 架構說明
+- SkillExecutor 處理：傷害計算、怪物檢測、燃燒/暈眩效果
+- MainScene 處理：時序排程（delayedCall）、視覺效果
+
+---
+
 ## v0.9.20a - 進階技能完整搬遷
 
 ### 完整搬遷至 SkillExecutor
