@@ -127,6 +127,7 @@ export class MonsterManager {
     private speedMultiplier: number = 1.0; // 怪物速度倍率
     private hpMultiplier: number = 1.0; // 怪物血量倍率
     private damageMultiplier: number = 1.0; // 怪物攻擊力倍率
+    private debuffResistance: number = 0; // 負面狀態抵抗率（0=無抵抗, 0.25=25%, 0.5=50%）
 
     // 蝙蝠群生成設定
     private batSwarmInterval: number = 30000; // 每 30 秒生成一批
@@ -340,10 +341,10 @@ export class MonsterManager {
         this.createMonsterGrid();
     }
 
-    // 計算 60 級後的強化倍率（每 5 級 +15%，配合動態生成補償）
+    // 計算 50 級後的強化倍率（每 5 級 +15%，配合動態生成補償）
     private getHighLevelMultiplier(): number {
-        if (this.playerLevel <= 60) return 1;
-        const extraTiers = Math.floor((this.playerLevel - 60) / 5);
+        if (this.playerLevel <= 50) return 1;
+        const extraTiers = Math.floor((this.playerLevel - 50) / 5);
         return 1 + 0.15 * extraTiers;
     }
 
@@ -1193,6 +1194,17 @@ export class MonsterManager {
         this.damageMultiplier = multiplier;
     }
 
+    // 設定負面狀態抵抗率（日常=0, 噩夢=0.25, 煉獄=0.5）
+    setDebuffResistance(resistance: number) {
+        this.debuffResistance = resistance;
+    }
+
+    // 檢查怪物是否抵抗負面狀態（根據難度抵抗率）
+    private isDebuffResisted(): boolean {
+        if (this.debuffResistance <= 0) return false;
+        return Math.random() < this.debuffResistance;
+    }
+
     // 取得生怪資訊（供 DEBUG 顯示）
     getSpawnInfo(): { spawnMultiplier: number; interval: number; spawnCount: number } {
         const now = this.scene.time.now;
@@ -1277,13 +1289,16 @@ export class MonsterManager {
 
     // ===== 統一狀態效果系統 =====
 
-    // 添加狀態效果（統一介面）
+    // 添加狀態效果（統一介面，含抵抗判定）
     applyStatusEffect(monsterIds: number[], effect: Omit<StatusEffect, 'lastTickTime'>) {
         const now = this.scene.time.now;
 
         for (const id of monsterIds) {
             const monster = this.monsters.find(m => m.id === id);
             if (!monster) continue;
+
+            // 抵抗判定：每隻怪物獨立判定
+            if (this.isDebuffResisted()) continue;
 
             // 檢查是否已有相同類型的效果
             const existing = monster.statusEffects.find(e => e.type === effect.type);
@@ -1371,11 +1386,14 @@ export class MonsterManager {
         }
     }
 
-    // 擊退怪物（從指定點推開指定距離）
+    // 擊退怪物（從指定點推開指定距離，含抵抗判定）
     knockbackMonsters(monsterIds: number[], fromX: number, fromY: number, distance: number) {
         for (const id of monsterIds) {
             const monster = this.monsters.find(m => m.id === id);
             if (monster) {
+                // 抵抗判定：每隻怪物獨立判定
+                if (this.isDebuffResisted()) continue;
+
                 // 計算擊退方向（從 from 點指向怪物）
                 const dx = monster.x - fromX;
                 const dy = monster.y - fromY;
