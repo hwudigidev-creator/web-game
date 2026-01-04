@@ -96,7 +96,7 @@ export default class MainScene extends Phaser.Scene {
 
     private static readonly FLOOR_OBSTACLE_COUNT_MIN = 15;
     private static readonly FLOOR_OBSTACLE_COUNT_MAX = 20;
-    private static readonly FLOOR_OBSTACLE_SIZE_MIN = 3;   // 障礙物最小大小（單位）
+    private static readonly FLOOR_OBSTACLE_SIZE_MIN = 5;   // 障礙物最小大小（單位）
     private static readonly FLOOR_OBSTACLE_SIZE_MAX = 8;   // 障礙物最大大小（單位）
 
     // 邊緣波浪脈衝系統（紅到橘漸層）
@@ -550,7 +550,7 @@ export default class MainScene extends Phaser.Scene {
     private static readonly HEALING_ITEM_SCATTER_RADIUS = 0.5; // 散落半徑（單位）
     private static readonly HEALING_ITEM_SIZE = 0.05;          // 物品大小（畫面高度比例）
     // 拾取範圍（單位，1 單位 = 畫面高度 10%）
-    private basePickupRange: number = 1;    // 基礎拾取範圍（技能加成從 skillManager 取得）
+    private basePickupRange: number = 2;    // 基礎拾取範圍（技能加成從 skillManager 取得）
 
     // 經驗水晶掉落系統（怪物死亡時掉落，需拾取才獲得經驗）
     private expCrystals: {
@@ -571,7 +571,7 @@ export default class MainScene extends Phaser.Scene {
     private static readonly EXP_CRYSTAL_SIZE = 0.04;         // 水晶大小（畫面高度比例）
     private static readonly EXP_CRYSTAL_MAGNET_RANGE = 2;    // 磁鐵吸取觸發範圍（單位）
     private static readonly EXP_CRYSTAL_ATTRACT_SPEED = 8;   // 吸取速度（單位/秒）
-    private static readonly EXP_CRYSTAL_PICKUP_RANGE = 1;    // 實際拾取範圍（單位）
+    private static readonly EXP_CRYSTAL_PICKUP_RANGE = 2;    // 實際拾取範圍（單位）
     private pendingMergeExp: number = 0;                     // 待合併的經驗值
 
     // 技能範圍格子系統（只覆蓋遊玩區域）

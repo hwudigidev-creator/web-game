@@ -482,8 +482,8 @@ export class MonsterManager {
         // 檢查遠離玩家的怪物並傳送到邊緣
         this.teleportDistantMonsters(playerX, playerY, cameraOffsetX, cameraOffsetY);
 
-        // 玩家碰撞範圍（1 個單位 = 畫面高度 10%）
-        const collisionRange = this.gameBounds.height * 0.10;
+        // 玩家碰撞範圍（0.6 個單位 = 畫面高度 6%）
+        const collisionRange = this.gameBounds.height * 0.06;
 
         // 更新每隻怪物的位置和動畫狀態
         const monstersToRemove: number[] = [];
