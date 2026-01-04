@@ -889,6 +889,171 @@
       50% { transform: rotate(-90deg); }
     }
 
+    /* PWA 安裝提示 */
+    #install-prompt {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(135deg, rgba(30, 30, 40, 0.98), rgba(20, 20, 30, 0.98));
+      z-index: 9998;
+      padding: 12px 16px;
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      font-family: 'Noto Sans TC', Arial, sans-serif;
+      animation: slideUp 0.3s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    #install-prompt .prompt-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    #install-prompt .prompt-icon {
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+
+    #install-prompt .prompt-text {
+      flex: 1;
+      color: #fff;
+    }
+
+    #install-prompt .prompt-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      color: #4fc3f7;
+    }
+
+    #install-prompt .prompt-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.4;
+    }
+
+    #install-prompt .prompt-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #install-prompt .prompt-btn {
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    #install-prompt .prompt-btn.primary {
+      background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+      color: #000;
+    }
+
+    #install-prompt .prompt-btn.primary:hover {
+      background: linear-gradient(135deg, #81d4fa, #4fc3f7);
+    }
+
+    #install-prompt .prompt-btn.secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    #install-prompt .prompt-btn.secondary:hover {
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+    }
+
+    /* 安裝步驟彈窗 */
+    #install-guide {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 10000;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Noto Sans TC', Arial, sans-serif;
+    }
+
+    #install-guide .guide-content {
+      background: linear-gradient(135deg, #1e1e28, #14141e);
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 320px;
+      width: 90%;
+      text-align: center;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    #install-guide .guide-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #4fc3f7;
+      margin-bottom: 16px;
+    }
+
+    #install-guide .guide-steps {
+      text-align: left;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 20px;
+    }
+
+    #install-guide .guide-steps .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    #install-guide .guide-steps .step-num {
+      background: #4fc3f7;
+      color: #000;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    #install-guide .guide-close {
+      background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+      color: #000;
+      border: none;
+      padding: 10px 32px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #install-guide .guide-close:hover {
+      background: linear-gradient(135deg, #81d4fa, #4fc3f7);
+    }
+
     /* 手機直向時顯示提示 */
     @media screen and (max-width: 900px) and (orientation: portrait) {
       #rotate-notice {
@@ -1071,6 +1236,32 @@
   <div id="rotate-notice">
     <div class="icon">📱</div>
     <div class="text">請將裝置轉為橫向</div>
+  </div>
+
+  <!-- PWA 安裝提示 -->
+  <div id="install-prompt">
+    <div class="prompt-content">
+      <div class="prompt-icon">🎮</div>
+      <div class="prompt-text">
+        <div class="prompt-title">安裝到主畫面，獲得最佳體驗</div>
+        <div class="prompt-desc">全螢幕遊玩，不受瀏覽器網址列干擾</div>
+      </div>
+      <div class="prompt-actions">
+        <button class="prompt-btn secondary" id="install-dismiss">稍後</button>
+        <button class="prompt-btn primary" id="install-show-guide">如何安裝</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 安裝步驟彈窗 -->
+  <div id="install-guide">
+    <div class="guide-content">
+      <div class="guide-title">安裝到主畫面</div>
+      <div class="guide-steps" id="install-steps">
+        <!-- 由 JS 動態填入 -->
+      </div>
+      <button class="guide-close" id="install-guide-close">我知道了</button>
+    </div>
   </div>
 
   <!-- 右下角版本資訊（由 JS 動態設定） -->
@@ -2070,6 +2261,137 @@
           });
       });
     }
+
+    // ===== PWA 安裝提示 =====
+    (function() {
+      const installPrompt = document.getElementById('install-prompt');
+      const installGuide = document.getElementById('install-guide');
+      const installSteps = document.getElementById('install-steps');
+      const dismissBtn = document.getElementById('install-dismiss');
+      const showGuideBtn = document.getElementById('install-show-guide');
+      const closeGuideBtn = document.getElementById('install-guide-close');
+
+      // 檢測是否已安裝為 PWA
+      function isPWA() {
+        return window.matchMedia('(display-mode: standalone)').matches ||
+               window.matchMedia('(display-mode: fullscreen)').matches ||
+               window.navigator.standalone === true;
+      }
+
+      // 檢測是否為手機
+      function isMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+               window.innerWidth <= 900;
+      }
+
+      // 檢測 iOS
+      function isIOS() {
+        return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      }
+
+      // 本次是否已關閉提示
+      let dismissed = false;
+
+      // 顯示安裝提示
+      function showInstallPrompt() {
+        if (isPWA() || !isMobile() || dismissed) return;
+        // 延遲 2 秒顯示，讓玩家先看到遊戲
+        setTimeout(() => {
+          if (!isPWA()) {
+            installPrompt.style.display = 'block';
+          }
+        }, 2000);
+      }
+
+      // 隱藏安裝提示
+      function hideInstallPrompt() {
+        installPrompt.style.display = 'none';
+      }
+
+      // 顯示安裝步驟
+      function showInstallGuide() {
+        hideInstallPrompt();
+
+        // 根據平台顯示不同步驟
+        if (isIOS()) {
+          installSteps.innerHTML = `
+            <div class="step">
+              <span class="step-num">1</span>
+              <span>點擊 Safari 底部的 <strong>分享按鈕</strong> <i class="fa-solid fa-arrow-up-from-bracket"></i></span>
+            </div>
+            <div class="step">
+              <span class="step-num">2</span>
+              <span>向下滑動，選擇 <strong>「加入主畫面」</strong></span>
+            </div>
+            <div class="step">
+              <span class="step-num">3</span>
+              <span>點擊右上角 <strong>「新增」</strong> 完成安裝</span>
+            </div>
+          `;
+        } else {
+          installSteps.innerHTML = `
+            <div class="step">
+              <span class="step-num">1</span>
+              <span>點擊瀏覽器右上角 <strong>選單</strong> <i class="fa-solid fa-ellipsis-vertical"></i></span>
+            </div>
+            <div class="step">
+              <span class="step-num">2</span>
+              <span>選擇 <strong>「新增至主畫面」</strong> 或 <strong>「安裝應用程式」</strong></span>
+            </div>
+            <div class="step">
+              <span class="step-num">3</span>
+              <span>確認後即可從主畫面啟動遊戲</span>
+            </div>
+          `;
+        }
+
+        installGuide.style.display = 'flex';
+      }
+
+      // 隱藏安裝步驟
+      function hideInstallGuide() {
+        installGuide.style.display = 'none';
+        dismissed = true;
+      }
+
+      // 綁定事件
+      dismissBtn.addEventListener('click', () => {
+        hideInstallPrompt();
+        dismissed = true;
+      });
+
+      showGuideBtn.addEventListener('click', showInstallGuide);
+      closeGuideBtn.addEventListener('click', hideInstallGuide);
+
+      // 點擊背景關閉
+      installGuide.addEventListener('click', (e) => {
+        if (e.target === installGuide) {
+          hideInstallGuide();
+        }
+      });
+
+      // 監聽方向變化，橫向時顯示提示
+      function checkOrientation() {
+        const isLandscape = window.innerWidth > window.innerHeight;
+        if (isLandscape && isMobile() && !isPWA() && !dismissed) {
+          showInstallPrompt();
+        } else {
+          hideInstallPrompt();
+        }
+      }
+
+      // 初始檢查
+      window.addEventListener('load', () => {
+        setTimeout(checkOrientation, 1000);
+      });
+
+      // 監聽方向變化
+      window.addEventListener('resize', checkOrientation);
+      window.addEventListener('orientationchange', () => {
+        setTimeout(checkOrientation, 100);
+      });
+    })();
   </script>
 
   <script type="module" src="/src/main.ts"></script>
