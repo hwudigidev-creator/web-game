@@ -126,6 +126,7 @@ export class MonsterManager {
     private difficultyMultiplier: number = 1.0;
     private speedMultiplier: number = 1.0; // 怪物速度倍率
     private hpMultiplier: number = 1.0; // 怪物血量倍率
+    private damageMultiplier: number = 1.0; // 怪物攻擊力倍率
 
     // 蝙蝠群生成設定
     private batSwarmInterval: number = 30000; // 每 30 秒生成一批
@@ -352,12 +353,12 @@ export class MonsterManager {
         return Math.floor(baseScaled * this.getHighLevelMultiplier() * this.hpMultiplier);
     }
 
-    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，60 級後額外強化）
+    // 計算怪物傷害（玩家等級單位，最低 1 單位，乘以怪物傷害倍率，60 級後額外強化，套用難度倍率）
     private calculateMonsterDamage(monster: Monster): number {
         const damageUnits = Math.max(1, this.playerLevel);
         const baseDamage = MonsterManager.DAMAGE_UNIT * damageUnits;
-        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 60 級後強化
-        return baseDamage * monster.definition.damage * this.getHighLevelMultiplier();
+        // 套用怪物傷害倍率（例如 BOSS 的 3 倍傷害）+ 60 級後強化 + 難度倍率
+        return baseDamage * monster.definition.damage * this.getHighLevelMultiplier() * this.damageMultiplier;
     }
 
     // 計算怪物經驗值（每 10 級翻倍）
@@ -1186,6 +1187,10 @@ export class MonsterManager {
 
     setHpMultiplier(multiplier: number) {
         this.hpMultiplier = multiplier;
+    }
+
+    setDamageMultiplier(multiplier: number) {
+        this.damageMultiplier = multiplier;
     }
 
     // 取得生怪資訊（供 DEBUG 顯示）

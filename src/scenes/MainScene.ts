@@ -311,11 +311,11 @@ export default class MainScene extends Phaser.Scene {
 
     // 遊戲模式系統
     private static readonly GAME_MODES = [
-        { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
-        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 1.5, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍', image: 'mode_nightmare' },
-        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.0, color: 0xF44336, description: '怪物 3 倍速 1.5 倍，經驗 3 倍', image: 'mode_inferno' }
+        { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, damageMultiplier: 1.0, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
+        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍', image: 'mode_nightmare' },
+        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, color: 0xF44336, description: '怪物 3 倍速 1.5 倍，經驗 3 倍', image: 'mode_inferno' }
     ];
-    private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; color: number; description: string } = MainScene.GAME_MODES[0];
+    private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; damageMultiplier: number; color: number; description: string } = MainScene.GAME_MODES[0];
     private modePanelContainer!: Phaser.GameObjects.Container;
     private modeCardBgs: Phaser.GameObjects.Rectangle[] = [];
     private modeCardContainers: Phaser.GameObjects.Container[] = [];
@@ -10479,10 +10479,11 @@ export default class MainScene extends Phaser.Scene {
         this.currentGameMode = MainScene.GAME_MODES[index];
         this.hasModeSelected = true;
 
-        // 設定怪物管理器的難度倍率、速度倍率與血量倍率
+        // 設定怪物管理器的難度倍率、速度倍率、血量倍率與攻擊力倍率
         this.monsterManager.setDifficultyMultiplier(this.currentGameMode.multiplier);
         this.monsterManager.setSpeedMultiplier(this.currentGameMode.speedMultiplier);
         this.monsterManager.setHpMultiplier(this.currentGameMode.hpMultiplier);
+        this.monsterManager.setDamageMultiplier(this.currentGameMode.damageMultiplier);
 
         // 淡出動畫
         this.tweens.add({
