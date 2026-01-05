@@ -601,7 +601,7 @@ export default class MainScene extends Phaser.Scene {
     private circleLineEffectPool: Phaser.GameObjects.Sprite[] = [];
     private activeCircleLineEffects: Phaser.GameObjects.Sprite[] = [];
     private static readonly CIRCLE_LINE_EFFECT_POOL_SIZE = 20; // CIRCLE_LINE 物件池大小
-    // 紋理 key（對應 BootScene 載入的圖片）
+    // 紋理 key（對應 GridScene 載入的圖片）
     private static readonly TEXTURE_SECTOR_PREFIX = 'effect_sector_'; // 扇形紋理前綴 (後綴為角度)
     private static readonly TEXTURE_SECTOR_360 = 'effect_sector_360'; // 360度扇形（爆炸內圈用）
     private static readonly TEXTURE_CIRCLE = 'effect_circle'; // 圓形紋理
@@ -796,7 +796,7 @@ export default class MainScene extends Phaser.Scene {
         // 建立技能範圍格子覆蓋層（放在 UI 層）
         this.createSkillGrid();
 
-        // 初始化技能特效物件池（紋理由 BootScene 預載）
+        // 初始化技能特效物件池（紋理由 GridScene 預載）
         this.initSkillEffectPool();
         this.initLineEffectPool(); // LINE 紋理池（打擊火花用）
         this.initCircleLineEffectPool(); // CIRCLE_LINE 紋理池（圓形邊緣線用）
@@ -12479,7 +12479,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     // ============ 技能特效物件池系統 ============
-    // 紋理由 BootScene 預載（effects/*.png）
+    // 紋理由 GridScene 預載（effects/*.png）
 
     // 初始化技能特效物件池
     private initSkillEffectPool() {

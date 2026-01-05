@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import BootScene from './scenes/BootScene';
 import MainScene from './scenes/MainScene';
 import GridScene from './scenes/GridScene';
 
@@ -45,7 +44,7 @@ function createGame() {
                 debug: false
             }
         },
-        scene: [GridScene, BootScene, MainScene]
+        scene: [GridScene, MainScene]
     };
 
     game = new Phaser.Game(config);

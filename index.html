@@ -766,6 +766,26 @@
       color: #ffcc00;
     }
 
+    /* 送榜成功區塊 */
+    .death-success {
+      width: 100%;
+      text-align: center;
+    }
+
+    .success-message {
+      font-size: clamp(18px, 4vw, 24px);
+      color: #4CAF50;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .success-message i {
+      font-size: clamp(24px, 5vw, 32px);
+    }
+
     /* 控制區共用樣式 - 直式排列 */
     .control-group {
       display: flex;
@@ -1406,6 +1426,20 @@
           <i class="fa-solid fa-rotate-right"></i> 跳過
         </button>
       </div>
+      <!-- 送榜成功後顯示 -->
+      <div id="death-success" class="death-success" style="display: none;">
+        <div class="success-message">
+          <i class="fa-solid fa-check-circle"></i> 已登錄排行榜！
+        </div>
+        <div class="death-actions">
+          <button id="death-replay" class="death-btn primary">
+            <i class="fa-solid fa-rotate-right"></i> 再玩一次
+          </button>
+          <button id="death-close" class="death-btn">
+            <i class="fa-solid fa-xmark"></i> 關閉
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1960,9 +1994,15 @@
     const deathTime = document.getElementById('death-time');
     const deathLevel = document.getElementById('death-level');
     const deathDamage = document.getElementById('death-damage');
+    const deathForm = document.querySelector('.death-form');
+    const deathActions = document.querySelector('.death-content > .death-actions');
+    const deathSuccess = document.getElementById('death-success');
+    const deathReplay = document.getElementById('death-replay');
+    const deathClose = document.getElementById('death-close');
 
     let schoolList = [];
     let selectedSchool = '';
+    let hasSubmittedScore = false; // 是否已送榜成功
 
     // 載入學校清單
     fetch('./src/data/hslist.json')
@@ -2014,6 +2054,16 @@
       }
     });
 
+    // 阻止輸入框的鍵盤事件傳播到 Phaser（修復 Backspace 無法刪除問題）
+    [deathNickname, deathSchoolInput].forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+      });
+      input.addEventListener('keyup', (e) => {
+        e.stopPropagation();
+      });
+    });
+
     // 顯示死亡彈出視窗
     function showDeathPopup(time, level, damage, difficulty = 'daily', isReopen = false) {
       // 保存死亡資訊供重新打開用
@@ -2035,6 +2085,17 @@
         deathNickname.value = '';
         deathSchoolInput.value = '';
         selectedSchool = '';
+        hasSubmittedScore = false;
+      }
+      // 根據是否已送榜決定顯示內容
+      if (hasSubmittedScore) {
+        deathForm.style.display = 'none';
+        deathActions.style.display = 'none';
+        deathSuccess.style.display = 'block';
+      } else {
+        deathForm.style.display = 'block';
+        deathActions.style.display = 'flex';
+        deathSuccess.style.display = 'none';
       }
       openPopup(deathPopup);
     }
@@ -2103,9 +2164,21 @@
         }));
       }
 
+      // 送榜成功：顯示成功區塊，隱藏表單
+      hasSubmittedScore = true;
+      deathForm.style.display = 'none';
+      deathActions.style.display = 'none';
+      deathSuccess.style.display = 'block';
+      deathSubmit.disabled = false;
+      deathSubmit.innerHTML = '<i class="fa-solid fa-trophy"></i> 登錄排行榜';
+    });
+
+    // 跳過（目前隱藏）
+    deathSkip.addEventListener('click', () => {
       // 重置死亡狀態
       isPlayerDead = false;
       lastDeathData = null;
+      hasSubmittedScore = false;
       closePopup(deathPopup);
       // 重新開始遊戲（不回標題畫面）
       setTimeout(() => {
@@ -2113,16 +2186,22 @@
       }, 500);
     });
 
-    // 跳過
-    deathSkip.addEventListener('click', () => {
-      // 重置死亡狀態
+    // 再玩一次
+    deathReplay.addEventListener('click', () => {
       isPlayerDead = false;
       lastDeathData = null;
+      hasSubmittedScore = false;
       closePopup(deathPopup);
       // 重新開始遊戲（不回標題畫面）
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('gameRestart'));
       }, 500);
+    });
+
+    // 關閉（只關閉彈窗，不重開遊戲，點畫面可再打開）
+    deathClose.addEventListener('click', () => {
+      // 保留 isPlayerDead 和 lastDeathData，讓點擊畫面可再次打開
+      closePopup(deathPopup);
     });
 
     // 監聯遊戲死亡事件
@@ -2133,7 +2212,8 @@
 
     // 點擊遊戲區域重新打開死亡彈窗
     document.getElementById('app').addEventListener('click', () => {
-      if (isPlayerDead && lastDeathData && deathPopup.style.display !== 'flex') {
+      // 使用 classList 檢查而非 style.display（因 closePopup 有 300ms 延遲）
+      if (isPlayerDead && lastDeathData && !deathPopup.classList.contains('visible')) {
         showDeathPopup(lastDeathData.time, lastDeathData.level, lastDeathData.damage, lastDeathData.difficulty, true);
       }
     });
