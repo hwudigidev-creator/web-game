@@ -311,11 +311,11 @@ export default class MainScene extends Phaser.Scene {
 
     // 遊戲模式系統
     private static readonly GAME_MODES = [
-        { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, damageMultiplier: 1.0, debuffResistance: 0, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
-        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, debuffResistance: 0.25, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍\n機率抵抗負面狀態', image: 'mode_nightmare' },
-        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, debuffResistance: 0.5, color: 0xF44336, description: '極限挑戰，高風險高回報\n更高機率抵抗負面狀態', image: 'mode_inferno' }
+        { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, damageMultiplier: 1.0, debuffResistance: 0, waveCount: 50, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
+        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, debuffResistance: 0.25, waveCount: 75, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍\n機率抵抗負面狀態', image: 'mode_nightmare' },
+        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, debuffResistance: 0.5, waveCount: 100, color: 0xF44336, description: '極限挑戰，高風險高回報\n更高機率抵抗負面狀態', image: 'mode_inferno' }
     ];
-    private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; damageMultiplier: number; debuffResistance: number; color: number; description: string } = MainScene.GAME_MODES[0];
+    private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; damageMultiplier: number; debuffResistance: number; waveCount: number; color: number; description: string } = MainScene.GAME_MODES[0];
     private modePanelContainer!: Phaser.GameObjects.Container;
     private modeCardBgs: Phaser.GameObjects.Rectangle[] = [];
     private modeCardContainers: Phaser.GameObjects.Container[] = [];
@@ -1527,8 +1527,10 @@ export default class MainScene extends Phaser.Scene {
         const arcLength = startRange * halfAngle * 2; // 保持弧長不變
         const flashColor = skill.definition.flashColor || skill.definition.color;
 
-        // 10 單位傷害
-        const baseDamage = MainScene.DAMAGE_UNIT * 10;
+        // 10 單位傷害 + 進階技能等級加成
+        const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill('active_soul_render');
+        const damageUnits = 10 + advancedBonus;
+        const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
         const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
         // 記錄起始位置（玩家位置）
@@ -9937,33 +9939,36 @@ export default class MainScene extends Phaser.Scene {
         switch (skill.definition.id) {
             case 'active_soul_render': {
                 const angle = 60 + level * 10;
-                const damageUnits = 2 + level;
+                const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+                const damageUnits = 2 + level + advancedBonus;
                 const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
                 const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
                 const baseCd = skill.definition.cooldown || 1000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
                 lines.push(`扇形角度: ${angle}°`);
                 lines.push(`射程: 3 單位`);
-                lines.push(`傷害: ${finalDamage}`);
+                lines.push(`傷害: ${finalDamage}${advancedBonus > 0 ? ` (+${advancedBonus}組合)` : ''}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
             }
             case 'active_coder': {
                 const rangeUnits = 3 + level * 0.5;
-                // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
-                const damageUnits = (1 + level) * 2;
+                // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）+ 進階技能加成
+                const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+                const damageUnits = (1 + level) * 2 + advancedBonus;
                 const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
                 const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
                 const baseCd = skill.definition.cooldown || 2000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
                 lines.push(`範圍: ${rangeUnits} 單位`);
-                lines.push(`傷害: ${finalDamage}`);
+                lines.push(`傷害: ${finalDamage}${advancedBonus > 0 ? ` (+${advancedBonus}組合)` : ''}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
             }
             case 'active_vfx': {
                 const isMax = level >= skill.definition.maxLevel;
-                const damageUnits = 1 + level;
+                const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+                const damageUnits = 1 + level + advancedBonus;
                 const baseDamage = MainScene.DAMAGE_UNIT * damageUnits;
                 const finalDamage = Math.floor(baseDamage * (1 + damageBonus));
                 const baseCd = skill.definition.cooldown || 2500;
@@ -9976,19 +9981,22 @@ export default class MainScene extends Phaser.Scene {
                     lines.push(`光束數: ${level + 1} 道`);
                     lines.push(`射程: 10 單位`);
                 }
-                lines.push(`傷害: ${finalDamage}`);
+                lines.push(`傷害: ${finalDamage}${advancedBonus > 0 ? ` (+${advancedBonus}組合)` : ''}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
             }
             case 'active_architect': {
                 const shieldPercent = 0.3;
                 const shieldAmount = Math.floor(this.maxHp * shieldPercent);
-                const reflectUnits = 1 + level * 1.5;
+                // 反傷傷害：2/4/6/8/10/20（與 SkillExecutor 一致）+ 進階技能加成
+                const reflectDamageTable = [2, 4, 6, 8, 10, 20];
+                const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+                const reflectUnits = (reflectDamageTable[level] || 2) + advancedBonus;
                 const reflectDamage = MainScene.DAMAGE_UNIT * reflectUnits;
                 const baseCd = skill.definition.cooldown || 10000;
                 const finalCd = (baseCd * (1 - cdReduction) / 1000).toFixed(1);
                 lines.push(`護盾: ${shieldAmount} (霸體)`);
-                lines.push(`反傷: ${reflectDamage} + 擊退 1 單位`);
+                lines.push(`反傷: ${reflectDamage}${advancedBonus > 0 ? ` (+${advancedBonus}組合)` : ''} + 擊退 1 單位`);
                 lines.push(`護盾消失回血: ${shieldAmount}`);
                 lines.push(`冷卻: ${finalCd}s`);
                 break;
@@ -10506,12 +10514,13 @@ export default class MainScene extends Phaser.Scene {
         this.currentGameMode = MainScene.GAME_MODES[index];
         this.hasModeSelected = true;
 
-        // 設定怪物管理器的難度倍率、速度倍率、血量倍率、攻擊力倍率與負面狀態抵抗率
+        // 設定怪物管理器的難度參數
         this.monsterManager.setDifficultyMultiplier(this.currentGameMode.multiplier);
         this.monsterManager.setSpeedMultiplier(this.currentGameMode.speedMultiplier);
         this.monsterManager.setHpMultiplier(this.currentGameMode.hpMultiplier);
         this.monsterManager.setDamageMultiplier(this.currentGameMode.damageMultiplier);
         this.monsterManager.setDebuffResistance(this.currentGameMode.debuffResistance);
+        this.monsterManager.setWaveBaseCount(this.currentGameMode.waveCount);
 
         // 淡出動畫
         this.tweens.add({

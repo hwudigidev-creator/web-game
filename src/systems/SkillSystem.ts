@@ -1138,6 +1138,33 @@ export class SkillManager {
         return learned;
     }
 
+    // 取得主動技能對應的進階技能傷害加成（等級總和）
+    // active_soul_render: advanced_burning_celluloid + advanced_soul_slash
+    // active_coder: advanced_tech_artist + advanced_phantom_iteration
+    // active_vfx: advanced_perfect_pixel + advanced_vfx_burst
+    // active_architect: advanced_absolute_defense + advanced_zero_trust
+    getAdvancedSkillBonusForActiveSkill(activeSkillId: string): number {
+        const mapping: Record<string, string[]> = {
+            'active_soul_render': ['advanced_burning_celluloid', 'advanced_soul_slash'],
+            'active_coder': ['advanced_tech_artist', 'advanced_phantom_iteration'],
+            'active_vfx': ['advanced_perfect_pixel', 'advanced_vfx_burst'],
+            'active_architect': ['advanced_absolute_defense', 'advanced_zero_trust']
+        };
+
+        const relatedAdvancedSkills = mapping[activeSkillId];
+        if (!relatedAdvancedSkills) return 0;
+
+        let totalBonus = 0;
+        for (const advSkillId of relatedAdvancedSkills) {
+            const level = this.advancedSkillLevels.get(advSkillId) ?? -1;
+            // 只有已學習的技能（level >= 0）才計入加成
+            if (level >= 0) {
+                totalBonus += level;
+            }
+        }
+        return totalBonus;
+    }
+
     // 停止所有技能（遊戲結束時）
     stopAllSkills() {
         // 標記遊戲結束狀態（由 MainScene 處理實際停止邏輯）

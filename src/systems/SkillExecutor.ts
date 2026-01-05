@@ -95,8 +95,9 @@ export class SkillExecutor {
         const sectorAngle = 60 + skill.level * 10;
         const halfAngle = (sectorAngle / 2) * (Math.PI / 180);
 
-        // 傷害：2 單位 + 每級 1 單位
-        const damageUnits = 2 + skill.level;
+        // 傷害：2 單位 + 每級 1 單位 + 進階技能等級加成
+        const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+        const damageUnits = 2 + skill.level + advancedBonus;
         const baseDamage = DAMAGE_UNIT * damageUnits;
         const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
@@ -175,8 +176,9 @@ export class SkillExecutor {
         const rangeUnits = 3 + skill.level * 0.5;
         const range = unitSize * rangeUnits;
 
-        // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）
-        const damageUnits = (1 + skill.level) * 2;
+        // 傷害：2 單位 + 每級 2 單位（Lv.0=2單位，Lv.5=12單位）+ 進階技能等級加成
+        const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+        const damageUnits = (1 + skill.level) * 2 + advancedBonus;
         const baseDamage = DAMAGE_UNIT * damageUnits;
         const { damage: finalDamage } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
@@ -252,8 +254,9 @@ export class SkillExecutor {
             ? this.gameBounds.height * 0.5  // MAX：5 單位寬（10 倍粗）
             : this.gameBounds.height * 0.05; // 普通：0.5 單位
 
-        // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）
-        const damageUnits = 1 + skill.level;
+        // 傷害：1 單位 + 每級 1 單位（Lv.0=1單位，Lv.5=6單位）+ 進階技能等級加成
+        const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+        const damageUnits = 1 + skill.level + advancedBonus;
         const baseDamage = DAMAGE_UNIT * damageUnits;
         const { damage: finalDamage, isCrit } = this.skillManager.calculateFinalDamageWithCrit(baseDamage, this.currentLevel);
 
@@ -398,9 +401,10 @@ export class SkillExecutor {
         this.scene.setCurrentShield(shieldAmount);
         this.scene.setMaxShield(shieldAmount);
 
-        // 反傷傷害：2/4/6/8/10/20（Lv.0=2, Lv.5=20）
+        // 反傷傷害：2/4/6/8/10/20（Lv.0=2, Lv.5=20）+ 進階技能等級加成
         const reflectDamageTable = [2, 4, 6, 8, 10, 20];
-        const reflectUnits = reflectDamageTable[skill.level] || 2;
+        const advancedBonus = this.skillManager.getAdvancedSkillBonusForActiveSkill(skill.definition.id);
+        const reflectUnits = (reflectDamageTable[skill.level] || 2) + advancedBonus;
         this.scene.setShieldReflectDamage(DAMAGE_UNIT * reflectUnits);
 
         // 繪製護盾條

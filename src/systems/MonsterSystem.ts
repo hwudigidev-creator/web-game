@@ -136,6 +136,12 @@ export class MonsterManager {
     private static readonly BAT_FIXED_HP = 10; // 固定 1 單位 HP
     private static readonly BAT_FIXED_EXP = 5; // 固定經驗
 
+    // 波次怪物生成設定（每分鐘觸發）
+    private waveSpawnInterval: number = 60000; // 每 60 秒生成一波
+    private lastWaveSpawnTime: number = 0;
+    private waveBaseCount: number = 50; // 基礎波次數量（日常: 50, 噩夢: 75, 煉獄: 100）
+    private pendingMonsters: number = 0; // 候補怪物數量（超過上限時暫存）
+
     // 菁英怪生成追蹤（記錄已生成菁英怪的等級）
     private eliteSpawnedAtLevels: Set<number> = new Set();
 
@@ -373,6 +379,8 @@ export class MonsterManager {
         this.isSpawning = true;
         this.lastSpawnTime = this.scene.time.now;
         this.lastBatSwarmTime = this.scene.time.now; // 蝙蝠群也從現在開始計時
+        this.lastWaveSpawnTime = this.scene.time.now; // 波次怪物也從現在開始計時
+        this.pendingMonsters = 0; // 重置候補怪物
         this.gameStartTime = this.scene.time.now; // 記錄遊戲開始時間
     }
 
@@ -464,11 +472,26 @@ export class MonsterManager {
         if (this.isSpawning && now - this.lastSpawnTime >= dynamicInterval && monsterGap > 0) {
             // 根據遊戲時間和難度倍率計算生成數量
             const baseSpawnCount = Math.floor(MonsterManager.SPAWN_BASE_COUNT * spawnMultiplier * this.difficultyMultiplier);
-            const actualSpawnCount = Math.min(Math.max(1, baseSpawnCount), monsterGap);
+            let actualSpawnCount = Math.min(Math.max(1, baseSpawnCount), monsterGap);
+
+            // 加入候補怪物（有空位時補滿）
+            if (this.pendingMonsters > 0) {
+                const remainingSlots = monsterGap - actualSpawnCount;
+                const pendingToSpawn = Math.min(this.pendingMonsters, remainingSlots);
+                actualSpawnCount += pendingToSpawn;
+                this.pendingMonsters -= pendingToSpawn;
+            }
+
             for (let i = 0; i < actualSpawnCount; i++) {
                 this.spawnMonster(playerX, playerY, cameraOffsetX, cameraOffsetY);
             }
             this.lastSpawnTime = now;
+        }
+
+        // 檢查是否需要生成波次怪物（每 60 秒一波）
+        if (this.isSpawning && now - this.lastWaveSpawnTime >= this.waveSpawnInterval) {
+            this.spawnWave(cameraOffsetX, cameraOffsetY);
+            this.lastWaveSpawnTime = now;
         }
 
         // 檢查是否需要生成蝙蝠群（受數量上限限制）
@@ -1199,10 +1222,92 @@ export class MonsterManager {
         this.debuffResistance = resistance;
     }
 
+    // 設定波次怪物數量（日常=50, 噩夢=75, 煉獄=100）
+    setWaveBaseCount(count: number) {
+        this.waveBaseCount = count;
+    }
+
     // 檢查怪物是否抵抗負面狀態（根據難度抵抗率）
     private isDebuffResisted(): boolean {
         if (this.debuffResistance <= 0) return false;
         return Math.random() < this.debuffResistance;
+    }
+
+    // 生成波次怪物（從隨機一側邊緣生成）
+    private spawnWave(cameraOffsetX: number, cameraOffsetY: number) {
+        // 計算可生成數量（不超過上限）
+        const availableSlots = MonsterManager.MAX_MONSTERS - this.monsters.length;
+        const waveCount = this.waveBaseCount;
+        const actualSpawn = Math.min(waveCount, availableSlots);
+        const pending = waveCount - actualSpawn;
+
+        // 超出的數量加入候補
+        this.pendingMonsters += pending;
+
+        if (actualSpawn <= 0) return;
+
+        // 隨機選擇一側邊緣（上、下、左、右）
+        const edges = ['top', 'bottom', 'left', 'right'];
+        const edge = edges[Math.floor(Math.random() * edges.length)];
+
+        // 畫面邊界
+        const viewLeft = cameraOffsetX;
+        const viewRight = cameraOffsetX + this.gameBounds.width;
+        const viewTop = cameraOffsetY;
+        const viewBottom = cameraOffsetY + this.gameBounds.height;
+        const margin = 100; // 畫面外距離
+
+        // 根據邊緣決定生成位置
+        for (let i = 0; i < actualSpawn; i++) {
+            let spawnX: number;
+            let spawnY: number;
+
+            switch (edge) {
+                case 'top':
+                    spawnX = viewLeft + Math.random() * this.gameBounds.width;
+                    spawnY = viewTop - margin - Math.random() * 50;
+                    break;
+                case 'bottom':
+                    spawnX = viewLeft + Math.random() * this.gameBounds.width;
+                    spawnY = viewBottom + margin + Math.random() * 50;
+                    break;
+                case 'left':
+                    spawnX = viewLeft - margin - Math.random() * 50;
+                    spawnY = viewTop + Math.random() * this.gameBounds.height;
+                    break;
+                case 'right':
+                    spawnX = viewRight + margin + Math.random() * 50;
+                    spawnY = viewTop + Math.random() * this.gameBounds.height;
+                    break;
+                default:
+                    spawnX = viewLeft + Math.random() * this.gameBounds.width;
+                    spawnY = viewTop - margin;
+            }
+
+            // 限制在地圖範圍內
+            spawnX = Phaser.Math.Clamp(spawnX, 0, this.mapWidth);
+            spawnY = Phaser.Math.Clamp(spawnY, 0, this.mapHeight);
+
+            // 建立怪物
+            const definition = MONSTER_TYPES[0];
+            const scaledHp = this.calculateMonsterHp(definition.hp);
+
+            const monster: Monster = {
+                id: this.nextMonsterId++,
+                definition,
+                x: spawnX,
+                y: spawnY,
+                hp: scaledHp,
+                lastDamageTime: 0,
+                bouncePhase: Math.random() * Math.PI * 2,
+                bounceSpeed: 3 + Math.random() * 2,
+                squashStretch: 1,
+                flashStartTime: 0,
+                statusEffects: []
+            };
+
+            this.monsters.push(monster);
+        }
     }
 
     // 取得生怪資訊（供 DEBUG 顯示）
