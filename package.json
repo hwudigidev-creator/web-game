@@ -1,7 +1,7 @@
 {
   "name": "ddt-web",
   "private": true,
-  "version": "0.9.26b",
+  "version": "0.9.27a",
   "type": "module",
   "scripts": {
     "dev": "vite",

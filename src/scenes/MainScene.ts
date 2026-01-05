@@ -48,7 +48,10 @@ export default class MainScene extends Phaser.Scene {
     private moveSpeed: number = 0; // 實際移動速度（套用加成後）
 
     // 地圖倍率（相對於可視區域的倍數）
-    private static readonly MAP_SCALE = 10;
+    // iOS WebGL 紋理限制約 4096x4096，需要動態調整
+    private static readonly MAP_SCALE_DEFAULT = 10;
+    private static readonly MAP_SCALE_IOS = 3; // iOS 使用較小倍率避免黑屏
+    private mapScale: number = 10;
 
     // 技能欄設定
     private static readonly ACTIVE_SKILLS = 4;
@@ -657,9 +660,16 @@ export default class MainScene extends Phaser.Scene {
             };
         }
 
-        // 計算大地圖尺寸（可視區域的 10 倍）
-        this.mapWidth = this.gameBounds.width * MainScene.MAP_SCALE;
-        this.mapHeight = this.gameBounds.height * MainScene.MAP_SCALE;
+        // 檢測 iOS 設備（包含 iPhone、iPad、iPod）
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        // iOS 使用較小地圖倍率避免 WebGL 紋理超限導致黑屏
+        this.mapScale = isIOS ? MainScene.MAP_SCALE_IOS : MainScene.MAP_SCALE_DEFAULT;
+
+        // 計算大地圖尺寸
+        this.mapWidth = this.gameBounds.width * this.mapScale;
+        this.mapHeight = this.gameBounds.height * this.mapScale;
 
         // 初始化技能執行器
         this.skillExecutor = new SkillExecutor(this);
