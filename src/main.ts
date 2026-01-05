@@ -3,10 +3,11 @@ import BootScene from './scenes/BootScene';
 import MainScene from './scenes/MainScene';
 import GridScene from './scenes/GridScene';
 
-// 設定版本資訊（從 Vite 注入）
+// 設定版本資訊（從 Vite 注入，加入 fallback 防止未定義）
 const versionInfo = document.getElementById('version-info');
 if (versionInfo) {
-    versionInfo.textContent = `v${__APP_VERSION__}`;
+    const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+    versionInfo.textContent = `v${version}`;
 }
 
 let game: Phaser.Game | null = null;
