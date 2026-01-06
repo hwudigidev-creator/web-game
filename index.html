@@ -1250,7 +1250,7 @@
       user-select: none;
     }
   </style>
-  <script type="module" crossorigin src="/web-game/assets/index-B6ddauXB.js"></script>
+  <script type="module" crossorigin src="/web-game/assets/index-CNnQdev9.js"></script>
   <link rel="modulepreload" crossorigin href="/web-game/assets/phaser-0RJB29YE.js">
 </head>
 
@@ -1479,6 +1479,19 @@
   <div id="app"></div>
 
   <script>
+    // ===== 通用按鈕點擊音效 =====
+    document.addEventListener('click', (e) => {
+      const target = e.target.closest('.ctrl-btn, .death-btn, .lb-tab, .lb-diff-tab');
+      if (target && window.playUIClick) {
+        // 確認按鈕使用確認音效
+        if (target.classList.contains('primary') || target.id === 'death-submit') {
+          window.playUIConfirm();
+        } else {
+          window.playUIClick();
+        }
+      }
+    });
+
     // ===== 音量控制 =====
     const volumeBars = document.getElementById('volume-bars');
     const volumeUp = document.getElementById('volume-up');
@@ -1618,6 +1631,8 @@
       requestAnimationFrame(() => {
         popup.classList.add('visible');
       });
+      // 播放彈窗音效
+      if (window.playUIPopup) window.playUIPopup();
       // 通知遊戲暫停
       window.dispatchEvent(new CustomEvent('popupStateChange', { detail: { open: true } }));
     }
@@ -1627,6 +1642,8 @@
       setTimeout(() => {
         popup.style.display = 'none';
       }, 300);
+      // 播放關閉音效
+      if (window.playUIClose) window.playUIClose();
       // 通知遊戲恢復
       window.dispatchEvent(new CustomEvent('popupStateChange', { detail: { open: false } }));
     }
