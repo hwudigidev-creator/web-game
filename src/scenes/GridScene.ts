@@ -83,12 +83,8 @@ export default class GridScene extends Phaser.Scene {
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (!this.isReady || this.isAnimating || this.isPreloadingMain) return;
 
-            // 停止標題 BGM
-            if (this.titleBgm && this.titleBgm.isPlaying) {
-                this.titleBgm.stop();
-            }
-
             // 開始預載 MainScene 資源，完成後從點擊位置轉場
+            // BGM 會在 100% 後隨畫面淡出
             this.startMainScenePreload(pointer.x, pointer.y);
         });
 
@@ -580,6 +576,23 @@ export default class GridScene extends Phaser.Scene {
                 duration: fadeOutDuration,
                 ease: 'Sine.easeIn'
             });
+
+            // 標題 BGM 淡出
+            if (this.titleBgm && this.titleBgm.isPlaying) {
+                this.tweens.addCounter({
+                    from: 0.5, // 目前音量 50%
+                    to: 0,
+                    duration: fadeOutDuration,
+                    ease: 'Sine.easeIn',
+                    onUpdate: (tween) => {
+                        const volume = tween.getValue() ?? 0;
+                        (this.titleBgm as Phaser.Sound.WebAudioSound).setVolume(volume);
+                    },
+                    onComplete: () => {
+                        this.titleBgm.stop();
+                    }
+                });
+            }
 
             // 漸變完成後開始轉場
             this.time.delayedCall(fadeOutDuration, () => {
