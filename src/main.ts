@@ -1,6 +1,23 @@
 import Phaser from 'phaser';
 import MainScene from './scenes/MainScene';
 import GridScene from './scenes/GridScene';
+import { playUIClick, playUIConfirm, playUIPopup, playUIClose, playSoundEffect } from './systems/SoundManager';
+
+// 暴露音效函數到全域（供 HTML 使用）
+declare global {
+    interface Window {
+        playUIClick: typeof playUIClick;
+        playUIConfirm: typeof playUIConfirm;
+        playUIPopup: typeof playUIPopup;
+        playUIClose: typeof playUIClose;
+        playSoundEffect: typeof playSoundEffect;
+    }
+}
+window.playUIClick = playUIClick;
+window.playUIConfirm = playUIConfirm;
+window.playUIPopup = playUIPopup;
+window.playUIClose = playUIClose;
+window.playSoundEffect = playSoundEffect;
 
 // 設定版本資訊（從 Vite 注入，加入 fallback 防止未定義）
 const versionInfo = document.getElementById('version-info');

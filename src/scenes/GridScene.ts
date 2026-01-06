@@ -55,6 +55,7 @@ export default class GridScene extends Phaser.Scene {
         this.load.image('neros', 'NeroS.png');
         this.load.image('glow', 'glow.png');
         this.load.audio('bgm_title', 'audio/BGM00.mp3');
+        this.load.audio('se_ui_start', 'audio/SE_UI_Start.mp3'); // 開始音效（點擊時播放）
 
         // 監聯初始載入進度
         this.load.on('progress', (value: number) => {
@@ -84,7 +85,7 @@ export default class GridScene extends Phaser.Scene {
             if (!this.isReady || this.isAnimating || this.isPreloadingMain) return;
 
             // 開始預載 MainScene 資源，完成後從點擊位置轉場
-            // BGM 會在 100% 後隨畫面淡出
+            // BGM 會在 100% 後隨畫面淡出，Start 音效也在 100% 時播放
             this.startMainScenePreload(pointer.x, pointer.y);
         });
 
@@ -479,6 +480,22 @@ export default class GridScene extends Phaser.Scene {
         this.load.audio('bgm_game_01', 'audio/BGM01.mp3');
         this.load.audio('bgm_game_02', 'audio/BGM02.mp3');
 
+        // 預載入 UI 音效
+        this.load.audio('se_ui_click', 'audio/SE_UI_Click.mp3');
+        this.load.audio('se_ui_confirm', 'audio/SE_UI_Confirm.mp3');
+        this.load.audio('se_ui_popup', 'audio/SE_UI_Popup.mp3');
+        this.load.audio('se_ui_close', 'audio/SE_UI_Close.mp3');
+        this.load.audio('se_ui_start', 'audio/SE_UI_Start.mp3');
+
+        // 預載入打擊音效
+        this.load.audio('se_hit_normal_1', 'audio/SE_Hit_Normal_01.mp3');
+        this.load.audio('se_hit_normal_2', 'audio/SE_Hit_Normal_02.mp3');
+        this.load.audio('se_hit_normal_3', 'audio/SE_Hit_Normal_03.mp3');
+        this.load.audio('se_hit_crit', 'audio/SE_Hit_Crit.mp3');
+        this.load.audio('se_hit_skill_1', 'audio/SE_Hit_Skill_01.mp3');
+        this.load.audio('se_hit_skill_2', 'audio/SE_Hit_Skill_02.mp3');
+        this.load.audio('se_hit_skill_3', 'audio/SE_Hit_Skill_03.mp3');
+
         // 預載入技能特效紋理
         this.load.image('effect_circle', 'effects/circle.png');
         this.load.image('effect_circle_line', 'effects/circle_line.png');
@@ -534,6 +551,11 @@ export default class GridScene extends Phaser.Scene {
 
     private onMainScenePreloadComplete() {
         this.isPreloadingMain = false;
+
+        // 播放開始音效（100% 時）
+        if (this.cache.audio.exists('se_ui_start')) {
+            this.sound.play('se_ui_start', { volume: 0.7 });
+        }
 
         // 停頓 500ms 顯示 100%
         this.time.delayedCall(500, () => {

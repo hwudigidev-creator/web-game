@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { SkillManager, SkillDefinition, PlayerSkill, SKILL_LIBRARY, AdvancedSkillDefinition, PlayerAdvancedSkill, SparkColors } from '../systems/SkillSystem';
 import { SkillExecutor } from '../systems/SkillExecutor';
 import { MonsterManager, Monster } from '../systems/MonsterSystem';
+import { SoundManager } from '../systems/SoundManager';
 
 interface GameBounds {
     x: number;
@@ -359,6 +360,9 @@ export default class MainScene extends Phaser.Scene {
     // 技能系統
     private skillManager: SkillManager = new SkillManager();
     private skillExecutor!: SkillExecutor;
+
+    // 音效系統
+    private soundManager!: SoundManager;
     private skillIconContainers: Phaser.GameObjects.Container[] = []; // 技能欄圖示容器
     private skillLevelTexts: Phaser.GameObjects.Text[] = []; // 技能等級文字
     private skillIconSprites: (Phaser.GameObjects.Sprite | null)[] = []; // 技能圖示 Sprite
@@ -621,6 +625,9 @@ export default class MainScene extends Phaser.Scene {
     create() {
         // MainScene 的背景色
         this.cameras.main.setBackgroundColor('#111111');
+
+        // 初始化音效管理器
+        this.soundManager = new SoundManager(this);
 
         // 判斷是否為手機裝置（觸控為主或螢幕較小）
         this.isMobile = this.sys.game.device.input.touch && window.innerWidth < 1024;
@@ -1147,6 +1154,9 @@ export default class MainScene extends Phaser.Scene {
         // 播放攻擊動畫
         this.setCharacterState('attack', true);
 
+        // 播放出招音效（一般攻擊）
+        this.soundManager.playHit('normal', 1);
+
         // 角色閃光效果（使用技能的閃光顏色，50% 混合）
         if (def.flashColor) {
             this.character.setTint(def.flashColor);
@@ -1479,7 +1489,7 @@ export default class MainScene extends Phaser.Scene {
                 if (result.totalExp > 0) {
                     this.addExp(result.totalExp);
                 }
-    
+
                 // 擊中多隻觸發畫面震動
                 this.shakeScreen(hitMonsters.length);
 
@@ -4185,6 +4195,9 @@ export default class MainScene extends Phaser.Scene {
         // 至少擊中 10 隻才觸發震動
         if (hitCount < 10) return;
 
+        // 播放暴擊音效（震動時才播）
+        this.soundManager.playHit('crit', hitCount);
+
         // 輕微震動：強度 0.005，持續 100ms
         this.cameras.main.shake(100, 0.005);
     }
@@ -6349,6 +6362,8 @@ export default class MainScene extends Phaser.Scene {
                 if (hitMonsters.length > 0) {
                     const result = this.monsterManager.damageMonsters(hitMonsters, aoeDamage);
                     if (result.totalExp > 0) this.addExp(result.totalExp);
+                    // 狀態效果傷害播放技能音效（隨機 1-3）
+                    this.soundManager.playHit('skill', hitMonsters.length);
                 }
 
                 // 顯示圓形爆炸效果（橘紅色）
@@ -12855,6 +12870,7 @@ export default class MainScene extends Phaser.Scene {
     private showHitSparkEffect(worldX: number, worldY: number, color: number, hitDirection?: number, count: number = 4) {
         const screen = this.worldToScreen(worldX, worldY);
         const unitSize = this.gameBounds.height / 10;
+
 
         const sparkCount = count;
         const sparkLength = unitSize * 1.2; // 原 1.8，減少 1/3

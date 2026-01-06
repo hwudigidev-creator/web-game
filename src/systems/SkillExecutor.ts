@@ -1,6 +1,7 @@
 import { PlayerSkill, PlayerAdvancedSkill, SparkColors } from './SkillSystem';
 import type { Monster } from './MonsterSystem';
 import type MainScene from '../scenes/MainScene';
+import { SoundManager } from './SoundManager';
 
 // MainScene 的 DAMAGE_UNIT 常數
 const DAMAGE_UNIT = 10;
@@ -529,6 +530,8 @@ export class SkillExecutor {
 
                     if (monstersToBurn.length > 0) {
                         this.monsterManager.burnMonsters(monstersToBurn, burnDuration, burnDamage);
+                        // 觸發狀態效果播放技能音效
+                        SoundManager.getInstance()?.playHit('skill', monstersToBurn.length);
                     }
                 }
 
@@ -601,6 +604,8 @@ export class SkillExecutor {
 
                     if (hitMonsters.length > 0) {
                         this.monsterManager.stunMonsters(hitMonsters, stunDuration);
+                        // 觸發狀態效果播放技能音效
+                        SoundManager.getInstance()?.playHit('skill', hitMonsters.length);
                         const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
                         if (result.totalExp > 0) this.call('addExp', result.totalExp);
 
@@ -842,6 +847,8 @@ export class SkillExecutor {
         if (hitMonsters.length > 0) {
             // 先暈眩（1秒），再造成傷害
             this.monsterManager.stunMonsters(hitMonsters, 1000);
+            // 觸發狀態效果播放技能音效
+            SoundManager.getInstance()?.playHit('skill', hitMonsters.length);
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) this.call('addExp', result.totalExp);
         }
@@ -1236,6 +1243,8 @@ export class SkillExecutor {
 
         if (hitMonsters.length > 0) {
             this.monsterManager.stunMonsters(hitMonsters, 500); // 分身版暈眩 0.5 秒
+            // 觸發狀態效果播放技能音效
+            SoundManager.getInstance()?.playHit('skill', hitMonsters.length);
             const result = this.monsterManager.damageMonsters(hitMonsters, finalDamage);
             if (result.totalExp > 0) this.call('addExp', result.totalExp);
         }
