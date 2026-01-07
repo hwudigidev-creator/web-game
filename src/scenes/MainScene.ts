@@ -316,8 +316,8 @@ export default class MainScene extends Phaser.Scene {
     // 遊戲模式系統
     private static readonly GAME_MODES = [
         { id: 'daily', name: '日常', multiplier: 1.0, expMultiplier: 1.0, speedMultiplier: 0.8, hpMultiplier: 1.0, damageMultiplier: 1.0, debuffResistance: 0, waveCount: 50, color: 0x4CAF50, description: '標準難度，適合日常遊玩', image: 'mode_daily' },
-        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, debuffResistance: 0.25, waveCount: 75, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍\n機率抵抗負面狀態', image: 'mode_nightmare' },
-        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, debuffResistance: 0.5, waveCount: 100, color: 0xF44336, description: '極限挑戰，高風險高回報\n更高機率抵抗負面狀態', image: 'mode_inferno' }
+        { id: 'nightmare', name: '噩夢', multiplier: 2.0, expMultiplier: 2.0, speedMultiplier: 1.2, hpMultiplier: 2.0, damageMultiplier: 1.5, debuffResistance: 0.5, waveCount: 75, color: 0x9C27B0, description: '怪物更多更快，經驗翻倍\n50%機率抵抗負面狀態', image: 'mode_nightmare' },
+        { id: 'inferno', name: '煉獄', multiplier: 3.0, expMultiplier: 3.0, speedMultiplier: 1.5, hpMultiplier: 2.5, damageMultiplier: 2.0, debuffResistance: 0.8, waveCount: 100, color: 0xF44336, description: '極限挑戰，高風險高回報\n80%機率抵抗負面狀態', image: 'mode_inferno' }
     ];
     private currentGameMode: { id: string; name: string; multiplier: number; expMultiplier: number; speedMultiplier: number; hpMultiplier: number; damageMultiplier: number; debuffResistance: number; waveCount: number; color: number; description: string } = MainScene.GAME_MODES[0];
     private modePanelContainer!: Phaser.GameObjects.Container;

@@ -2209,10 +2209,10 @@
       lastDeathData = null;
       hasSubmittedScore = false;
       closePopup(deathPopup);
-      // 重新開始遊戲（不回標題畫面）
+      // 直接重新載入頁面
       setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('gameRestart'));
-      }, 500);
+        location.reload();
+      }, 300);
     });
 
     // 關閉（只關閉彈窗，不重開遊戲，點畫面可再打開）
